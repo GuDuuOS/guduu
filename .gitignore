@@ -4,6 +4,12 @@ synapse/
 # 部署运维记录（含服务器拓扑，本地保留、不托管）
 DEPLOY.md
 
+# 本地专用密钥/连接文件 —— 绝不上传 GitHub、绝不放服务器
+CREDENTIALS.local.md
+*.local.md
+*.local
+secrets*
+
 # 本地运行产物，不提交
 .venv/
 run/
@@ -16,3 +22,8 @@ __pycache__/
 
 # 临时/日志
 *.log
+
+# 杂项 / 系统文件 / 打包产物
+.DS_Store
+.claude/
+*.zip
