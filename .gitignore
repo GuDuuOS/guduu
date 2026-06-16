@@ -27,3 +27,6 @@ __pycache__/
 .DS_Store
 .claude/
 *.zip
+
+# AI 生成的原始大图素材（巨大、未被网页引用，仅本地保留）
+hf_*.png

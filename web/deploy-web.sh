@@ -17,13 +17,19 @@ REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ELEMENT_DIR=/var/www/element
 LANDING_DIR=/var/www/cosmac-landing
 LOGO="$REPO_DIR/LOGO/logo.png"
+LANDING_LOGO="$REPO_DIR/web/landing/logo.png"
+LANDING_LOGO_SVG="$REPO_DIR/web/landing/logo.svg"
 
 echo "仓库目录: $REPO_DIR"
 
 # 1) 落地页（cosmac.cc）
 mkdir -p "$LANDING_DIR"
 cp "$REPO_DIR/web/landing/index.html" "$LANDING_DIR/index.html"
-cp "$LOGO" "$LANDING_DIR/logo.png"
+cp "$LANDING_LOGO" "$LANDING_DIR/logo.png"
+cp "$LANDING_LOGO_SVG" "$LANDING_DIR/logo.svg"
+cp "$REPO_DIR/web/landing/guduu-star-hero.png" "$LANDING_DIR/guduu-star-hero.png"
+cp "$REPO_DIR/web/landing/star-main.jpeg" "$LANDING_DIR/star-main.jpeg"
+cp "$REPO_DIR"/web/landing/star-look-*.jpg "$LANDING_DIR"/
 echo "✅ 落地页已更新"
 
 # 2) Element 配置 + 登录页 logo（app.cosmac.cc）
@@ -46,7 +52,7 @@ for f in "$ELEMENT_DIR"/vector-icons/*.png; do
 done
 # 浏览器默认请求的 /favicon.ico
 convert "$LOGO" -resize "64x64!" "$ELEMENT_DIR/favicon.ico"
-convert "$LOGO" -resize "64x64!" "$LANDING_DIR/favicon.ico"
+convert "$LANDING_LOGO" -resize "64x64!" "$LANDING_DIR/favicon.ico"
 echo "✅ 图标已全部替换"
 
 echo "🎉 网页层部署完成"

@@ -1,20 +1,1399 @@
 <!DOCTYPE html>
-<html lang="zh"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1"><title>GuDuu</title>
-<link rel="icon" href="/logo.png">
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#0f172a,#1e293b);color:#e2e8f0;text-align:center;padding:24px}
-.logo{width:140px;height:140px;border-radius:32px;box-shadow:0 12px 40px rgba(0,0,0,.45);margin-bottom:28px}
-h1{font-size:40px;letter-spacing:-1px;margin-bottom:14px}
-p{font-size:18px;line-height:1.7;color:#94a3b8;margin-bottom:36px}
-a.btn{display:inline-block;padding:16px 40px;font-size:18px;font-weight:600;color:#1a1300;background:linear-gradient(90deg,#f59e0b,#fbbf24);border-radius:999px;text-decoration:none;transition:transform .15s}
-a.btn:hover{transform:translateY(-2px)}
-.foot{margin-top:48px;font-size:13px;color:#475569}
-</style></head>
-<body><div>
-<img class="logo" src="/logo.png" alt="GuDuu">
-<h1>GuDuu</h1>
-<p>内置主 AI 的智能即时通讯<br>聊天、群组，以及一个能看懂、能帮你做事的 AI。</p>
-<a class="btn" href="https://app.cosmac.cc">进入应用 →</a>
-<div class="foot">GuDuu · cosmac.cc</div></div></body></html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta
+    name="description"
+    content="CosMac Star is the entertainment edition of CosMac OS for creating, operating, and monetizing virtual AI stars."
+  >
+  <title>CosMac Star</title>
+  <link rel="icon" href="/logo.svg" type="image/svg+xml">
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #fbfaf7;
+      --paper-2: #f2eee8;
+      --ink: #15120f;
+      --muted: #706963;
+      --line: rgba(21, 18, 15, 0.13);
+      --soft-line: rgba(21, 18, 15, 0.08);
+      --cream: #fff7eb;
+      --rose: #d94f5c;
+      --plum: #6c4be8;
+      --blue: #5879ff;
+      --chartreuse: #c7ff3d;
+      --max: 1200px;
+      --mx: 50%;
+      --my: 50%;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html {
+      background: var(--paper);
+      overflow-x: hidden;
+      scroll-behavior: smooth;
+    }
+
+    body {
+      min-height: 100vh;
+      overflow-x: hidden;
+      background:
+        radial-gradient(circle at var(--mx) var(--my), rgba(216, 79, 92, 0.12), transparent 22rem),
+        linear-gradient(180deg, #fffdfa 0%, var(--paper) 54%, #f5f1ea 100%);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI",
+        Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+      letter-spacing: 0;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: -2;
+      pointer-events: none;
+      background-image:
+        linear-gradient(var(--soft-line) 1px, transparent 1px),
+        linear-gradient(90deg, var(--soft-line) 1px, transparent 1px);
+      background-size: 74px 74px;
+      mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.5), transparent 66%);
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    img {
+      display: block;
+      max-width: 100%;
+    }
+
+    .topbar {
+      position: fixed;
+      top: 0;
+      right: 0;
+      left: 0;
+      z-index: 20;
+      border-bottom: 1px solid rgba(21, 18, 15, 0.08);
+      background: rgba(251, 250, 247, 0.76);
+      backdrop-filter: blur(24px) saturate(1.16);
+    }
+
+    .nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: min(100% - 32px, var(--max));
+      height: 76px;
+      margin: 0 auto;
+    }
+
+    .brand,
+    .nav-links,
+    .nav-cta,
+    .button,
+    .tag,
+    .chip {
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .brand {
+      gap: 16px;
+      white-space: nowrap;
+    }
+
+    .brand-mark {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 62px;
+      height: 62px;
+      flex: 0 0 auto;
+    }
+
+    .brand-mark::before {
+      content: "";
+      position: absolute;
+      inset: 4px;
+      z-index: -1;
+      border-radius: 50%;
+      background:
+        radial-gradient(circle at 26% 20%, rgba(199, 255, 61, 0.56), transparent 34%),
+        radial-gradient(circle at 68% 24%, rgba(88, 121, 255, 0.38), transparent 36%),
+        radial-gradient(circle at 44% 78%, rgba(217, 79, 92, 0.34), transparent 42%),
+        rgba(255, 255, 255, 0.58);
+      filter: blur(10px) saturate(1.25);
+      opacity: 0.78;
+      transform: scale(1.08);
+    }
+
+    .brand img {
+      width: 56px;
+      height: 56px;
+      object-fit: contain;
+      filter:
+        saturate(1.18)
+        contrast(1.04)
+        drop-shadow(0 10px 18px rgba(21, 18, 15, 0.16));
+    }
+
+    .brand-lockup {
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .brand-name {
+      color: transparent;
+      background:
+        linear-gradient(100deg, var(--ink) 0 28%, var(--rose) 42%, var(--plum) 62%, var(--blue) 78%, var(--ink) 100%);
+      background-size: 160% 100%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      font-size: 30px;
+      font-weight: 880;
+      line-height: 1;
+      letter-spacing: 0;
+      text-shadow: 0 10px 24px rgba(21, 18, 15, 0.08);
+    }
+
+    .nav-links {
+      gap: 22px;
+      color: rgba(21, 18, 15, 0.62);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .nav-links a {
+      transition: color 160ms ease, transform 160ms ease;
+    }
+
+    .nav-links a:hover {
+      color: var(--ink);
+      transform: translateY(-1px);
+    }
+
+    .nav-cta {
+      min-height: 34px;
+      padding: 0 15px;
+      border-radius: 999px;
+      background: var(--ink);
+      color: #fff;
+      font-weight: 820;
+    }
+
+    .hero {
+      position: relative;
+      isolation: isolate;
+      min-height: 100svh;
+      padding: 104px 0 44px;
+    }
+
+    .hero::before,
+    .hero::after {
+      content: "";
+      position: absolute;
+      z-index: -1;
+      border-radius: 999px;
+      filter: blur(4px);
+      opacity: 0.72;
+      animation: drift 8s ease-in-out infinite alternate;
+    }
+
+    .hero::before {
+      top: 16%;
+      right: 4%;
+      width: 240px;
+      height: 240px;
+      background: rgba(199, 255, 61, 0.34);
+    }
+
+    .hero::after {
+      bottom: 8%;
+      left: 5%;
+      width: 180px;
+      height: 180px;
+      background: rgba(108, 75, 232, 0.16);
+      animation-delay: -2.4s;
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 0.9fr) minmax(390px, 0.84fr);
+      gap: 44px;
+      align-items: center;
+      width: min(100% - 32px, var(--max));
+      min-height: calc(100svh - 148px);
+      margin: 0 auto;
+    }
+
+    .tag {
+      gap: 10px;
+      min-height: 34px;
+      margin-bottom: 22px;
+      padding: 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.62);
+      color: rgba(21, 18, 15, 0.76);
+      font-size: 12px;
+      font-weight: 860;
+      text-transform: uppercase;
+      box-shadow: 0 16px 36px rgba(21, 18, 15, 0.08);
+    }
+
+    .tag i {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--rose);
+      box-shadow: 0 0 0 7px rgba(217, 79, 92, 0.13);
+      animation: pulse 1.8s ease-in-out infinite;
+    }
+
+    h1 {
+      max-width: 700px;
+      color: var(--ink);
+      font-size: clamp(58px, 7.4vw, 112px);
+      font-weight: 860;
+      line-height: 0.86;
+    }
+
+    .accent-text {
+      display: inline-block;
+      color: transparent;
+      background: linear-gradient(100deg, var(--ink) 0%, var(--rose) 34%, var(--plum) 72%, var(--ink) 100%);
+      background-size: 240% 100%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      animation: textShift 6s ease-in-out infinite;
+    }
+
+    .lead {
+      max-width: 620px;
+      margin-top: 26px;
+      color: var(--muted);
+      font-size: clamp(19px, 1.9vw, 25px);
+      font-weight: 560;
+      line-height: 1.35;
+    }
+
+    .cta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 13px;
+      margin-top: 32px;
+    }
+
+    .button {
+      justify-content: center;
+      min-height: 50px;
+      padding: 0 22px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.7);
+      color: var(--ink);
+      font-size: 15px;
+      font-weight: 820;
+      box-shadow: 0 18px 36px rgba(21, 18, 15, 0.08);
+      transition: transform 170ms ease, box-shadow 170ms ease, background 170ms ease;
+    }
+
+    .button:hover {
+      transform: translateY(-2px);
+      background: #fff;
+      box-shadow: 0 24px 46px rgba(21, 18, 15, 0.12);
+    }
+
+    .button.primary {
+      border-color: var(--ink);
+      background: var(--ink);
+      color: #fff;
+    }
+
+    .hero-star {
+      position: relative;
+      min-height: 620px;
+    }
+
+    .portrait-wrap {
+      position: absolute;
+      inset: 0 0 0 auto;
+      width: min(100%, 500px);
+      overflow: hidden;
+      border-radius: 8px;
+      background: #fff;
+      box-shadow:
+        0 46px 120px rgba(21, 18, 15, 0.18),
+        0 0 0 1px rgba(21, 18, 15, 0.08);
+      transform: rotate(1.4deg);
+      animation: portraitFloat 6.2s ease-in-out infinite;
+    }
+
+    .portrait-wrap img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: 64% 42%;
+      filter: saturate(1.08) contrast(1.02) brightness(1.02);
+    }
+
+    .portrait-wrap::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(180deg, transparent 42%, rgba(251, 250, 247, 0.2) 100%),
+        radial-gradient(circle at var(--mx) var(--my), rgba(255, 255, 255, 0.28), transparent 17rem);
+      mix-blend-mode: screen;
+    }
+
+    .chip {
+      position: absolute;
+      z-index: 2;
+      min-height: 42px;
+      padding: 0 15px;
+      border: 1px solid rgba(21, 18, 15, 0.11);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.78);
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 820;
+      box-shadow: 0 18px 44px rgba(21, 18, 15, 0.14);
+      backdrop-filter: blur(18px);
+      animation: stickerFloat 5s ease-in-out infinite;
+    }
+
+    .chip.one {
+      top: 8%;
+      left: 0;
+      background: var(--chartreuse);
+    }
+
+    .chip.two {
+      right: -1%;
+      bottom: 26%;
+      color: #fff;
+      background: var(--rose);
+      animation-delay: -1.6s;
+    }
+
+    .chip.three {
+      bottom: 7%;
+      left: 7%;
+      background: #fff;
+      animation-delay: -2.8s;
+    }
+
+    .ticker {
+      overflow: hidden;
+      contain: layout paint;
+      max-width: 100vw;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .ticker-track {
+      display: flex;
+      width: max-content;
+      animation: marquee 30s linear infinite;
+    }
+
+    .ticker span {
+      padding: 16px 28px;
+      color: rgba(21, 18, 15, 0.72);
+      font-size: 13px;
+      font-weight: 860;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .visual-system {
+      display: grid;
+      grid-template-columns: 0.72fr 1.28fr;
+      gap: 34px;
+      align-items: start;
+      width: min(100% - 32px, var(--max));
+      margin: 0 auto;
+      padding: 104px 0;
+    }
+
+    .visual-copy {
+      position: sticky;
+      top: 92px;
+      align-self: start;
+      padding: 26px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.68);
+      box-shadow: 0 24px 60px rgba(21, 18, 15, 0.08);
+      backdrop-filter: blur(18px);
+    }
+
+    .visual-copy .section-title {
+      font-size: clamp(34px, 4.6vw, 62px);
+    }
+
+    .visual-note {
+      display: grid;
+      gap: 10px;
+      margin-top: 24px;
+      color: rgba(21, 18, 15, 0.62);
+      font-size: 13px;
+      font-weight: 680;
+      line-height: 1.42;
+    }
+
+    .visual-note span {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--soft-line);
+    }
+
+    .lookbook {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 14px;
+      align-items: stretch;
+    }
+
+    .look-card {
+      position: relative;
+      min-height: 280px;
+      overflow: hidden;
+      border: 1px solid rgba(21, 18, 15, 0.1);
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 20px 54px rgba(21, 18, 15, 0.1);
+      transform: translateY(16px);
+      opacity: 0;
+      transition: transform 680ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 680ms ease, box-shadow 180ms ease;
+    }
+
+    .look-card.visible {
+      transform: translateY(0);
+      opacity: 1;
+    }
+
+    .look-card:hover {
+      box-shadow: 0 28px 68px rgba(21, 18, 15, 0.16);
+    }
+
+    .look-card img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: transform 500ms ease, filter 500ms ease;
+    }
+
+    .look-card:hover img {
+      transform: scale(1.035);
+      filter: saturate(1.08) contrast(1.03);
+    }
+
+    .look-card figcaption {
+      position: absolute;
+      right: 12px;
+      bottom: 12px;
+      left: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 38px;
+      padding: 0 12px;
+      border: 1px solid rgba(255, 255, 255, 0.42);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.72);
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 820;
+      backdrop-filter: blur(16px);
+    }
+
+    .look-card.featured {
+      grid-column: span 8;
+      min-height: 430px;
+    }
+
+    .look-card.tall {
+      grid-column: span 4;
+      min-height: 430px;
+    }
+
+    .look-card.medium {
+      grid-column: span 4;
+      min-height: 520px;
+    }
+
+    .look-card.wide {
+      grid-column: span 8;
+      min-height: 360px;
+    }
+
+    main {
+      background: linear-gradient(180deg, #fffdfa, var(--paper) 48%, #f4efe8);
+    }
+
+    section {
+      width: min(100% - 32px, var(--max));
+      margin: 0 auto;
+      padding: 104px 0;
+    }
+
+    .section-kicker {
+      margin-bottom: 16px;
+      color: var(--rose);
+      font-size: 13px;
+      font-weight: 860;
+      text-transform: uppercase;
+    }
+
+    .section-title {
+      max-width: 940px;
+      color: var(--ink);
+      font-size: clamp(38px, 5.4vw, 78px);
+      font-weight: 850;
+      line-height: 0.98;
+    }
+
+    .section-copy {
+      max-width: 780px;
+      margin-top: 22px;
+      color: var(--muted);
+      font-size: clamp(18px, 1.9vw, 24px);
+      font-weight: 520;
+      line-height: 1.48;
+    }
+
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 44px;
+    }
+
+    .feature {
+      position: relative;
+      min-height: 310px;
+      overflow: hidden;
+      padding: 26px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.72);
+      box-shadow: 0 22px 58px rgba(21, 18, 15, 0.08);
+      transform: translateY(18px);
+      opacity: 0;
+      transition: transform 680ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 680ms ease;
+    }
+
+    .feature.visible {
+      transform: translateY(0);
+      opacity: 1;
+    }
+
+    .feature::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, rgba(217, 79, 92, 0.1), transparent 44%);
+      opacity: 0;
+      transition: opacity 220ms ease;
+    }
+
+    .feature:hover::before {
+      opacity: 1;
+    }
+
+    .feature-index {
+      position: relative;
+      color: rgba(21, 18, 15, 0.46);
+      font-size: 12px;
+      font-weight: 860;
+      letter-spacing: 0.12em;
+    }
+
+    .feature h3 {
+      position: relative;
+      margin-top: 86px;
+      color: var(--ink);
+      font-size: 29px;
+      line-height: 1.02;
+    }
+
+    .feature p {
+      position: relative;
+      margin-top: 16px;
+      color: rgba(21, 18, 15, 0.62);
+      font-size: 16px;
+      line-height: 1.55;
+    }
+
+    .studio {
+      display: grid;
+      grid-template-columns: 0.82fr 1.18fr;
+      gap: 46px;
+      align-items: center;
+    }
+
+    .studio-board {
+      position: relative;
+      min-height: 540px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.44)),
+        #f5efe7;
+      box-shadow: 0 34px 90px rgba(21, 18, 15, 0.12);
+    }
+
+    .studio-board::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(90deg, transparent 0 48%, rgba(217, 79, 92, 0.18) 49% 51%, transparent 52%),
+        repeating-linear-gradient(180deg, transparent 0 58px, rgba(21, 18, 15, 0.08) 59px 60px);
+      animation: boardPan 7s linear infinite;
+    }
+
+    .mission {
+      position: absolute;
+      width: min(45%, 260px);
+      padding: 16px;
+      border: 1px solid rgba(21, 18, 15, 0.12);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.78);
+      box-shadow: 0 20px 50px rgba(21, 18, 15, 0.12);
+      backdrop-filter: blur(18px);
+      animation: stickerFloat 6s ease-in-out infinite;
+    }
+
+    .mission:nth-child(1) {
+      top: 34px;
+      left: 28px;
+    }
+
+    .mission:nth-child(2) {
+      top: 142px;
+      right: 30px;
+      animation-delay: -1.4s;
+    }
+
+    .mission:nth-child(3) {
+      right: 84px;
+      bottom: 46px;
+      animation-delay: -2.6s;
+    }
+
+    .mission b {
+      display: block;
+      color: var(--ink);
+      font-size: 15px;
+      line-height: 1.2;
+    }
+
+    .mission span {
+      display: block;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .timeline {
+      position: absolute;
+      right: 24px;
+      bottom: 24px;
+      left: 24px;
+      display: grid;
+      gap: 10px;
+      padding: 16px;
+      border: 1px solid rgba(21, 18, 15, 0.12);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.78);
+      box-shadow: 0 20px 50px rgba(21, 18, 15, 0.1);
+      backdrop-filter: blur(18px);
+    }
+
+    .timeline-row {
+      height: 18px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(21, 18, 15, 0.09);
+    }
+
+    .timeline-row i {
+      display: block;
+      width: var(--w);
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--rose), var(--plum));
+      animation: timelinePulse 2.8s ease-in-out infinite alternate;
+    }
+
+    .im-band {
+      width: 100%;
+      max-width: none;
+      padding: 110px 0;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      background:
+        linear-gradient(110deg, rgba(217, 79, 92, 0.08), rgba(108, 75, 232, 0.08)),
+        #fff;
+    }
+
+    .im-inner {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 56px;
+      align-items: center;
+      width: min(100% - 32px, var(--max));
+      margin: 0 auto;
+    }
+
+    .chat-stack {
+      display: grid;
+      gap: 14px;
+      max-width: 520px;
+      justify-self: end;
+      perspective: 900px;
+    }
+
+    .bubble {
+      width: fit-content;
+      max-width: 88%;
+      padding: 14px 16px;
+      border: 1px solid rgba(21, 18, 15, 0.1);
+      border-radius: 8px;
+      background: #fff;
+      color: rgba(21, 18, 15, 0.72);
+      font-size: 15px;
+      font-weight: 560;
+      line-height: 1.42;
+      box-shadow: 0 18px 42px rgba(21, 18, 15, 0.09);
+      transform: rotateY(-5deg);
+      animation: messageIn 620ms ease both;
+    }
+
+    .bubble.star {
+      justify-self: end;
+      background: var(--ink);
+      color: #fff;
+      font-weight: 760;
+      transform: rotateY(5deg);
+      animation-delay: 180ms;
+    }
+
+    .bubble:nth-child(3) {
+      animation-delay: 360ms;
+    }
+
+    .bubble:nth-child(4) {
+      animation-delay: 540ms;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 42px;
+    }
+
+    .metric {
+      padding: 24px 0 0;
+      border-top: 1px solid rgba(21, 18, 15, 0.14);
+    }
+
+    .metric strong {
+      display: block;
+      color: var(--ink);
+      font-size: clamp(30px, 4.2vw, 54px);
+      line-height: 1;
+    }
+
+    .metric span {
+      display: block;
+      margin-top: 10px;
+      color: rgba(21, 18, 15, 0.56);
+      font-size: 14px;
+      line-height: 1.36;
+    }
+
+    .final {
+      padding-bottom: 110px;
+      text-align: center;
+    }
+
+    .final .section-title,
+    .final .section-copy,
+    .final .cta-row {
+      margin-right: auto;
+      margin-left: auto;
+    }
+
+    .final .cta-row {
+      justify-content: center;
+    }
+
+    footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      width: min(100% - 32px, var(--max));
+      margin: 0 auto;
+      padding: 28px 0 42px;
+      border-top: 1px solid var(--line);
+      color: rgba(21, 18, 15, 0.48);
+      font-size: 13px;
+    }
+
+    @keyframes drift {
+      to { transform: translate3d(24px, -18px, 0) scale(1.08); }
+    }
+
+    @keyframes pulse {
+      50% { opacity: 0.5; transform: scale(1.35); }
+    }
+
+    @keyframes textShift {
+      50% { background-position: 100% 0; }
+    }
+
+    @keyframes portraitFloat {
+      50% { transform: translateY(-12px) rotate(-0.8deg); }
+    }
+
+    @keyframes stickerFloat {
+      50% { transform: translateY(-12px) rotate(-1deg); }
+    }
+
+    @keyframes marquee {
+      to { transform: translateX(-50%); }
+    }
+
+    @keyframes boardPan {
+      to { background-position: 80px 0, 0 60px; }
+    }
+
+    @keyframes timelinePulse {
+      to { filter: brightness(1.06); transform: translateX(18px); }
+    }
+
+    @keyframes messageIn {
+      from { opacity: 0; transform: translateY(18px) rotateY(0deg); }
+    }
+
+    @media (max-width: 920px) {
+      .nav-links a:not(.nav-cta) {
+        display: none;
+      }
+
+      .hero-grid,
+      .visual-system,
+      .studio,
+      .im-inner,
+      .feature-grid,
+      .metrics {
+        grid-template-columns: 1fr;
+      }
+
+      .hero-grid {
+        min-height: auto;
+      }
+
+      .visual-copy {
+        position: static;
+      }
+
+      .look-card.featured,
+      .look-card.tall,
+      .look-card.medium,
+      .look-card.wide {
+        grid-column: span 6;
+      }
+
+      .hero-star {
+        min-height: 590px;
+        order: -1;
+      }
+
+      .portrait-wrap {
+        right: 0;
+        left: auto;
+        width: min(100%, 500px);
+      }
+
+      section {
+        padding: 78px 0;
+      }
+
+      .feature {
+        min-height: 250px;
+      }
+
+      .feature h3 {
+        margin-top: 60px;
+      }
+
+      .studio-board {
+        min-height: 470px;
+      }
+
+      .chat-stack {
+        max-width: none;
+        justify-self: stretch;
+      }
+    }
+
+    @media (max-width: 560px) {
+      .nav,
+      .hero-grid,
+      section,
+      .im-inner,
+      footer {
+        width: min(100% - 24px, var(--max));
+      }
+
+      .hero {
+        padding-top: 92px;
+      }
+
+      .brand {
+        gap: 10px;
+      }
+
+      .brand-mark {
+        width: 52px;
+        height: 52px;
+      }
+
+      .brand img {
+        width: 48px;
+        height: 48px;
+      }
+
+      .brand-name {
+        font-size: 22px;
+      }
+
+      .nav-cta {
+        padding: 0 12px;
+      }
+
+      .hero-star {
+        min-height: 520px;
+      }
+
+      .portrait-wrap {
+        width: 100%;
+        transform: rotate(0.8deg);
+      }
+
+      .chip.one {
+        top: 5%;
+        left: 8px;
+      }
+
+      .chip.two {
+        right: 4px;
+        bottom: 22%;
+      }
+
+      .chip.three {
+        bottom: 4%;
+        left: 12px;
+      }
+
+      h1 {
+        font-size: 53px;
+      }
+
+      .lead {
+        font-size: 19px;
+      }
+
+      .cta-row {
+        flex-direction: column;
+      }
+
+      .button {
+        width: 100%;
+      }
+
+      .ticker span {
+        padding: 14px 20px;
+      }
+
+      .visual-system {
+        width: min(100% - 24px, var(--max));
+        padding: 78px 0;
+      }
+
+      .lookbook {
+        grid-template-columns: 1fr;
+      }
+
+      .look-card.featured,
+      .look-card.tall,
+      .look-card.medium,
+      .look-card.wide {
+        grid-column: auto;
+        min-height: 440px;
+      }
+
+      .look-card.featured,
+      .look-card.wide {
+        min-height: 300px;
+      }
+
+      .mission {
+        width: calc(100% - 44px);
+      }
+
+      .mission:nth-child(2) {
+        top: 146px;
+        right: 22px;
+      }
+
+      .mission:nth-child(3) {
+        right: 22px;
+        bottom: 118px;
+      }
+
+      footer {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        animation-duration: 1ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: 1ms !important;
+      }
+
+      .feature {
+        opacity: 1;
+        transform: none;
+      }
+
+      .look-card {
+        opacity: 1;
+        transform: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <nav class="nav" aria-label="Primary navigation">
+      <a class="brand" href="#top" aria-label="CosMac Star home">
+        <span class="brand-mark">
+          <img src="/logo.svg" alt="">
+        </span>
+        <span class="brand-lockup">
+          <span class="brand-name">CosMac Star</span>
+        </span>
+      </a>
+      <div class="nav-links">
+        <a href="#create">Create</a>
+        <a href="#visuals">Visuals</a>
+        <a href="#studio">Studio</a>
+        <a href="#im">Fan IM</a>
+        <a href="#operate">Operate</a>
+        <a class="nav-cta" href="https://app.cosmac.cc">Enter App</a>
+      </div>
+    </nav>
+  </header>
+
+  <div id="top" class="hero">
+    <div class="hero-grid">
+      <div class="hero-copy">
+        <div class="tag"><i></i> CosMac OS Entertainment Edition</div>
+        <h1>Create a <span class="accent-text">virtual star</span> people can love.</h1>
+        <p class="lead">
+          Start with a fictional AI idol and a main star image. Then turn her
+          into videos, fan rooms, campaigns, and future monetization.
+        </p>
+        <div class="cta-row">
+          <a class="button primary" href="https://app.cosmac.cc">Enter App</a>
+          <a class="button" href="#create">Explore the system</a>
+        </div>
+      </div>
+
+      <div class="hero-star" aria-label="Main virtual star">
+        <div class="portrait-wrap">
+          <img src="/star-main.jpeg" alt="CosMac Star main virtual idol">
+        </div>
+        <div class="chip one">Main virtual star</div>
+        <div class="chip two">AI persona online</div>
+        <div class="chip three">Fan room ready</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ticker" aria-label="Global product statements">
+    <div class="ticker-track">
+      <span>Create your virtual AI star</span>
+      <span>AIスターを育てる</span>
+      <span>AI 스타를 운영하다</span>
+      <span>打造、运营、变现一个AI明星</span>
+      <span>Game-like video studio</span>
+      <span>Fan IM as the community layer</span>
+      <span>Create your virtual AI star</span>
+      <span>AIスターを育てる</span>
+      <span>AI 스타를 운영하다</span>
+      <span>打造、运营、变现一个AI明星</span>
+      <span>Game-like video studio</span>
+      <span>Fan IM as the community layer</span>
+    </div>
+  </div>
+
+  <main>
+    <section id="visuals" class="visual-system" aria-labelledby="visuals-title">
+      <div class="visual-copy">
+        <div class="section-kicker">Star visual system</div>
+        <h2 class="section-title" id="visuals-title">
+          One virtual star, many scenes, one recognizable identity.
+        </h2>
+        <p class="section-copy">
+          CosMac Star is not just a generated face. It is a reusable character
+          system: campaign images, selfies, stage looks, lifestyle moments, and
+          fan-facing visuals that keep the same star alive across formats.
+        </p>
+        <div class="visual-note" aria-label="Visual system notes">
+          <span><b>01</b> Campaign still</span>
+          <span><b>02</b> Mirror persona</span>
+          <span><b>03</b> Summer drop</span>
+          <span><b>04</b> Evening style</span>
+          <span><b>05</b> Fan selfie</span>
+          <span><b>06</b> Motion campaign</span>
+          <span><b>07</b> Editorial scene</span>
+        </div>
+      </div>
+
+      <div class="lookbook" aria-label="Virtual star image lookbook">
+        <figure class="look-card featured">
+          <img src="/star-look-01.jpg" alt="CosMac virtual star campaign image" loading="lazy">
+          <figcaption><span>01</span><span>Campaign still</span></figcaption>
+        </figure>
+        <figure class="look-card tall">
+          <img src="/star-look-03.jpg" alt="CosMac virtual star mirror look" loading="lazy">
+          <figcaption><span>02</span><span>Mirror persona</span></figcaption>
+        </figure>
+        <figure class="look-card medium">
+          <img src="/star-look-04.jpg" alt="CosMac virtual star beach look" loading="lazy">
+          <figcaption><span>03</span><span>Summer drop</span></figcaption>
+        </figure>
+        <figure class="look-card medium">
+          <img src="/star-look-05.jpg" alt="CosMac virtual star fashion look" loading="lazy">
+          <figcaption><span>04</span><span>Evening style</span></figcaption>
+        </figure>
+        <figure class="look-card medium">
+          <img src="/star-look-06.jpg" alt="CosMac virtual star idol selfie" loading="lazy">
+          <figcaption><span>05</span><span>Fan selfie</span></figcaption>
+        </figure>
+        <figure class="look-card wide">
+          <img src="/star-look-02.jpg" alt="CosMac virtual star motion campaign" loading="lazy">
+          <figcaption><span>06</span><span>Motion campaign</span></figcaption>
+        </figure>
+        <figure class="look-card tall">
+          <img src="/star-look-07.jpg" alt="CosMac virtual star editorial look" loading="lazy">
+          <figcaption><span>07</span><span>Editorial scene</span></figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section id="create" aria-labelledby="create-title">
+      <div class="section-kicker">Virtual star first</div>
+      <h2 class="section-title" id="create-title">
+        Build the idol before the celebrity. Make the IP before the face.
+      </h2>
+      <p class="section-copy">
+        CosMac Star begins with a virtual performer: look, voice, attitude,
+        story world, fan voice, and content rhythm. Own-face twins and agency
+        incubation become expansion modes after the star has a direction.
+      </p>
+
+      <div class="feature-grid" aria-label="Product pillars">
+        <article class="feature">
+          <div class="feature-index">01 / ORIGINAL</div>
+          <h3>Virtual AI idols</h3>
+          <p>
+            Create a performer from scratch and define the visual identity,
+            personality, content style, and fan relationship.
+          </p>
+        </article>
+        <article class="feature">
+          <div class="feature-index">02 / EXTEND</div>
+          <h3>Own-face twins</h3>
+          <p>
+            When a creator wants to step into the IP, add a real face and
+            convert personal identity into controllable AI performances.
+          </p>
+        </article>
+        <article class="feature">
+          <div class="feature-index">03 / SCALE</div>
+          <h3>Agency rosters</h3>
+          <p>
+            Incubate multiple virtual talents with shared production workflows,
+            fan rooms, campaign memory, and future commerce paths.
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <section id="studio" aria-labelledby="studio-title">
+      <div class="studio">
+        <div>
+          <div class="section-kicker">Game-like video studio</div>
+          <h2 class="section-title" id="studio-title">
+            Video creation becomes missions, assets, and levels.
+          </h2>
+          <p class="section-copy">
+            Pick a scene, generate a performance, remix the cut, ship the
+            challenge, and let fans participate. The workflow feels closer to
+            operating a game character than editing a blank timeline.
+          </p>
+        </div>
+
+        <div class="studio-board" aria-label="Animated production workflow preview">
+          <div class="mission">
+            <b>Mission 01 · Define the idol</b>
+            <span>Look, voice, personality, fandom tone.</span>
+          </div>
+          <div class="mission">
+            <b>Mission 02 · Generate a scene</b>
+            <span>Script, camera, dance, hook, caption.</span>
+          </div>
+          <div class="mission">
+            <b>Mission 03 · Launch to fans</b>
+            <span>Room campaign, replies, remix prompts.</span>
+          </div>
+          <div class="timeline">
+            <div class="timeline-row"><i style="--w: 78%"></i></div>
+            <div class="timeline-row"><i style="--w: 56%"></i></div>
+            <div class="timeline-row"><i style="--w: 88%"></i></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="im" class="im-band" aria-labelledby="im-title">
+      <div class="im-inner">
+        <div>
+          <div class="section-kicker">Fan IM layer</div>
+          <h2 class="section-title" id="im-title">
+            The star is not only content. The star is a conversation.
+          </h2>
+          <p class="section-copy">
+            CosMac OS provides the IM foundation where fans can join rooms,
+            message the star, follow campaigns, receive replies, and build a
+            relationship with the AI performer over time.
+          </p>
+        </div>
+
+        <div class="chat-stack" aria-label="Fan chat preview">
+          <div class="bubble">Can my team create a new virtual idol for our channel?</div>
+          <div class="bubble star">Yes. Start with a character setting, then I will turn it into video missions.</div>
+          <div class="bubble">Can we add the founder's face later?</div>
+          <div class="bubble star">Later is perfect. Build the virtual star first, then extend the IP.</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="operate" aria-labelledby="operate-title">
+      <div class="section-kicker">Operate the IP</div>
+      <h2 class="section-title" id="operate-title">
+        Creation, community, and monetization in one operating system.
+      </h2>
+      <p class="section-copy">
+        CosMac Star is the entertainment edition of CosMac OS: a place to create
+        the star, produce videos, talk with fans, remember community context,
+        and prepare the IP for future commerce.
+      </p>
+
+      <div class="metrics" aria-label="Capability list">
+        <div class="metric">
+          <strong>01</strong>
+          <span>Virtual star identity and persona setup</span>
+        </div>
+        <div class="metric">
+          <strong>02</strong>
+          <span>Game-like video production workflows</span>
+        </div>
+        <div class="metric">
+          <strong>03</strong>
+          <span>Fan rooms, replies, campaigns, and memory</span>
+        </div>
+        <div class="metric">
+          <strong>04</strong>
+          <span>IP operations ready for monetization</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="final" aria-labelledby="final-title">
+      <div class="section-kicker">CosMac Star</div>
+      <h2 class="section-title" id="final-title">
+        Start with a virtual character. Grow it into a star system.
+      </h2>
+      <p class="section-copy">
+        Create the idol, produce the content, open the fan room, and operate the
+        next AI-powered entertainment IP.
+      </p>
+      <div class="cta-row">
+        <a class="button primary" href="https://app.cosmac.cc">Enter App</a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span>CosMac Star · CosMac OS Entertainment Edition</span>
+    <span>cosmac.cc</span>
+  </footer>
+
+  <script>
+    const root = document.documentElement;
+
+    window.addEventListener("pointermove", (event) => {
+      const x = `${(event.clientX / window.innerWidth) * 100}%`;
+      const y = `${(event.clientY / window.innerHeight) * 100}%`;
+      root.style.setProperty("--mx", x);
+      root.style.setProperty("--my", y);
+    }, { passive: true });
+
+    const revealObserver = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add("visible");
+        }
+      });
+    }, { threshold: 0.18 });
+
+    document.querySelectorAll(".feature, .look-card").forEach((card) => {
+      revealObserver.observe(card);
+    });
+  </script>
+</body>
+</html>
