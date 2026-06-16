@@ -36,16 +36,24 @@ echo "✅ 落地页已更新"
 # 2) Element 配置 + 登录页 logo（app.cosmac.cc）
 cp "$REPO_DIR/web/element-config.json" "$ELEMENT_DIR/config.json"
 cp "$LOGO" "$ELEMENT_DIR/guduu-logo.png"
+cp "$REPO_DIR/web/element-auth.css" "$ELEMENT_DIR/cosmac-auth.css"
+cp "$REPO_DIR/web/landing/star-main.jpeg" "$ELEMENT_DIR/auth-star-main.jpeg"
 echo "✅ Element 配置已更新"
 
-# 3) 去掉 Element 品牌字样：标签页标题 / meta / PWA 名称
+# 3) 注入注册/登录页品牌背景样式；Element 升级后重跑脚本即可恢复。
+if ! grep -q 'cosmac-auth.css' "$ELEMENT_DIR/index.html"; then
+  sed -i '/<\/head>/i\  <link rel="stylesheet" href="/cosmac-auth.css">' "$ELEMENT_DIR/index.html"
+fi
+echo "✅ Element 注册/登录页背景样式已注入"
+
+# 4) 去掉 Element 品牌字样：标签页标题 / meta / PWA 名称
 #    （只改给人看的文本，不动 themes/element 等路径）
 sed -i 's#<title>[^<]*</title>#<title>CosMac Star</title>#' "$ELEMENT_DIR/index.html"
 sed -i 's/content="\([^"]*\)Element\([^"]*\)"/content="\1CosMac Star\2"/g' "$ELEMENT_DIR/index.html"
 [ -f "$ELEMENT_DIR/manifest.json" ] && sed -i 's/"Element"/"CosMac Star"/g' "$ELEMENT_DIR/manifest.json"
 echo "✅ Element 静态品牌已替换为 CosMac Star"
 
-# 4) 所有图标（标签页 favicon + 添加到主屏图标）换成 CosMac Star logo
+# 5) 所有图标（标签页 favicon + 添加到主屏图标）换成 CosMac Star logo
 for f in "$ELEMENT_DIR"/vector-icons/*.png; do
   [ -f "$f" ] || continue
   w=$(identify -format "%w" "$f" 2>/dev/null) || continue
