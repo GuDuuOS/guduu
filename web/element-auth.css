@@ -63,6 +63,10 @@ body:has(.mx_AuthPage) {
 
 .mx_AuthPage .mx_AuthHeader img,
 .mx_AuthPage img[src*="cosmac-logo"] {
+  width: 116px !important;
+  height: 116px !important;
+  object-fit: contain !important;
+  margin: 2px auto 10px !important;
   filter:
     saturate(1.18)
     contrast(1.04)
