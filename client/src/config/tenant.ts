@@ -13,20 +13,20 @@
  */
 export const tenant = {
   /** 工作室/品牌显示名 */
-  name: '筱雨工作室',
+  name: '安其影视工作室',
   /** 主理人短名 */
-  shortName: '筱雨',
+  shortName: '安其',
   /** 产品名 */
-  productName: '创作工作台',
+  productName: 'AI 制作中台',
   /** 主工作区 label / title */
-  hqLabel: '筱雨',
-  hqTitle: '筱雨工作室',
+  hqLabel: '安其',
+  hqTitle: '安其影视工作室',
   /** 主工作区 ID（默认 workspace id）*/
   hqId: 'hq',
   /** 顶栏 "CosMac OS × XXX" 后缀（保留品牌联名样式）*/
-  topbarSuffix: '筱雨工作室',
+  topbarSuffix: '安其影视工作室',
   /** AI 角色称呼里"你是 XX 的助手"中的 XX */
-  aiOwner: '筱雨工作室'
+  aiOwner: '安其影视工作室'
 } as const
 
 /** 衍生：板块 brand 字段统一模板，如 "内容运营 · 创作工作台" */

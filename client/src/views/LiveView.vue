@@ -60,6 +60,20 @@ const { open: openPluginStore } = usePluginStore()
 const { open: openAssets } = useCustomAssets()
 const { openSettings } = useUserProfile()
 
+// ── 数据看板（复用 DEMO 的画布组件 + 影视公司主题数据）──
+import KpiCard from '@/components/canvas/KpiCard.vue'
+import PanelChart from '@/components/canvas/PanelChart.vue'
+import UnitGrid from '@/components/canvas/UnitGrid.vue'
+import CommandCenter from '@/components/canvas/CommandCenter.vue'
+import BizPanels from '@/components/canvas/BizPanels.vue'
+import { getDashboard } from '@/data/dashboards'
+import { useActiveWorkspace } from '@/composables/useActiveWorkspace'
+import '@/styles/canvas.css' // 看板样式，命名空间在 .canvas/.panel 下，不与 LiveView 撞
+const { activeId } = useActiveWorkspace()
+const dash = computed(() => getDashboard(activeId.value))
+const board = ref(false) // true=主区显示数据看板；false=显示频道
+function openBoard() { board.value = true; currentRoom.value = '' }
+
 const HS = 'https://hs.cosmac.cc'
 
 // ── 登录态 ──────────────────────────────────────────────
@@ -156,6 +170,7 @@ async function doLogin() {
 }
 
 function openRoom(id: string) {
+  board.value = false
   currentRoom.value = id
   msgs.value = listMessages(id)
 }
@@ -415,6 +430,14 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
         </div>
 
         <div class="cs-list">
+          <!-- 置顶：数据看板（影视公司制作驾驶舱）-->
+          <div class="cs-item pinned-item" :class="{ active: board }" @click="openBoard">
+            <span class="cs-ic">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1" /><rect x="14" y="3" width="7" height="5" rx="1" /><rect x="14" y="12" width="7" height="9" rx="1" /><rect x="3" y="16" width="7" height="5" rx="1" /></svg>
+            </span>
+            <span class="cs-label">数据看板</span>
+          </div>
+
           <!-- 频道 group（真实房间）-->
           <div class="cs-group">
             <button class="cs-group-head" @click="channelsOpen = !channelsOpen">
@@ -462,8 +485,44 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
         </div>
       </aside>
 
-      <!-- 中：频道（浮卡）-->
+      <!-- 中：数据看板 / 频道（浮卡）-->
       <main class="main">
+        <!-- ===== 数据看板（影视公司制作驾驶舱）===== -->
+        <template v-if="board">
+          <div class="ch-header">
+            <div class="title">📊 数据看板</div>
+            <div class="ch-actions">
+              <button class="ch-ic-btn" :class="{ active: aiOpen }" :title="aiOpen ? '关闭中枢 AI' : '打开中枢 AI'" @click="aiOpen = !aiOpen">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" /></svg>
+              </button>
+            </div>
+          </div>
+          <div class="board-scroll">
+            <div class="canvas">
+              <div class="ctitle">{{ dash.brand }}</div>
+              <div class="csub">// 实时运营画布 · 由 CosMac Star 自动维护</div>
+              <CommandCenter />
+              <div class="kpis">
+                <KpiCard v-for="(k, i) in dash.kpis" :key="k.label" :data="k" :delay="200 + i * 80" />
+              </div>
+              <div class="grid-2">
+                <PanelChart :title="dash.prod.title" :config="dash.prod.build" :live="dash.prod.live" />
+                <PanelChart :title="dash.save.title" :config="dash.save.build" />
+              </div>
+              <div class="grid-3">
+                <div class="panel" style="grid-column: span 2">
+                  <div class="pt">{{ dash.unitsTitle }}</div>
+                  <UnitGrid :units="dash.units" />
+                </div>
+                <PanelChart :title="dash.pie.title" :config="dash.pie.build" :height="dash.pie.height ?? 180" />
+              </div>
+              <BizPanels />
+            </div>
+          </div>
+        </template>
+
+        <!-- ===== 频道 ===== -->
+        <template v-else>
         <div v-if="currentRoom" class="ch-header">
           <button class="ch-fav" :class="{ active: fav }" :title="fav ? '取消收藏' : '收藏'" @click="fav = !fav">
             <svg width="16" height="16" viewBox="0 0 24 24" :fill="fav ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
@@ -543,6 +602,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
             </div>
           </div>
         </div>
+        </template>
       </main>
 
       <!-- 右：中枢 AI 面板（浮卡）-->
@@ -740,6 +800,9 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 
 /* main（浮卡）*/
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--bg); border-radius: 12px; margin: 8px; overflow: hidden; }
+/* 数据看板滚动容器 */
+.board-scroll { flex: 1; overflow-y: auto; min-height: 0; }
+.pinned-item { color: var(--text-2); }
 .ch-header { height: 50px; flex-shrink: 0; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; padding: 0 16px; background: var(--bg-panel); }
 .ch-fav { width: 28px; height: 28px; background: transparent; border: none; color: var(--text-3); border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
 .ch-fav:hover { background: var(--bg-hover); color: var(--text); }

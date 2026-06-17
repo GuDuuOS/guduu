@@ -6,14 +6,14 @@
         <span class="cc-badge">⚡ AI 指令中枢</span>
         <span class="cc-live"><span class="dot" /> 全链路自动运作</span>
       </div>
-      <h2 class="cc-title">一句话，<span class="hl">开始变现</span></h2>
-      <p class="cc-sub">从一个想法，到选题、脚本、剪辑、发布、变现 —— 全链路由 AI 自动跑通。</p>
+      <h2 class="cc-title">一句话，<span class="hl">开始制作</span></h2>
+      <p class="cc-sub">从一个创意，到剧本、分镜、配音、成片、粉丝运营 —— 全链路由 AI 自动跑通。</p>
 
       <div class="cc-input">
         <input
           v-model="text"
           class="cc-field"
-          placeholder="输入你的目标，例如：帮我策划一条职场爆款并排好发布…"
+          placeholder="输入你的创意，例如：给《银河谣》写下一集大纲并生成分镜…"
           @keyup.enter="run()"
         />
         <button class="cc-send" :disabled="!text.trim()" @click="run()">

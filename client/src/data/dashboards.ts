@@ -111,35 +111,36 @@ const MONTH6 = ['1月', '2月', '3月', '4月', '5月', '6月']
 export const dashboardMap: Record<string, DashboardData> = {
   /* ===== 筱雨工作室 ===== */
   [tenant.hqId]: {
-    title: '总览-创作驾驶舱',
-    topic: '全平台数据 · 一屏看全局',
+    title: '总览-制作驾驶舱',
+    topic: '全平台剧集 / 粉丝数据 · 一屏看全局',
     brand: tenantBrand,
-    unitsTitle: '各平台账号状态',
+    unitsTitle: '各剧集 / 虚拟明星 / 平台状态',
     kpis: [
-      { label: '今日总播放', target: 86400, unit: '次', delta: '▲ +12.4% vs 昨日' },
-      { label: '本月涨粉', target: 12480, unit: '人', delta: '▲ +18.6% 环比' },
-      { label: '商单收入', target: 38600, unit: '元', delta: '▲ 本月新签 2 单' },
-      { label: 'AI 今日处理', target: 1056, unit: '项', delta: '▲ 节省 6 小时' }
+      { label: '今日剧集总播放', target: 1280, unit: '万次', delta: '▲ +9.2% vs 昨日' },
+      { label: '全网粉丝总数', target: 386, unit: '万', delta: '▲ +18.6% 环比' },
+      { label: '本周粉丝回复', target: 3240, unit: '条', delta: '▲ AI 自动回 92%' },
+      { label: 'AI 今日制作', target: 1056, unit: '项', delta: '▲ 节省 14 小时' }
     ],
     units: [
-      { name: '抖音', status: '粉丝 48.2w' },
-      { name: '小红书', status: '粉丝 21.6w' },
-      { name: '视频号', status: '粉丝 9.8w' },
-      { name: '公众号', status: '粉丝 12.4w' },
-      { name: 'B站', status: '粉丝 6.3w' },
-      { name: '知乎', status: '更新滞后', warn: true },
-      { name: '私域社群', status: '3 群 · 1480 人' },
-      { name: '草稿箱', status: '待发 4 条' }
+      { name: '《银河谣》', status: '播放 480w · 更新中' },
+      { name: '《夜航星》', status: '播放 320w · 制作中' },
+      { name: '虚拟明星·墨白', status: '粉丝 128w' },
+      { name: '虚拟明星·星野', status: '粉丝 96w · 新单曲' },
+      { name: '虚拟明星·凌霜', status: '粉丝 54w' },
+      { name: '抖音', status: '粉丝 210w' },
+      { name: 'B站', status: '更新滞后', warn: true },
+      { name: 'YouTube', status: '订阅 38w' }
     ],
     prod: {
-      title: '近 24h 播放趋势', live: true,
+      title: '近 24h 剧集播放趋势', live: true,
       build: lineChart(['00', '03', '06', '09', '12', '15', '18', '21', '24'], [
-        { label: '抖音', data: [12, 18, 26, 42, 68, 96, 128, 156, 142] },
-        { label: '小红书', data: [8, 10, 14, 22, 36, 48, 62, 74, 68], color: PALETTE[2] }
+        { label: '抖音', data: [18, 24, 30, 48, 78, 110, 142, 168, 150] },
+        { label: 'B站', data: [10, 12, 16, 24, 40, 56, 72, 88, 80], color: PALETTE[2] },
+        { label: 'YouTube', data: [6, 8, 10, 16, 26, 34, 44, 52, 48], color: PALETTE[3] }
       ])
     },
-    save: { title: '本月变现 (元)', build: barChart(['W1', 'W2', 'W3', 'W4'], [8600, 12400, 15800, 11200], PALETTE[1], '变现 (元)') },
-    pie: { title: 'AI 任务分布', height: 180, build: doughnut(['标题', '脚本', '回复', '复盘', '其他'], [342, 267, 201, 128, 148]) }
+    save: { title: '本月各周新增粉丝 (万)', build: barChart(['W1', 'W2', 'W3', 'W4'], [12, 18, 26, 21], PALETTE[1], '新增粉丝 (万)') },
+    pie: { title: 'AI 制作任务分布', height: 180, build: doughnut(['剧本', '分镜', '配音/配乐', '海报', '粉丝回复'], [286, 224, 168, 132, 246]) }
   },
 }
 
