@@ -27,6 +27,7 @@ import {
   roomIdsInSpace,
   createSpace,
   createChannelInSpace,
+  updateSpace,
   inviteToRoom,
   normalizeUserId,
   BOT_ID,
@@ -150,6 +151,35 @@ function selectSpace(id: string) {
   spaceChildIds.value = roomIdsInSpace(id)
   // 切了工作区，若当前频道不属于它，回到频道空态
   if (currentRoom.value && !spaceChildIds.value.has(currentRoom.value)) currentRoom.value = ''
+}
+
+// ── 工作区设置（点工作区名打开，改名称 / 简称）──
+const wsSetOpen = ref(false)
+const wsSetName = ref('')
+const wsSetLabel = ref('')
+const wsSetBusy = ref(false)
+function openWsSettings() {
+  if (!activeSpace.value) return
+  const s = spaces.value.find((x) => x.id === activeSpace.value)
+  wsSetName.value = s?.name || ''
+  wsSetLabel.value = s?.label || ''
+  wsSetOpen.value = true
+}
+async function saveWsSettings() {
+  const id = activeSpace.value
+  const name = wsSetName.value.trim()
+  if (!id || !name || wsSetBusy.value) return
+  wsSetBusy.value = true
+  try {
+    await updateSpace(id, { name, label: wsSetLabel.value.trim() })
+    toast('已保存', `工作区改为「${name}」`)
+    wsSetOpen.value = false
+    setTimeout(refresh, 700)
+  } catch (e: any) {
+    toast('保存失败', e?.message || String(e))
+  } finally {
+    wsSetBusy.value = false
+  }
 }
 
 // ── 新建工作区（完整表单：类型 / 名称 / 简称 / 可见性 / 按类型建默认频道）──
@@ -600,7 +630,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
       <!-- 左：频道侧栏（浮卡）-->
       <aside v-if="!focused" class="channels">
         <div class="cs-ws-head">
-          <button class="cs-ws-name" :title="activeSpaceName">
+          <button class="cs-ws-name" :title="`${activeSpaceName} · 点击设置`" @click="openWsSettings">
             <span class="name">{{ activeSpaceName }}</span>
             <svg class="chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
           </button>
@@ -966,6 +996,25 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
         <div class="nw-foot">
           <button class="nw-btn" :disabled="newChCreating" @click="newChOpen = false">取消</button>
           <button class="nw-btn primary" :disabled="!newChName.trim() || newChCreating" @click="createChannel">{{ newChCreating ? '创建中…' : '创建' }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 工作区设置：改名称 / 简称（真写进 Matrix Space）-->
+    <div v-if="wsSetOpen" class="nw-overlay" @click.self="wsSetOpen = false">
+      <div class="nw-modal">
+        <div class="nw-title">工作区设置</div>
+        <div class="nw-sub">改这个工作区的名称和左栏简称（实时写进后端）</div>
+        <div class="nw-field-label">名称</div>
+        <input v-model="wsSetName" class="nw-input" placeholder="工作区名称" @keyup.enter="saveWsSettings" />
+        <div class="nw-field-label">简称（左栏图标，最多 3 字）</div>
+        <input v-model="wsSetLabel" class="nw-input" maxlength="3" :placeholder="wsSetName ? wsLabel(wsSetName) : '如 制作'" />
+        <div class="nw-preview" v-if="wsSetName.trim()">
+          <div class="nw-prev-ws"><span class="nw-prev-ic">{{ wsSetLabel.trim() || wsLabel(wsSetName) }}</span>{{ wsSetName }}</div>
+        </div>
+        <div class="nw-foot">
+          <button class="nw-btn" :disabled="wsSetBusy" @click="wsSetOpen = false">取消</button>
+          <button class="nw-btn primary" :disabled="!wsSetName.trim() || wsSetBusy" @click="saveWsSettings">{{ wsSetBusy ? '保存中…' : '保存' }}</button>
         </div>
       </div>
     </div>

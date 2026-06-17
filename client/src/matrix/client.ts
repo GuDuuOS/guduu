@@ -205,6 +205,20 @@ export async function createSpace(
   return sid
 }
 
+/** 改工作区(Space)的名称 / 简称。name→m.room.name；label→cosmac.workspace 状态。 */
+export async function updateSpace(
+  spaceId: string,
+  opts: { name?: string; label?: string } = {},
+): Promise<void> {
+  if (!mx) throw new Error('未登录')
+  if (opts.name) {
+    await (mx as any).sendStateEvent(spaceId, 'm.room.name', { name: opts.name }, '')
+  }
+  if (opts.label !== undefined) {
+    await (mx as any).sendStateEvent(spaceId, 'cosmac.workspace', { label: opts.label }, '')
+  }
+}
+
 /** 在某工作区(Space)下真建一个频道：建房间 + 邀请主 AI + 挂到 Space 下。返回 room_id。 */
 export async function createChannelInSpace(
   spaceId: string,
