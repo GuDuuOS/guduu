@@ -29,8 +29,6 @@ import {
 } from '@/matrix/client'
 import { tenant } from '@/config/tenant'
 import logoUrl from '@/assets/cosmac-logo.png'
-// 顶栏品牌 logo 用 DEMO 的矢量胶囊（暖色：奶油+橙），22×32 天然比例不变形
-import brandLogo from '@/assets/gudu-logo.svg'
 
 const HS = 'https://hs.cosmac.cc'
 
@@ -284,7 +282,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
             <circle cx="3" cy="9" r="1.6" /><circle cx="9" cy="9" r="1.6" /><circle cx="15" cy="9" r="1.6" />
             <circle cx="3" cy="15" r="1.6" /><circle cx="9" cy="15" r="1.6" /><circle cx="15" cy="15" r="1.6" />
           </svg>
-          <img :src="brandLogo" alt="" class="logo" />
+          <img :src="logoUrl" alt="" class="logo" />
           <span class="product-name">CosMac Star<span class="product-x">X</span>{{ tenant.topbarSuffix }}</span>
         </button>
         <div v-if="appMenuOpen" class="tas-pop" @click.stop>
@@ -597,7 +595,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 .top-brand-btn:hover { background: var(--bg-hover); }
 .top-brand-btn:active, .top-brand-btn.open { background: var(--bg-active); }
 .apps-ic { color: var(--text-3); flex-shrink: 0; }
-.top-brand-btn .logo { width: 22px; height: 32px; object-fit: contain; display: block; flex-shrink: 0; }
+.top-brand-btn .logo { width: 26px; height: 26px; object-fit: contain; border-radius: 6px; display: block; flex-shrink: 0; }
 .product-name { font-family: var(--font-heading); font-size: var(--fs-200); line-height: var(--lh-200); font-weight: var(--fw-bold); color: var(--text); letter-spacing: -.2px; display: inline-flex; align-items: center; white-space: nowrap; }
 .product-x { color: var(--accent); font-weight: 800; margin: 0 8px; font-family: var(--font-heading); font-size: var(--fs-200); font-style: italic; letter-spacing: 0; }
 .tas-pop { position: absolute; top: calc(100% + 6px); left: 6px; z-index: 60; min-width: 220px; padding: 8px; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,.14); }
