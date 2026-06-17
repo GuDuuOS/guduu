@@ -56,6 +56,17 @@ async function startFrom(opts: {
     deviceId: opts.deviceId,
   })
   await mx.startClient({ initialSyncLimit: 30 })
+  // 等首次同步完成（房间列表加载好）再返回，避免后续逻辑在空列表上重复建房间
+  await new Promise<void>((resolve) => {
+    const handler = (state: string) => {
+      if (state === 'PREPARED') {
+        ;(mx as any).off('sync', handler)
+        resolve()
+      }
+    }
+    if ((mx as any).getSyncState?.() === 'PREPARED') resolve()
+    else (mx as any).on('sync', handler)
+  })
   return opts.userId
 }
 
@@ -113,24 +124,14 @@ export function onUpdate(cb: () => void): void {
   ;(mx as any).on('Room.timeline', () => cb())
 }
 
-/** 收集所有"私聊(DM)"房间 id（来自 m.direct 账户数据），左侧频道列表里要排除它们。 */
-function dmRoomIds(): Set<string> {
-  const ids = new Set<string>()
-  const content: any = (mx as any)?.getAccountData?.('m.direct')?.getContent?.() || {}
-  for (const arr of Object.values(content)) {
-    for (const id of (arr as string[]) || []) ids.add(id)
-  }
-  return ids
-}
-
-/** 列出我加入的群频道（排除私聊 DM；按名称排序）。 */
+/** 列出我加入的群频道（排除"中枢 AI"私聊和无名 DM；按名称排序）。 */
 export function listRooms(): LiveRoom[] {
   if (!mx) return []
-  const dms = dmRoomIds()
   return mx
     .getRooms()
-    .filter((r) => !dms.has(r.roomId))
     .map((r) => ({ id: r.roomId, name: r.name || r.roomId }))
+    // 中枢 AI 在右侧单独显示；无名 DM 的 name 会回退成对方 mxid（以 @ 开头），都不进频道列表
+    .filter((r) => r.name !== '中枢 AI' && !r.name.startsWith('@'))
     .sort((a, b) => a.name.localeCompare(b.name, 'zh'))
 }
 
@@ -175,18 +176,17 @@ export function findBotDm(): string | null {
   return null
 }
 
-const AI_ROOM_KEY = 'cosmac.aiRoom'
-
-/** 确保有一个专用的"中枢 AI"私聊房间：优先用记住的那个，否则新建一个并记住。 */
+/** 确保有一个"中枢 AI"私聊房间：先复用已存在的（按名字），没有才新建。 */
 export async function ensureBotDm(): Promise<string> {
-  const saved = localStorage.getItem(AI_ROOM_KEY)
-  if (saved && mx?.getRoom(saved)) return saved
-  const res: any = await mx!.createRoom({
+  if (!mx) throw new Error('未登录')
+  // 同步已完成，getRooms 可靠：复用任意一个已存在的"中枢 AI"房间，避免重复创建
+  const existing = mx.getRooms().find((r) => r.name === '中枢 AI')
+  if (existing) return existing.roomId
+  const res: any = await mx.createRoom({
     name: '中枢 AI',
     preset: 'trusted_private_chat' as any,
     invite: [BOT_ID],
     is_direct: true,
   })
-  localStorage.setItem(AI_ROOM_KEY, res.room_id)
   return res.room_id
 }
