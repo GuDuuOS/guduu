@@ -103,14 +103,16 @@ class CosmacBot:
     def _try_handle_command(self, room_id: str, sender: str, text: str) -> bool:
         """识别并执行 IM 控制命令。命中返回 True，否则 False（交回对话处理）。
 
-        目前支持：
-            /专班 <名字>   → 新建专班群、把发起人拉进去、并发一张派单富卡
+        目前支持（注意不要用 / 开头，否则会被 Element 当成它自己的客户端命令拦截）：
+            建专班 <名字> / 专班 <名字>   → 新建专班群、拉发起人进去、发一张派单富卡
+        （也兼容 /专班，万一用户在 Element 里点了"作为消息发送"）
         """
         text = text.strip()
-        if text.startswith("/专班"):
-            name = text[len("/专班"):].strip() or "新专班"
-            self._launch_campaign(room_id, sender, name)
-            return True
+        for prefix in ("建专班", "/专班", "专班"):
+            if text.startswith(prefix):
+                name = text[len(prefix):].strip(" :：") or "新专班"
+                self._launch_campaign(room_id, sender, name)
+                return True
         return False
 
     def _launch_campaign(self, origin_room: str, requester: str, name: str) -> None:
