@@ -113,11 +113,23 @@ export function onUpdate(cb: () => void): void {
   ;(mx as any).on('Room.timeline', () => cb())
 }
 
-/** 列出我加入的频道（按名称排序）。 */
+/** 收集所有"私聊(DM)"房间 id（来自 m.direct 账户数据），左侧频道列表里要排除它们。 */
+function dmRoomIds(): Set<string> {
+  const ids = new Set<string>()
+  const content: any = (mx as any)?.getAccountData?.('m.direct')?.getContent?.() || {}
+  for (const arr of Object.values(content)) {
+    for (const id of (arr as string[]) || []) ids.add(id)
+  }
+  return ids
+}
+
+/** 列出我加入的群频道（排除私聊 DM；按名称排序）。 */
 export function listRooms(): LiveRoom[] {
   if (!mx) return []
+  const dms = dmRoomIds()
   return mx
     .getRooms()
+    .filter((r) => !dms.has(r.roomId))
     .map((r) => ({ id: r.roomId, name: r.name || r.roomId }))
     .sort((a, b) => a.name.localeCompare(b.name, 'zh'))
 }
