@@ -85,7 +85,7 @@
       </div>
 
       <p class="ai-desc">
-        由 Guduu Main AI 插件提供服务，在右侧栏与你对话。
+        由 CosMac Star Main AI 插件提供服务，在右侧栏与你对话。
       </p>
       <p class="ai-desc dim">
         对话记录由服务端保存（按频道）；切换频道可查看各频道独立记录。

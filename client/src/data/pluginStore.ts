@@ -33,7 +33,7 @@ export const PLUGIN_CAT_META: Record<PluginCat, { label: string; color: string }
 
 export const pluginItems: PluginStoreItem[] = [
   /* AI 工具 */
-  { id: 'main-ai', name: 'Guduu Main AI · 筱雨', cat: 'ai', author: 'CosMac Star 官方', desc: '右侧栏常驻主控 AI，可建群、自动拉人、查询工作室任务状态', installs: '12k', price: 0, icon: 'AI', color: '#c96442', tag: '内置', builtinPluginId: 'ai', installed: true },
+  { id: 'main-ai', name: 'CosMac Star Main AI · 筱雨', cat: 'ai', author: 'CosMac Star 官方', desc: '右侧栏常驻主控 AI，可建群、自动拉人、查询工作室任务状态', installs: '12k', price: 0, icon: 'AI', color: '#c96442', tag: '内置', builtinPluginId: 'ai', installed: true },
   { id: 'voice-note', name: '语音速记', cat: 'ai', author: 'CosMac Star 官方', desc: '灵感 / 口播语音转文字，自动生成脚本草稿', installs: '1.4k', price: 9.9, icon: '记', color: '#c96442' },
 
   /* 监控 */
