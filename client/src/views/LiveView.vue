@@ -71,7 +71,7 @@ import { useActiveWorkspace } from '@/composables/useActiveWorkspace'
 import '@/styles/canvas.css' // 看板样式，命名空间在 .canvas/.panel 下，不与 LiveView 撞
 const { activeId } = useActiveWorkspace()
 const dash = computed(() => getDashboard(activeId.value))
-const board = ref(false) // true=主区显示数据看板；false=显示频道
+const board = ref(true) // true=主区显示数据看板；false=显示频道（登录后默认落在看板）
 function openBoard() { board.value = true; currentRoom.value = '' }
 
 const HS = 'https://hs.cosmac.cc'
@@ -148,6 +148,7 @@ function refresh() {
 async function afterLogin(uid: string) {
   me.value = uid
   loggedIn.value = true
+  board.value = true // 登录后第一屏 = 数据看板
   onUpdate(refresh)
   try {
     aiRoom.value = await ensureBotDm()
