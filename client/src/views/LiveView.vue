@@ -421,13 +421,9 @@ function toast(title: string, msg?: string) {
 
 // ── 真实数据刷新 ────────────────────────────────────────
 function refresh() {
-  // 工作区（Space）：加载 + 按固定顺序排（制作/运营/明星/外部），其余排后面
-  const WS_ORDER = ['制作中心', '运营营销', '明星·粉丝', '外部合作']
-  spaces.value = listSpaces().sort((a, b) => {
-    const ia = WS_ORDER.indexOf(a.name), ib = WS_ORDER.indexOf(b.name)
-    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.name.localeCompare(b.name, 'zh')
-  })
-  // 校正激活项（默认第一个 = 制作中心）
+  // 工作区（Space）：加载（listSpaces 已按 order 稳定排序，改名不影响顺序）
+  spaces.value = listSpaces()
+  // 校正激活项（默认第一个 = order 最小 = 制作中心）
   if (!activeSpace.value || !spaces.value.some((s) => s.id === activeSpace.value)) {
     activeSpace.value = spaces.value[0]?.id || ''
   }

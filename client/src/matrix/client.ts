@@ -153,12 +153,17 @@ export interface LiveSpace {
   label?: string
   /** 工作区头像（m.room.avatar）转好的 http 地址；有图就用图、没图用简称文字 */
   avatarUrl?: string
+  /** 排序序号（存在 cosmac.workspace.order；和名字无关，改名不影响顺序） */
+  order?: number
 }
 
-/** 读某个 Space 的自定义简称（cosmac.workspace 状态事件 → label）。 */
-function spaceLabel(room: any): string | undefined {
-  const ev = room?.currentState?.getStateEvents?.('cosmac.workspace', '')
-  return ev?.getContent?.()?.label || undefined
+/** 读某个 Space 的 cosmac.workspace 元数据（简称 label + 排序 order）。 */
+function spaceMeta(room: any): { label?: string; order?: number } {
+  const c = room?.currentState?.getStateEvents?.('cosmac.workspace', '')?.getContent?.() || {}
+  return {
+    label: c.label || undefined,
+    order: typeof c.order === 'number' ? c.order : undefined,
+  }
 }
 
 /** mxc:// 转成可显示的 http 地址（走 /_matrix/media，已被 nginx 代理）。 */
@@ -187,8 +192,12 @@ export function listSpaces(): LiveSpace[] {
   return mx
     .getRooms()
     .filter((r) => (r as any).isSpaceRoom?.())
-    .map((r) => ({ id: r.roomId, name: r.name || r.roomId, label: spaceLabel(r), avatarUrl: spaceAvatar(r) }))
-    .sort((a, b) => a.name.localeCompare(b.name, 'zh'))
+    .map((r) => {
+      const m = spaceMeta(r)
+      return { id: r.roomId, name: r.name || r.roomId, label: m.label, order: m.order, avatarUrl: spaceAvatar(r) }
+    })
+    // 稳定排序：先按 order（没有的排后面），同 order 再按名字。改名不影响顺序。
+    .sort((a, b) => (a.order ?? 1e9) - (b.order ?? 1e9) || a.name.localeCompare(b.name, 'zh'))
 }
 
 /** 取某个工作区(Space)下挂的频道 roomId 集合（读 m.space.child 状态事件）。 */
@@ -218,12 +227,12 @@ export async function createSpace(
     creation_content: { type: 'm.space' } as any,
   })
   const sid = res.room_id
-  // 自定义简称存进 Space 的状态事件，listSpaces 会读出来
-  if (opts.label) {
-    try {
-      await (mx as any).sendStateEvent(sid, 'cosmac.workspace', { label: opts.label }, '')
-    } catch { /* 存简称失败不影响主流程 */ }
-  }
+  // 简称 + 排序序号存进 cosmac.workspace 状态。order 取现有工作区最大值+1（排到末尾）。
+  try {
+    const orders = listSpaces().map((s) => s.order).filter((n): n is number => typeof n === 'number')
+    const nextOrder = (orders.length ? Math.max(...orders) : -1) + 1
+    await (mx as any).sendStateEvent(sid, 'cosmac.workspace', { label: opts.label || '', order: nextOrder }, '')
+  } catch { /* 存元数据失败不影响主流程 */ }
   return sid
 }
 
@@ -237,14 +246,19 @@ export async function leaveAndForget(roomId: string): Promise<void> {
 /** 改工作区(Space)的名称 / 简称。name→m.room.name；label→cosmac.workspace 状态。 */
 export async function updateSpace(
   spaceId: string,
-  opts: { name?: string; label?: string; avatar?: string } = {},
+  opts: { name?: string; label?: string; avatar?: string; order?: number } = {},
 ): Promise<void> {
   if (!mx) throw new Error('未登录')
   if (opts.name) {
     await (mx as any).sendStateEvent(spaceId, 'm.room.name', { name: opts.name }, '')
   }
-  if (opts.label !== undefined) {
-    await (mx as any).sendStateEvent(spaceId, 'cosmac.workspace', { label: opts.label }, '')
+  // label / order 合并写进同一个 cosmac.workspace 状态（避免互相覆盖）
+  if (opts.label !== undefined || opts.order !== undefined) {
+    const cur = mx.getRoom(spaceId)?.currentState?.getStateEvents('cosmac.workspace', '')?.getContent() || {}
+    const next: any = { ...cur }
+    if (opts.label !== undefined) next.label = opts.label
+    if (opts.order !== undefined) next.order = opts.order
+    await (mx as any).sendStateEvent(spaceId, 'cosmac.workspace', next, '')
   }
   // avatar：undefined=不动；''=清空头像；mxc://=设置头像
   if (opts.avatar !== undefined) {
