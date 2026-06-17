@@ -123,6 +123,11 @@
 4. 改动后：跑 lint + 相关测试；动了 `synapse/` 就补 changelog。
 5. **保持本文件最新**：架构/路线图/核心改动一旦变化，先更新 CLAUDE.md。
 6. 不确定的产品决策，问负责人，不要自己拍板大方向。
+7. **每完成一个可用版本就自动「提交 → 推送 → 给部署命令」，不用等催。** 客户端（`client/`）功能做好且本地 preview 验证通过后，依次：
+   - ① 重建产物：`cd client && npm run build`（`client/dist` 被 .gitignore，提交用 `git add -f client/dist`）；
+   - ② `git commit` + `git push origin main`（commit message 写清这次做了什么）；
+   - ③ 给负责人一段 **GCP 浏览器 SSH 一键部署命令**：拉代码 → `cp` dist 到 `/var/www/cosmac-app` → `nginx -t && reload` → 自检线上 JS hash。完整命令与踩坑见本机 `DEPLOY.md`（已 gitignore）。
+   - 纯后端操作（真建 / 整理 Matrix 频道等，只改服务器数据、不动 `client/` 代码）不必走部署，但要说明"无需部署"。
 
 ---
 
