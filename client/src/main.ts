@@ -1,6 +1,6 @@
 import { createApp } from 'vue'
-// 正式客户端的根组件 = 真实驾驶舱（连 Synapse 的 LiveView）。
-// 原来的 App.vue 是 mock 设计稿，保留在仓库里作参考，不再作为入口。
+// 当前部署的是"真实可用版"LiveView（真登录/真频道/真消息/真 AI/富卡）。
+// 演示稿完整 UI（App.vue + components + styles/tokens）保留在仓库，下一阶段逐块接真后切换回来。
 import App from './views/LiveView.vue'
 import './styles/index.css'
 

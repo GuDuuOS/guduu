@@ -18,7 +18,7 @@ export type { Confidential, AccessLevel }
 const visible = ref(false)
 
 /**
- * 主 AI（GuDuu 总控）的全局配置——区别于按频道的隔离配置。
+ * 主 AI（CosMac Star 总控）的全局配置——区别于按频道的隔离配置。
  * 总控 AI 统筹各「子智能体」、对接全平台数据、拥有更高额度与全局记忆。
  */
 const state = reactive({
@@ -61,7 +61,7 @@ const state = reactive({
     { label: '私域用户数据', level: '机密', access: '只读' }
   ] as DataScope[],
 
-  model: { model: 'GuDuu-Pro', tokenBudget: 5000, rateLimit: 600 } as ChannelModel,
+  model: { model: 'CosMac Star-Pro', tokenBudget: 5000, rateLimit: 600 } as ChannelModel,
 
   memory: { longTerm: true, scope: '全平台', retentionDays: 365, audit: true } as ChannelMemory
 })

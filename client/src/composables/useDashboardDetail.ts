@@ -212,7 +212,7 @@ function buildChart(spec: ChartSpec, dash: DashboardData): CardActionPayload {
     subtitle: dash.brand,
     variant: 'info',
     chartConfig: spec.build,
-    chartNote: '放大查看 · 数据由 GuDuu 实时汇总'
+    chartNote: '放大查看 · 数据由 CosMac Star 实时汇总'
   }
 }
 

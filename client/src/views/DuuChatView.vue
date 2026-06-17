@@ -6,14 +6,14 @@
           <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
         </svg>
       </button>
-      <ChannelTitleMenu title="GuDuu">
+      <ChannelTitleMenu title="CosMac Star">
         <div
           class="a bot"
           style="width:22px;height:22px;border-radius:5px;background:var(--text);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;margin-right:4px"
         >
           G
         </div>
-        GuDuu
+        CosMac Star
         <span class="bot-badge">机器人</span>
       </ChannelTitleMenu>
       <div class="topic">你的 AI 同事 · 可以问我任何关于公司的事</div>
@@ -34,7 +34,7 @@
 
     <MessageStream :days="days" />
     <Composer
-      channel-label="→ 与 GuDuu 私聊"
+      channel-label="→ 与 CosMac Star 私聊"
       placeholder="试试输入 / 调出命令，或自然语言提问..."
       :commands="slashCommands"
     />
@@ -53,7 +53,7 @@ import { useChannelAdmin } from '@/composables/useChannelAdmin'
 const days = duuMessages
 const fav = ref(false)
 const { visible: rightPanelVisible, toggle } = useRightPanel()
-useChannelAdmin().setCurrent('GuDuu')
+useChannelAdmin().setCurrent('CosMac Star')
 </script>
 
 <style scoped>

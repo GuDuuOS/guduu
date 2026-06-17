@@ -8,7 +8,7 @@
       <div class="pinned">
         <div class="ph">📌 PINNED</div>
         <div class="pc">
-          本频道由 <b>GuDuu</b> 7×24 实时维护。所有数据、账号状态、Agent 消息均来自接入的
+          本频道由 <b>CosMac Star</b> 7×24 实时维护。所有数据、账号状态、Agent 消息均来自接入的
           抖音 / 小红书 / 视频号 / 公众号 等平台。
         </div>
       </div>

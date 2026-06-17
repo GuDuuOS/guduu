@@ -257,7 +257,7 @@
               <ul><li v-for="(l, li) in sec.lines" :key="li">{{ l }}</li></ul>
             </div>
             <div class="ai-card-actions">
-              <button class="ai-card-btn" @click="notify('周报 PDF 已生成', 'GuDuu_数据周报_' + m.card.period.replace(/[^0-9/]/g, '') + '.pdf')">导出 PDF</button>
+              <button class="ai-card-btn" @click="notify('周报 PDF 已生成', 'CosMac Star_数据周报_' + m.card.period.replace(/[^0-9/]/g, '') + '.pdf')">导出 PDF</button>
               <button class="ai-card-btn ghost" @click="notify('已推送到「数据-涨粉复盘」频道')">推送到频道</button>
             </div>
           </div>
@@ -618,7 +618,7 @@
         </ul>
       </div>
       <div class="ai-side-sec">
-        <div class="ai-side-title">GuDuuOS · 上下文</div>
+        <div class="ai-side-title">CosMac StarOS · 上下文</div>
         <ul class="ai-ctx-list">
           <li><span class="ic">📄</span>Instructions · CLAUDE.md</li>
           <li><span class="ic">📊</span>全平台数据_2026Q2.xlsx</li>

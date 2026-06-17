@@ -177,7 +177,7 @@ const STEP_MS = 520
 /* ===== 候选人花名册（带关键词与推荐理由）===== */
 interface Roster { name: string; role: string; reason: string; always?: boolean; keys?: RegExp }
 const ROSTER: Roster[] = [
-  { name: 'GuDuu',     role: '总控',     reason: '总控协调（默认加入）', always: true },
+  { name: 'CosMac Star',     role: '总控',     reason: '总控协调（默认加入）', always: true },
   { name: '筱雨',      role: '主理人',   reason: '拍板 / 重大决策',     keys: /(选题|脚本|拍摄|发布|商单|定档|审核|预算)/ },
   { name: '小鹿',      role: '商务运营', reason: '商单 / 私域 / 合作',  keys: /(商单|品牌|合作|报价|私域|社群|合同|回款)/ },
   { name: '老周',      role: '摄影',     reason: '拍摄 / 现场',         keys: /(拍摄|拍|镜头|现场|场地|道具|布景)/ },

@@ -1,15 +1,15 @@
 <template>
   <div ref="root" class="tas-wrap">
     <!-- 品牌按键：九宫格 + logo + 产品名 -->
-    <button class="top-brand-btn" :class="{ open }" :title="`GuDuu OS · ${tenant.topbarSuffix}`" @click="open = !open">
+    <button class="top-brand-btn" :class="{ open }" :title="`CosMac OS · ${tenant.topbarSuffix}`" @click="open = !open">
       <svg class="apps-ic" width="18" height="18" viewBox="0 0 18 18" fill="currentColor" aria-hidden="true">
         <circle cx="3" cy="3" r="1.6" /><circle cx="9" cy="3" r="1.6" /><circle cx="15" cy="3" r="1.6" />
         <circle cx="3" cy="9" r="1.6" /><circle cx="9" cy="9" r="1.6" /><circle cx="15" cy="9" r="1.6" />
         <circle cx="3" cy="15" r="1.6" /><circle cx="9" cy="15" r="1.6" /><circle cx="15" cy="15" r="1.6" />
       </svg>
-      <img :src="logoUrl" alt="GuDuu" class="logo" />
+      <img :src="logoUrl" alt="CosMac Star" class="logo" />
       <span class="product-name">
-        GuDuu OS<span class="product-x">X</span>{{ tenant.topbarSuffix }}
+        CosMac OS<span class="product-x">X</span>{{ tenant.topbarSuffix }}
       </span>
     </button>
 
@@ -63,7 +63,7 @@
 
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import logoUrl from '@/assets/gudu-logo.svg'
+import logoUrl from '@/assets/cosmac-logo.png'
 import { useMarketplace } from '@/composables/useMarketplace'
 import { useCli } from '@/composables/useCli'
 import { useProfileHome } from '@/composables/useProfileHome'

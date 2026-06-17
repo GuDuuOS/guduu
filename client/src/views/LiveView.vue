@@ -14,6 +14,7 @@ import {
   type LiveRoom,
   type LiveMsg,
 } from '@/matrix/client'
+import logoUrl from '@/assets/cosmac-logo.png'
 
 const HS = 'https://hs.cosmac.cc'
 
@@ -135,7 +136,7 @@ onMounted(async () => {
   <!-- 驾驶舱 -->
   <div v-else class="shell">
     <header class="topbar">
-      <div class="brand">CosMac<span>Star</span></div>
+      <div class="brand"><img :src="logoUrl" class="brand-logo" alt="" />CosMac<span>Star</span></div>
       <div class="spacer" />
       <button class="ghost" @click="aiOpen = !aiOpen">{{ aiOpen ? '收起 AI' : '中枢 AI' }}</button>
       <div class="user">{{ me }}</div>
@@ -221,6 +222,8 @@ onMounted(async () => {
 .login { height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(180deg, #fffdfa, #f4efe8); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 .login-card { width: 320px; display: flex; flex-direction: column; gap: 12px; padding: 28px; background: #fff; border: 1px solid #eee; border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,.08); }
 .logo, .brand { font-weight: 800; font-size: 22px; color: #15120f; }
+.brand { display: inline-flex; align-items: center; gap: 8px; }
+.brand-logo { width: 26px; height: 26px; object-fit: contain; border-radius: 6px; }
 .logo span, .brand span { color: #f59e0b; margin-left: 4px; }
 .login-card input { padding: 11px 13px; border: 1px solid #ddd; border-radius: 10px; font-size: 14px; }
 .login-card button { padding: 11px; border: 0; border-radius: 10px; background: #15120f; color: #fff; font-size: 14px; cursor: pointer; }

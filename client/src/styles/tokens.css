@@ -3,35 +3,36 @@
      主区域 / ChannelHeader / 右栏 → 纯白"内容层"
      外框灰（TopBar / 两侧 rail / 频道侧栏）→ 统一一档可见的灰，把白色内容托出来
   */
-  --bg:          #ffffff;   /* 主区域、消息流、composer：纯白 */
-  --bg-soft:     #ebecef;   /* 两侧 rail（workspace / plugin）+ TopBar */
-  --bg-side:     #f4f4f6;   /* channel sidebar：比外框 rail 浅一档 */
-  --bg-panel:    #ffffff;   /* 卡片 / composer 输入框 / 右栏 */
-  --bg-code:     #eef0f3;
-  --bg-hover:    #dfe1e5;   /* 灰底上 hover：再深一档 */
-  --bg-active:   #d5d8de;   /* 灰底上 active：更深 */
+  /* === CosMac Star 暖色调（米白 + 橙 + 暖墨）=== */
+  --bg:          #ffffff;   /* 主区域、消息流、composer：纯白内容层 */
+  --bg-soft:     #f4efe8;   /* 两侧 rail + TopBar：暖米灰外框 */
+  --bg-side:     #faf7f2;   /* channel sidebar：暖米白 */
+  --bg-panel:    #fffdf8;   /* 卡片 / 输入框 / 右栏：暖白 */
+  --bg-code:     #f2eee8;
+  --bg-hover:    #f0ebe3;   /* 暖底 hover */
+  --bg-active:   #e7ddcd;   /* 暖底 active */
 
-  --text:        #1f2937;
-  --text-2:      #4b5563;
-  --text-3:      #6b7280;
-  --text-dim:    #9ca3af;
+  --text:        #15120f;   /* 暖墨近黑 */
+  --text-2:      #4a443e;
+  --text-3:      #706963;
+  --text-dim:    #b3aaa0;
 
-  --border:      #e5e7eb;
-  --border-soft: #eef0f3;
+  --border:      #e7e0d6;
+  --border-soft: #f0ebe3;
 
-  --accent:      #c96442;
-  --accent-soft: #fbe8df;
+  --accent:      #f59e0b;   /* 品牌橙 */
+  --accent-soft: #fff3e0;
   --warn:        #d97706;
-  --danger:      #dc2626;
+  --danger:      #d94f5c;
   --ok:          #16a34a;
-  --info:        #2563eb;
+  --info:        #c2761f;
 
-  /* Mattermost 风的 workspace 选中描边蓝 */
-  --ws-active:      #1c58d9;
-  --ws-active-soft: #e6edfa;
+  /* 选中描边：改用品牌橙（去掉原来的蓝） */
+  --ws-active:      #f59e0b;
+  --ws-active-soft: #fff3e0;
 
-  --action:      #1f2937;
-  --action-hover:#111827;
+  --action:      #15120f;   /* 深色按钮 */
+  --action-hover:#000000;
 
   /* === 字体栈：Mattermost Compass Design System === */
   /* body：Open Sans  /  heading：Metropolis  /  mono：等宽 */

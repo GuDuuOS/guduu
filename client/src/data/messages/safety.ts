@@ -8,7 +8,7 @@ const topicBot = {
 
 const duuBot = {
   type: 'bot' as const,
-  name: 'GuDuu',
+  name: 'CosMac Star',
   avatar: 'G'
 }
 
@@ -62,7 +62,7 @@ export const safetyMessages: DayMessages[] = [
         id: 's5',
         sender: { type: 'human', name: '筱雨', avatar: '雨', color: '#7a5a3a' },
         time: '08:24',
-        html: '@GuDuu 把本月已发内容按平台播放汇总成图给我看看。'
+        html: '@CosMac Star 把本月已发内容按平台播放汇总成图给我看看。'
       },
       {
         id: 's6',

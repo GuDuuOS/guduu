@@ -96,7 +96,7 @@ function buildDoc(label: string, ctx: CardActionCtx): CardActionPayload {
     subtitle: ctx.meta,
     variant: ctx.variant,
     sections: [],
-    footer: '// 演示视图 · 数据来自 GuDuu OS 关联系统'
+    footer: '// 演示视图 · 数据来自 CosMac OS 关联系统'
   }
   const sections: CardActionDocSection[] = []
   const kvt = kvTable(ctx)

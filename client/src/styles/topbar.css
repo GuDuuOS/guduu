@@ -38,8 +38,10 @@
 }
 
 .topbar .top-brand-btn .logo {
-  width: 22px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  border-radius: 7px;
   display: block;
   flex-shrink: 0;
   user-select: none;

@@ -6,7 +6,7 @@ export const duuMessages: DayMessages[] = [
     messages: [
       {
         id: 'd1',
-        sender: { type: 'bot', name: 'GuDuu', avatar: 'G' },
+        sender: { type: 'bot', name: 'CosMac Star', avatar: 'G' },
         time: '09:00',
         html: '早安，筱雨 👋<br/>试试输入 <code>/</code> 调出命令，或者直接问我任何关于账号 / 内容 / 商单的事。'
       }

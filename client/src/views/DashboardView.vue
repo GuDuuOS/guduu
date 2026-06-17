@@ -9,7 +9,7 @@
 
     <div class="canvas">
       <div class="ctitle">{{ dash.brand }}</div>
-      <div class="csub">// REAL-TIME OPERATIONAL CANVAS · 由 GuDuu 自动维护</div>
+      <div class="csub">// REAL-TIME OPERATIONAL CANVAS · 由 CosMac Star 自动维护</div>
 
       <CommandCenter />
 
