@@ -8,5 +8,8 @@ import App from './views/LiveView.vue'
 // 含旧蓝色 #154dc4）会与 LiveView 自带的同名 scoped 类名撞车、把暖色皮肤污染掉。
 import './styles/tokens.css'
 import './styles/reset.css'
+// LiveView 复刻了 DEMO 的弹窗功能，其中 DepartmentCreateModal 用了 useRouter()，
+// 故装上 router（LiveView 仍是根组件、不走 <router-view>，对用户无影响，只为让 useRouter 可用）。
+import { router } from './router'
 
-createApp(App).mount('#app')
+createApp(App).use(router).mount('#app')

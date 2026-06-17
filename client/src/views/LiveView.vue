@@ -30,6 +30,36 @@ import {
 import { tenant } from '@/config/tenant'
 import logoUrl from '@/assets/cosmac-logo.png'
 
+// ── 复刻 DEMO 的按键功能：直接复用演示版的弹窗/面板组件 + 它们的 composable ──
+// 这些组件都是"常驻挂载、内部 v-if(visible)"模式；按键只需调对应 composable 的 open()。
+import MarketplaceModal from '@/components/layout/MarketplaceModal.vue'
+import PluginStoreModal from '@/components/layout/PluginStoreModal.vue'
+import CustomAssetsModal from '@/components/layout/CustomAssetsModal.vue'
+import UserSettingsModal from '@/components/layout/UserSettingsModal.vue'
+import ProfileHome from '@/components/layout/ProfileHome.vue'
+import DepartmentCreateModal from '@/components/layout/DepartmentCreateModal.vue'
+import CliConsole from '@/components/layout/CliConsole.vue'
+import ChannelAdminModal from '@/components/channel/ChannelAdminModal.vue'
+// ChannelAdminModal / SystemAiModal 用 .cam-* 全局样式（前缀唯一，不和 LiveView 撞）
+import '@/styles/admin-modal.css'
+import { useMarketplace } from '@/composables/useMarketplace'
+import { useCli } from '@/composables/useCli'
+import { useProfileHome } from '@/composables/useProfileHome'
+import { useDepartmentCreate } from '@/composables/useDepartmentCreate'
+import { useChannelAdmin } from '@/composables/useChannelAdmin'
+import { usePluginStore } from '@/composables/usePluginStore'
+import { useCustomAssets } from '@/composables/useCustomAssets'
+import { useUserProfile, type UserSettingsTab } from '@/composables/useUserProfile'
+
+const { open: openMarket } = useMarketplace()
+const { open: openCli } = useCli()
+const { open: openProfileHome } = useProfileHome()
+const { open: openCreateDept } = useDepartmentCreate()
+const { open: openAdmin, setCurrent } = useChannelAdmin()
+const { open: openPluginStore } = usePluginStore()
+const { open: openAssets } = useCustomAssets()
+const { openSettings } = useUserProfile()
+
 const HS = 'https://hs.cosmac.cc'
 
 // ── 登录态 ──────────────────────────────────────────────
@@ -226,15 +256,19 @@ function onSearch() { toast('🔍 全局搜索', '搜索频道 / 消息 / 文件
 function onUpgrade() { toast('✦ 升级会员', 'Pro 版解锁全部 Agent 与无限额度（演示）') }
 function onMentions() { toast('@ 提及', '这里会列出所有 @ 你的消息（演示）') }
 function onBookmarks() { toast('🔖 收藏夹', '你收藏的消息 / 文件（演示）') }
-function onSettings() { toast('⚙ 设置', '账号 / 通知 / 外观设置（演示）'); userMenuOpen.value = false }
-function onMarket() { toast('🛒 AI Agent 商城', '挑选并安装智能体 / 插件（演示）'); appMenuOpen.value = false }
-function onCli() { toast('▸ CLI', '命令行控制台（演示）'); appMenuOpen.value = false }
-function onProfile() { toast('🏠 个人主页', '你的主页 / 名片（演示）'); appMenuOpen.value = false }
-function onAddWorkspace() { toast('＋ 新建工作区', '创建一个新的部门 / 工作区（演示）') }
+// ↓↓↓ 这些按键复刻 DEMO 真实（mock）功能：打开对应弹窗/面板 ↓↓↓
+function onSettings(tab?: UserSettingsTab) { openSettings(tab); userMenuOpen.value = false }
+function onMarket() { openMarket(); appMenuOpen.value = false }
+function onCli() { openCli(); appMenuOpen.value = false }
+function onProfile() { openProfileHome(); appMenuOpen.value = false; userMenuOpen.value = false }
+function onAddWorkspace() { openCreateDept() }
+function onPluginStore() { openPluginStore() }
+function onCustomAssets() { openAssets() }
+function onMembers() { setCurrent(currentName.value || '当前频道'); openAdmin(currentName.value || '当前频道') }
+// ↓↓↓ 这些 DEMO 本身也只是 toast 提示（无独立弹窗），保持一致 ↓↓↓
 function onAddChannel() { toast('＋ 新建频道', '在当前工作区创建频道（演示）') }
 function onInvite() { toast('＋ 邀请成员', '通过链接或 @ 邀请成员加入（演示）') }
 function onFilter() { toast('筛选频道', '按未读 / 私密过滤（演示，可直接在右侧输入框查找）') }
-function onMembers() { toast('👥 成员 · 技能 · 知识库 · 规则', '管理当前频道（演示）') }
 function onAttach() { toast('📎 附件', '支持图片 / 视频 / 文档（演示）') }
 function onEmoji() { toast('😊 表情') }
 
@@ -313,7 +347,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
         <button class="ic-btn" title="收藏" @click="onBookmarks">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2Z" /></svg>
         </button>
-        <button class="ic-btn" title="设置" @click="onSettings">
+        <button class="ic-btn" title="设置" @click="onSettings()">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>
         </button>
         <button class="ic-btn ai-toggle" :class="{ active: aiOpen }" :title="aiOpen ? '收起中枢 AI' : '展开中枢 AI'" @click="aiOpen = !aiOpen">
@@ -333,9 +367,9 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
               </div>
             </div>
             <div class="um-sep" />
-            <button class="um-item" @click="onProfile"><span class="um-ic">👤</span>个人资料</button>
-            <button class="um-item" @click="onSettings"><span class="um-ic">🔒</span>我的权限</button>
-            <button class="um-item" @click="onSettings"><span class="um-ic">🔔</span>通知偏好</button>
+            <button class="um-item" @click="onSettings('profile')"><span class="um-ic">👤</span>个人资料</button>
+            <button class="um-item" @click="onSettings('perms')"><span class="um-ic">🔒</span>我的权限</button>
+            <button class="um-item" @click="onSettings('share')"><span class="um-ic">🔔</span>数据调用授权</button>
             <div class="um-sep" />
             <button class="um-item danger" @click="doLogout"><span class="um-ic">⎋</span>退出登录</button>
           </div>
@@ -555,13 +589,23 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
       <nav v-if="!focused" class="plugin-rail">
         <div class="pr-list">
           <div class="pr-icon active" title="中枢 AI" @click="aiOpen = !aiOpen">智</div>
-          <div class="pr-icon plus" title="添加插件" @click="onMarket">+</div>
+          <div class="pr-icon plus" title="添加插件" @click="onPluginStore">+</div>
         </div>
         <div class="pr-divider" />
-        <div class="pr-icon assets" title="资产 · 自定义配置" @click="onMarket">◈</div>
-        <div class="pr-icon gear" title="插件商城" @click="onMarket">⚙</div>
+        <div class="pr-icon assets" title="资产 · 自定义配置" @click="onCustomAssets">◈</div>
+        <div class="pr-icon gear" title="插件商城" @click="onPluginStore">⚙</div>
       </nav>
     </div>
+
+    <!-- DEMO 弹窗/面板（常驻挂载，内部按各自 composable 的 visible 控制显隐）-->
+    <MarketplaceModal />
+    <PluginStoreModal />
+    <CustomAssetsModal />
+    <UserSettingsModal />
+    <ProfileHome />
+    <DepartmentCreateModal />
+    <CliConsole />
+    <ChannelAdminModal />
 
     <!-- toast -->
     <div class="toast-host">
