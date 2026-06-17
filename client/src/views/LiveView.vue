@@ -13,7 +13,7 @@
   纯装饰按钮（升级/提及/收藏/附件等）弹轻量 toast。配色沿用 CosMac 暖色（米白+橙+暖墨），走 tokens.css。
 -->
 <script setup lang="ts">
-import { ref, computed, reactive, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, reactive, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import {
   login,
   restoreSession,
@@ -197,6 +197,12 @@ function removeWsImage() {
   wsSetAvatarChange.value = ''
   wsSetAvatarPreview.value = ''
 }
+
+// 简称统一限制为「2 个字符」——按码点(visual char)算，中/英/日/韩/emoji 都是 2 个为上限。
+function clamp2(s: string): string {
+  return [...s].slice(0, 2).join('')
+}
+watch(wsSetLabel, (v) => { const c = clamp2(v); if (c !== v) wsSetLabel.value = c })
 // 当前工作区下的频道数（删除确认提示用）
 const wsChildCount = computed(() => (activeSpace.value ? roomIdsInSpace(activeSpace.value).size : 0))
 async function deleteWorkspace() {
@@ -279,6 +285,7 @@ const newWsOpen = ref(false)
 const newWsType = ref('制作')
 const newWsName = ref('')
 const newWsLabel = ref('')
+watch(newWsLabel, (v) => { const c = clamp2(v); if (c !== v) newWsLabel.value = c })
 const newWsPublic = ref(false)
 const newWsCreating = ref(false)
 const curWsType = computed(() => WS_TYPES.find((t) => t.key === newWsType.value) || WS_TYPES[0])
@@ -1032,8 +1039,8 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
         <!-- 简称 + 可见性 -->
         <div class="nw-row2">
           <div class="nw-col">
-            <div class="nw-field-label">简称（左栏图标，留空自动取）</div>
-            <input v-model="newWsLabel" class="nw-input" maxlength="3" :placeholder="newWsSpaceName ? wsLabel(newWsSpaceName) : '如 制作'" />
+            <div class="nw-field-label">简称（左栏图标，最多 2 字，留空自动取）</div>
+            <input v-model="newWsLabel" class="nw-input" :placeholder="newWsSpaceName ? wsLabel(newWsSpaceName) : '如 制作'" />
           </div>
           <div class="nw-col">
             <div class="nw-field-label">可见性</div>
@@ -1107,7 +1114,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
         <div class="nw-field-label">名称</div>
         <input v-model="wsSetName" class="nw-input" placeholder="工作区名称" @keyup.enter="saveWsSettings" />
         <div class="nw-field-label">简称（左栏图标，最多 2 字；上传图片后以图片为准）</div>
-        <input v-model="wsSetLabel" class="nw-input" maxlength="2" :placeholder="wsSetName ? wsLabel(wsSetName) : '如 制作'" />
+        <input v-model="wsSetLabel" class="nw-input" :placeholder="wsSetName ? wsLabel(wsSetName) : '如 制作'" />
 
         <div class="nw-field-label">图标（上传图片，可选）</div>
         <div class="nw-avatar-row">
