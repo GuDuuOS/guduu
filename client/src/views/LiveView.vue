@@ -1,10 +1,11 @@
-<!-- CosMac 客户端 ↔ Synapse 连接测试页（纵切片验证）。
-     访问 /#/live：真登录 → 看真实频道 → 收发真实消息 → 渲染 cosmac.card 富卡。
-     验证通过后，再把这套真实数据接进驾驶舱 UI。 -->
+<!-- CosMac Star 真实客户端驾驶舱：连 Synapse，真实频道 + 真实消息 + cosmac.card 富卡渲染。
+     这是正式客户端的起点（从干净实现长起来，逐步逼近设计稿），数据全部真实。 -->
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import {
   login,
+  restoreSession,
+  logout,
   onUpdate,
   listRooms,
   listMessages,
@@ -13,7 +14,6 @@ import {
   type LiveMsg,
 } from '@/matrix/client'
 
-// 线上后端（本地开发也连它；后端已开 CORS，本地可直连）
 const HS = 'https://hs.cosmac.cc'
 
 const user = ref('admin')
@@ -28,19 +28,27 @@ const currentRoom = ref('')
 const msgs = ref<LiveMsg[]>([])
 const draft = ref('')
 
+const currentName = computed(
+  () => rooms.value.find((r) => r.id === currentRoom.value)?.name || '',
+)
+
 function refresh() {
   rooms.value = listRooms()
   if (currentRoom.value) msgs.value = listMessages(currentRoom.value)
+}
+
+function afterLogin(uid: string) {
+  me.value = uid
+  loggedIn.value = true
+  onUpdate(refresh)
+  refresh()
 }
 
 async function doLogin() {
   error.value = ''
   loading.value = true
   try {
-    me.value = await login(HS, user.value.trim(), password.value)
-    loggedIn.value = true
-    onUpdate(refresh)
-    refresh()
+    afterLogin(await login(HS, user.value.trim(), password.value))
   } catch (e: any) {
     error.value = e?.message || String(e)
   } finally {
@@ -60,56 +68,97 @@ async function send() {
   await sendText(currentRoom.value, t)
   setTimeout(refresh, 400)
 }
+
+function doLogout() {
+  logout()
+  loggedIn.value = false
+  rooms.value = []
+  msgs.value = []
+  currentRoom.value = ''
+}
+
+function initials(name: string) {
+  const s = name.replace(/^@/, '')
+  return s.slice(0, 1).toUpperCase()
+}
+function isMe(s: string) {
+  return s === me.value
+}
+
+onMounted(async () => {
+  loading.value = true
+  try {
+    const uid = await restoreSession()
+    if (uid) afterLogin(uid)
+  } finally {
+    loading.value = false
+  }
+})
 </script>
 
 <template>
-  <div class="live">
-    <!-- 登录 -->
-    <div v-if="!loggedIn" class="login">
-      <h2>CosMac · 连接测试</h2>
+  <!-- 登录 -->
+  <div v-if="!loggedIn" class="login">
+    <div class="login-card">
+      <div class="logo">CosMac<span>Star</span></div>
       <input v-model="user" placeholder="用户名（如 admin）" />
       <input v-model="password" type="password" placeholder="密码" @keyup.enter="doLogin" />
       <button :disabled="loading" @click="doLogin">{{ loading ? '登录中…' : '登录' }}</button>
       <p class="err" v-if="error">登录失败：{{ error }}</p>
-      <p class="hint">连接后端：{{ HS }}</p>
+      <p class="hint">连接后端 {{ HS }}</p>
     </div>
+  </div>
 
-    <!-- 主体 -->
-    <div v-else class="app">
-      <aside class="rooms">
-        <div class="me">{{ me }}</div>
+  <!-- 驾驶舱 -->
+  <div v-else class="shell">
+    <header class="topbar">
+      <div class="brand">CosMac<span>Star</span></div>
+      <div class="spacer" />
+      <div class="user">{{ me }}</div>
+      <button class="ghost" @click="doLogout">退出</button>
+    </header>
+
+    <div class="body">
+      <aside class="sidebar">
+        <div class="side-title">频道</div>
         <div
           v-for="r in rooms"
           :key="r.id"
-          class="room"
+          class="chan"
           :class="{ active: r.id === currentRoom }"
           @click="openRoom(r.id)"
-        >{{ r.name }}</div>
-        <p v-if="!rooms.length" class="hint">还没有房间。去 app.cosmac.cc 建个群、邀请自己。</p>
+        >
+          <span class="hash">#</span>{{ r.name }}
+        </div>
+        <p v-if="!rooms.length" class="hint pad">还没有频道</p>
       </aside>
 
-      <main class="chat">
+      <main class="main">
+        <div v-if="currentRoom" class="chan-head"># {{ currentName }}</div>
         <div class="stream">
-          <div v-for="m in msgs" :key="m.id" class="msg">
-            <div class="who">{{ m.sender }}</div>
-            <div class="body">{{ m.body }}</div>
-            <!-- cosmac.card 富卡（Element 看不到，这里能渲染）-->
-            <div v-if="m.card" class="card">
-              <div class="card-title">🗂 {{ m.card.title }}</div>
-              <div class="card-sub">{{ m.card.subtitle }}</div>
-              <div v-for="(row, i) in (m.card.rows || [])" :key="i" class="card-row">
-                <span>{{ row.task }}</span>
-                <span :class="row.type">{{ row.owner }}</span>
+          <div v-for="m in msgs" :key="m.id" class="row" :class="{ mine: isMe(m.sender) }">
+            <div class="avatar">{{ initials(m.senderName) }}</div>
+            <div class="bubble-wrap">
+              <div class="who">{{ m.senderName }}</div>
+              <div class="bubble">{{ m.body }}</div>
+              <!-- cosmac.card 富卡：Element 看不到，这里渲染成卡片 -->
+              <div v-if="m.card" class="card">
+                <div class="card-title">🗂 {{ m.card.title }}</div>
+                <div class="card-sub" v-if="m.card.subtitle">{{ m.card.subtitle }}</div>
+                <div v-for="(rw, i) in (m.card.rows || [])" :key="i" class="card-row">
+                  <span>{{ rw.task }}</span>
+                  <span :class="rw.type">{{ rw.owner }}</span>
+                </div>
               </div>
             </div>
           </div>
-          <p v-if="currentRoom && !msgs.length" class="hint">这个房间还没有消息。</p>
-          <p v-if="!currentRoom" class="hint">← 选一个房间</p>
+          <p v-if="currentRoom && !msgs.length" class="hint pad">这个频道还没有消息</p>
+          <p v-if="!currentRoom" class="hint pad">← 选一个频道开始</p>
         </div>
-        <div class="composer" v-if="currentRoom">
+        <div v-if="currentRoom" class="composer">
           <input
             v-model="draft"
-            placeholder="说点什么；或试：CosMac 建专班 测试专班"
+            placeholder="说点什么；叫主 AI 干活试：CosMac 建专班 测试专班"
             @keyup.enter="send"
           />
           <button @click="send">发送</button>
@@ -120,29 +169,55 @@ async function send() {
 </template>
 
 <style scoped>
-.live { height: 100vh; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #15120f; }
-.login { max-width: 320px; margin: 14vh auto; display: flex; flex-direction: column; gap: 10px; }
-.login h2 { margin-bottom: 6px; }
-.login input, .login button { padding: 10px 12px; border-radius: 8px; border: 1px solid #ddd; font-size: 14px; }
-.login button { background: #15120f; color: #fff; cursor: pointer; border: 0; }
+* { box-sizing: border-box; }
+.login { height: 100vh; display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(180deg, #fffdfa, #f4efe8); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+.login-card { width: 320px; display: flex; flex-direction: column; gap: 12px; padding: 28px;
+  background: #fff; border: 1px solid #eee; border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,.08); }
+.logo, .brand { font-weight: 800; font-size: 22px; color: #15120f; }
+.logo span, .brand span { color: #f59e0b; margin-left: 4px; }
+.login-card input { padding: 11px 13px; border: 1px solid #ddd; border-radius: 10px; font-size: 14px; }
+.login-card button { padding: 11px; border: 0; border-radius: 10px; background: #15120f; color: #fff; font-size: 14px; cursor: pointer; }
 .err { color: #d94f5c; font-size: 13px; }
-.hint { color: #999; font-size: 12px; }
-.app { display: grid; grid-template-columns: 260px 1fr; height: 100vh; }
-.rooms { border-right: 1px solid #eee; overflow: auto; padding: 12px; }
-.me { font-size: 12px; color: #888; margin-bottom: 12px; word-break: break-all; }
-.room { padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 14px; }
-.room.active, .room:hover { background: #f2eee8; }
-.chat { display: flex; flex-direction: column; height: 100vh; }
-.stream { flex: 1; overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
-.msg .who { font-size: 12px; color: #888; }
-.msg .body { white-space: pre-wrap; }
-.card { margin-top: 6px; border: 1px solid #e7e0d6; border-radius: 12px; padding: 14px; background: #fffdf8; max-width: 440px; }
+.hint { color: #9b948c; font-size: 12px; }
+.hint.pad { padding: 16px; }
+
+.shell { height: 100vh; display: flex; flex-direction: column; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #15120f; }
+.topbar { display: flex; align-items: center; gap: 12px; height: 56px; padding: 0 16px; border-bottom: 1px solid #eee; background: #fffdfa; }
+.brand { font-size: 18px; }
+.spacer { flex: 1; }
+.user { font-size: 12px; color: #888; }
+.ghost { border: 1px solid #ddd; background: #fff; border-radius: 8px; padding: 6px 12px; cursor: pointer; font-size: 13px; }
+
+.body { flex: 1; display: grid; grid-template-columns: 240px 1fr; min-height: 0; }
+.sidebar { border-right: 1px solid #eee; overflow: auto; padding: 12px 8px; background: #faf7f2; }
+.side-title { font-size: 11px; font-weight: 800; color: #b3aaa0; letter-spacing: .08em; padding: 6px 10px; text-transform: uppercase; }
+.chan { display: flex; align-items: center; padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 14px; color: #4a443e; }
+.chan:hover { background: #f0ebe3; }
+.chan.active { background: #15120f; color: #fff; }
+.hash { color: #c0b8ad; margin-right: 6px; }
+.chan.active .hash { color: #8a8278; }
+
+.main { display: flex; flex-direction: column; min-height: 0; }
+.chan-head { height: 52px; display: flex; align-items: center; padding: 0 18px; border-bottom: 1px solid #eee; font-weight: 700; }
+.stream { flex: 1; overflow: auto; padding: 18px; display: flex; flex-direction: column; gap: 16px; background: #fff; }
+.row { display: flex; gap: 10px; max-width: 760px; }
+.row.mine { flex-direction: row-reverse; align-self: flex-end; }
+.avatar { width: 34px; height: 34px; border-radius: 50%; background: #15120f; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex: 0 0 auto; }
+.row.mine .avatar { background: #f59e0b; color: #1a1300; }
+.bubble-wrap { min-width: 0; }
+.who { font-size: 12px; color: #999; margin-bottom: 3px; }
+.row.mine .who { text-align: right; }
+.bubble { background: #f2eee8; padding: 9px 13px; border-radius: 12px; white-space: pre-wrap; word-break: break-word; }
+.row.mine .bubble { background: #fde7c2; }
+.card { margin-top: 8px; border: 1px solid #e7e0d6; border-radius: 12px; padding: 14px; background: #fffdf8; max-width: 440px; }
 .card-title { font-weight: 700; }
-.card-sub { font-size: 12px; color: #888; margin-bottom: 10px; }
-.card-row { display: flex; justify-content: space-between; padding: 6px 0; border-top: 1px dashed #eee; }
+.card-sub { font-size: 12px; color: #888; margin: 2px 0 10px; }
+.card-row { display: flex; justify-content: space-between; padding: 6px 0; border-top: 1px dashed #eee; font-size: 14px; }
 .card-row .ai { color: #5879ff; font-weight: 600; }
 .card-row .human { color: #c2761f; font-weight: 600; }
-.composer { display: flex; gap: 8px; padding: 12px; border-top: 1px solid #eee; }
-.composer input { flex: 1; padding: 10px 12px; border-radius: 8px; border: 1px solid #ddd; font-size: 14px; }
-.composer button { padding: 10px 18px; border-radius: 8px; border: 0; background: #15120f; color: #fff; cursor: pointer; }
+
+.composer { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid #eee; background: #fffdfa; }
+.composer input { flex: 1; padding: 11px 14px; border: 1px solid #ddd; border-radius: 12px; font-size: 14px; }
+.composer button { padding: 11px 20px; border: 0; border-radius: 12px; background: #15120f; color: #fff; cursor: pointer; }
 </style>
