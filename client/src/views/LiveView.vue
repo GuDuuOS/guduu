@@ -448,7 +448,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
         <div class="stream">
           <div v-for="m in msgs" :key="m.id" class="msg" :class="{ bot: isBot(m.sender), me: isMe(m.sender) }">
             <div class="ava">{{ isBot(m.sender) ? '智' : initials(m.senderName) }}</div>
-            <div class="body">
+            <div class="msg-body">
               <div class="head">
                 <span class="name">{{ m.senderName }}</span>
                 <span class="role" :class="isBot(m.sender) ? 'bot' : 'human'">{{ isBot(m.sender) ? 'AI' : '成员' }}</span>
@@ -710,13 +710,15 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 
 /* 消息流（扁平 Slack 风）*/
 .stream { flex: 1; overflow-y: auto; padding: 16px var(--content-pad-x) 20px; }
-.msg { display: flex; gap: 12px; padding: 8px 0; }
-.msg:hover { background: var(--bg-soft); margin: 0 -10px; padding: 8px 10px; border-radius: 4px; }
+.msg { display: flex; gap: 12px; padding: 8px 0; border-radius: 6px; }
+/* 平时不铺底色（保持干净白底）；只有未读 / 选中时才出现底色 */
+.msg.unread { background: var(--accent-soft); margin: 0 -10px; padding: 8px 10px; box-shadow: inset 3px 0 0 var(--accent); }
+.msg.selected { background: var(--bg-soft); margin: 0 -10px; padding: 8px 10px; }
 .msg .ava { width: 36px; height: 36px; border-radius: 6px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 13px; color: #fff; background: var(--text-3); position: relative; }
 .msg.me .ava { background: var(--accent); color: #1a1300; }
 .msg.bot .ava { background: var(--text); }
 .msg.bot .ava::after { content: ""; position: absolute; bottom: -1px; right: -1px; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg); }
-.msg .body { flex: 1; min-width: 0; }
+.msg .msg-body { flex: 1; min-width: 0; }
 .msg .head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px; }
 .msg .name { font-weight: var(--fw-bold); font-size: var(--fs-100); color: var(--text); }
 .msg .role { font-size: var(--fs-50); padding: 1px 6px; border-radius: 3px; background: var(--bg-code); color: var(--text-3); letter-spacing: .3px; }
