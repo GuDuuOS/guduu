@@ -124,15 +124,59 @@ export function onUpdate(cb: () => void): void {
   ;(mx as any).on('Room.timeline', () => cb())
 }
 
-/** 列出我加入的群频道（排除"中枢 AI"私聊和无名 DM；按名称排序）。 */
+/** 列出我加入的群频道（排除 Space 空间本身、"中枢 AI"私聊和无名 DM；按名称排序）。 */
 export function listRooms(): LiveRoom[] {
   if (!mx) return []
   return mx
     .getRooms()
+    // Space（工作区）本身不是频道，不进频道列表
+    .filter((r) => !(r as any).isSpaceRoom?.())
     .map((r) => ({ id: r.roomId, name: r.name || r.roomId }))
     // 中枢 AI 在右侧单独显示；无名 DM 的 name 会回退成对方 mxid（以 @ 开头），都不进频道列表
     .filter((r) => r.name !== '中枢 AI' && !r.name.startsWith('@'))
     .sort((a, b) => a.name.localeCompare(b.name, 'zh'))
+}
+
+/** 给 UI 用的工作区（Matrix Space）结构 */
+export interface LiveSpace {
+  id: string
+  name: string
+}
+
+/** 列出我加入的工作区（Space），按名称排序。 */
+export function listSpaces(): LiveSpace[] {
+  if (!mx) return []
+  return mx
+    .getRooms()
+    .filter((r) => (r as any).isSpaceRoom?.())
+    .map((r) => ({ id: r.roomId, name: r.name || r.roomId }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'zh'))
+}
+
+/** 取某个工作区(Space)下挂的频道 roomId 集合（读 m.space.child 状态事件）。 */
+export function roomIdsInSpace(spaceId: string): Set<string> {
+  const ids = new Set<string>()
+  const space = mx?.getRoom(spaceId)
+  if (!space) return ids
+  const evs = (space as any).currentState?.getStateEvents?.('m.space.child') || []
+  for (const ev of evs) {
+    const child = ev.getStateKey?.()
+    const via = ev.getContent?.()?.via
+    // via 为空 = 该子关系已被撤销
+    if (child && via && via.length) ids.add(child)
+  }
+  return ids
+}
+
+/** 真建一个工作区（Matrix Space）；返回 room_id。 */
+export async function createSpace(name: string): Promise<string> {
+  if (!mx) throw new Error('未登录')
+  const res: any = await mx.createRoom({
+    name,
+    preset: 'private_chat' as any,
+    creation_content: { type: 'm.space' } as any,
+  })
+  return res.room_id
 }
 
 /** 读某个频道当前时间线的消息（含发送者昵称与 cosmac.card 富卡）。 */
