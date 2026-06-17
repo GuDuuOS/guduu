@@ -86,15 +86,57 @@ class CosmacBot:
             if content.get("msgtype") != "m.text":
                 return  # 第一步只处理纯文本，图片/文件等以后再说
             user_text = content.get("body", "")
-            logger.info("[房间 %s] %s 说: %s", room_id, sender, user_text)
 
-            # 2a) 先看是不是"主 AI 控制 IM"的命令（建专班等）。命中就执行动作、不再走对话。
-            if self._try_handle_command(room_id, sender, user_text):
+            # 只在被 @ 提及主 AI 时才响应：
+            # 避免群里别人正常聊天误触发命令、或主 AI 对每条消息都刷屏。
+            if not self._is_bot_mentioned(content):
+                return
+            logger.info("[房间 %s] %s @我: %s", room_id, sender, user_text)
+
+            # 去掉开头的 @提及，拿到真正的指令/内容
+            text = self._strip_mention(user_text)
+
+            # 2a) 命令优先（建专班等）。命中就执行动作、不再走对话。
+            if self._try_handle_command(room_id, sender, text):
                 return
 
             # 2b) 否则当普通对话，喂给可配置的 AI 后端生成回复
-            reply = self.llm.complete([Message(role="user", content=user_text)])
+            reply = self.llm.complete([Message(role="user", content=text or user_text)])
             self.client.send_text(room_id, reply)
+
+    # —— @ 提及识别：只有被 @ 才响应 ——
+
+    def _bot_localpart(self) -> str:
+        """从完整用户 id（@guduu:cosmac.cc）取出 localpart（guduu）。"""
+        return self.config.bot_user_id.split(":", 1)[0].lstrip("@")
+
+    def _is_bot_mentioned(self, content: Dict[str, Any]) -> bool:
+        """判断这条消息是否 @ 了主 AI。"""
+        # 1) 现代客户端：标准 m.mentions.user_ids 字段（最可靠）
+        mentions = content.get("m.mentions") or {}
+        if self.config.bot_user_id in (mentions.get("user_ids") or []):
+            return True
+        # 2) 兜底：正文里直接出现 bot 的显示名 / 用户 id / @localpart
+        body = content.get("body", "") or ""
+        candidates = (
+            self.config.bot_user_id,
+            self.config.bot_displayname,
+            f"@{self._bot_localpart()}",
+        )
+        return any(c and c in body for c in candidates)
+
+    def _strip_mention(self, text: str) -> str:
+        """去掉消息开头的 @提及（显示名/用户id），留下真正的指令文本。"""
+        text = text.strip()
+        for token in (
+            self.config.bot_displayname,
+            self.config.bot_user_id,
+            f"@{self._bot_localpart()}",
+        ):
+            if token and text.startswith(token):
+                text = text[len(token):]
+                break
+        return text.lstrip(" :：,，")
 
     # —— 主 AI 的"手"：把指令落成真实的 IM 操作 ——
     # 第一步用确定性的斜杠命令验证"建群+拉人+发富卡"全链路；
