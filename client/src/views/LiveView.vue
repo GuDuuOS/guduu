@@ -40,7 +40,8 @@ const currentName = computed(
 )
 
 function refresh() {
-  rooms.value = listRooms()
+  // 左侧频道列表排除"中枢 AI"私聊（它在右侧面板单独显示）
+  rooms.value = listRooms().filter((r) => r.id !== aiRoom.value)
   if (currentRoom.value) msgs.value = listMessages(currentRoom.value)
   if (aiRoom.value) aiMsgs.value = listMessages(aiRoom.value)
 }

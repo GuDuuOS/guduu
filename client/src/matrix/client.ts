@@ -163,14 +163,18 @@ export function findBotDm(): string | null {
   return null
 }
 
-/** 确保存在一个和主 AI 的私聊房间：有就返回，没有就新建一个。 */
+const AI_ROOM_KEY = 'cosmac.aiRoom'
+
+/** 确保有一个专用的"中枢 AI"私聊房间：优先用记住的那个，否则新建一个并记住。 */
 export async function ensureBotDm(): Promise<string> {
-  const found = findBotDm()
-  if (found) return found
+  const saved = localStorage.getItem(AI_ROOM_KEY)
+  if (saved && mx?.getRoom(saved)) return saved
   const res: any = await mx!.createRoom({
+    name: '中枢 AI',
     preset: 'trusted_private_chat' as any,
     invite: [BOT_ID],
     is_direct: true,
   })
+  localStorage.setItem(AI_ROOM_KEY, res.room_id)
   return res.room_id
 }
