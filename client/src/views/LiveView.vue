@@ -29,6 +29,7 @@ import {
   createChannelInSpace,
   updateSpace,
   updateRoom,
+  leaveAndForget,
   inviteToRoom,
   normalizeUserId,
   BOT_ID,
@@ -159,12 +160,39 @@ const wsSetOpen = ref(false)
 const wsSetName = ref('')
 const wsSetLabel = ref('')
 const wsSetBusy = ref(false)
+const wsDeleteArm = ref(false) // 删除工作区的二次确认
 function openWsSettings() {
   if (!activeSpace.value) return
   const s = spaces.value.find((x) => x.id === activeSpace.value)
   wsSetName.value = s?.name || ''
   wsSetLabel.value = s?.label || ''
+  wsDeleteArm.value = false
   wsSetOpen.value = true
+}
+// 当前工作区下的频道数（删除确认提示用）
+const wsChildCount = computed(() => (activeSpace.value ? roomIdsInSpace(activeSpace.value).size : 0))
+async function deleteWorkspace() {
+  const id = activeSpace.value
+  if (!id || wsSetBusy.value) return
+  wsSetBusy.value = true
+  try {
+    // 先退出该工作区下的所有频道，再退出工作区本身
+    for (const cid of roomIdsInSpace(id)) {
+      try { await leaveAndForget(cid) } catch { /* 单个失败不阻断 */ }
+    }
+    await leaveAndForget(id)
+    toast('已删除工作区', wsSetName.value)
+    wsSetOpen.value = false
+    activeSpace.value = ''
+    setTimeout(() => {
+      refresh()
+      board.value = true; tasks.value = false; currentRoom.value = ''
+    }, 900)
+  } catch (e: any) {
+    toast('删除失败', e?.message || String(e))
+  } finally {
+    wsSetBusy.value = false
+  }
 }
 async function saveWsSettings() {
   const id = activeSpace.value
@@ -554,7 +582,6 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
       <input v-model="password" type="password" placeholder="密码" @keyup.enter="doLogin" />
       <button class="login-btn" :disabled="loading" @click="doLogin">{{ loading ? '登录中…' : '登录' }}</button>
       <p class="err" v-if="error">登录失败：{{ error }}</p>
-      <p class="hint">连接后端 {{ HS }}</p>
     </div>
   </div>
 
@@ -1057,6 +1084,21 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
         <div class="nw-preview" v-if="wsSetName.trim()">
           <div class="nw-prev-ws"><span class="nw-prev-ic">{{ wsSetLabel.trim() || wsLabel(wsSetName) }}</span>{{ wsSetName }}</div>
         </div>
+
+        <!-- 危险区：删除工作区 -->
+        <div class="nw-danger">
+          <template v-if="!wsDeleteArm">
+            <button class="nw-del-link" :disabled="wsSetBusy" @click="wsDeleteArm = true">删除工作区</button>
+          </template>
+          <template v-else>
+            <div class="nw-del-warn">确定删除「{{ wsSetName }}」及其 {{ wsChildCount }} 个频道？此操作不可撤销。</div>
+            <div class="nw-del-row">
+              <button class="nw-btn" :disabled="wsSetBusy" @click="wsDeleteArm = false">取消</button>
+              <button class="nw-btn danger" :disabled="wsSetBusy" @click="deleteWorkspace">{{ wsSetBusy ? '删除中…' : '确认删除' }}</button>
+            </div>
+          </template>
+        </div>
+
         <div class="nw-foot">
           <button class="nw-btn" :disabled="wsSetBusy" @click="wsSetOpen = false">取消</button>
           <button class="nw-btn primary" :disabled="!wsSetName.trim() || wsSetBusy" @click="saveWsSettings">{{ wsSetBusy ? '保存中…' : '保存' }}</button>
@@ -1405,6 +1447,13 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 .nw-btn.primary { background: var(--accent); border-color: var(--accent); color: #1a1300; font-weight: 700; }
 .nw-btn.primary:hover { filter: brightness(1.05); background: var(--accent); }
 .nw-btn.primary:disabled { background: var(--border); border-color: var(--border); color: var(--text-dim); cursor: not-allowed; }
+.nw-btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; font-weight: 700; }
+.nw-btn.danger:hover { filter: brightness(1.05); }
+.nw-danger { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border-soft); }
+.nw-del-link { background: transparent; border: 0; color: var(--danger); font-size: 13px; cursor: pointer; padding: 0; }
+.nw-del-link:hover { text-decoration: underline; }
+.nw-del-warn { font-size: 13px; color: var(--danger); line-height: 1.5; margin-bottom: 10px; }
+.nw-del-row { display: flex; gap: 10px; }
 
 /* ──── toast ──── */
 .toast-host { position: fixed; right: 18px; bottom: 18px; z-index: 200; display: flex; flex-direction: column; gap: 10px; }

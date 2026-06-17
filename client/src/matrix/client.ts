@@ -205,6 +205,13 @@ export async function createSpace(
   return sid
 }
 
+/** 退出并遗忘一个房间/工作区（leave + forget）。用于"删除工作区/频道"（客户端能做的是退出）。 */
+export async function leaveAndForget(roomId: string): Promise<void> {
+  if (!mx) throw new Error('未登录')
+  await mx.leave(roomId)
+  try { await (mx as any).forget(roomId) } catch { /* forget 失败不影响已退出 */ }
+}
+
 /** 改工作区(Space)的名称 / 简称。name→m.room.name；label→cosmac.workspace 状态。 */
 export async function updateSpace(
   spaceId: string,
