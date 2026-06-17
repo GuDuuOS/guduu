@@ -140,7 +140,7 @@ onMounted(async () => {
             <div class="avatar">{{ initials(m.senderName) }}</div>
             <div class="bubble-wrap">
               <div class="who">{{ m.senderName }}</div>
-              <div class="bubble">{{ m.body }}</div>
+              <div v-if="!m.card" class="bubble">{{ m.body }}</div>
               <!-- cosmac.card 富卡：Element 看不到，这里渲染成卡片 -->
               <div v-if="m.card" class="card">
                 <div class="card-title">🗂 {{ m.card.title }}</div>
