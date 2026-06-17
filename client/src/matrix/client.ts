@@ -227,6 +227,51 @@ export async function createChannelInSpace(
   return cid
 }
 
+/** 本服务器域名（从当前用户 id 取，如 @admin:cosmac.cc → cosmac.cc）。 */
+export function serverName(): string {
+  return (mx?.getUserId() || '').split(':')[1] || 'cosmac.cc'
+}
+
+/** 把"用户名"或"@用户名"规范成完整 Matrix id（@用户名:本服务器）。 */
+export function normalizeUserId(input: string): string {
+  const s = input.trim()
+  if (!s) return ''
+  if (s.startsWith('@')) return s
+  return `@${s.replace(/^@/, '')}:${serverName()}`
+}
+
+/** 邀请一个已有用户进某频道（标准 Matrix 邀请）。 */
+export async function inviteToRoom(roomId: string, userId: string): Promise<void> {
+  if (!mx) throw new Error('未登录')
+  await mx.invite(roomId, userId)
+}
+
+/**
+ * 用 Synapse Admin API 新建一个账号（需当前登录者是服务器管理员，如 @admin）。
+ * 返回完整用户 id。失败抛错（含状态码/原因）。
+ */
+export async function createUser(
+  username: string,
+  password: string,
+  displayname?: string,
+): Promise<string> {
+  if (!mx) throw new Error('未登录')
+  const uid = normalizeUserId(username)
+  const base = (mx as any).baseUrl as string
+  const token = (mx as any).getAccessToken?.() as string
+  const res = await fetch(`${base}/_synapse/admin/v2/users/${encodeURIComponent(uid)}`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password, displayname: displayname || username, admin: false }),
+  })
+  if (!res.ok) {
+    let msg = `${res.status}`
+    try { msg = (await res.json())?.error || msg } catch { /* ignore */ }
+    throw new Error(`建账号失败：${msg}`)
+  }
+  return uid
+}
+
 /** 读某个频道当前时间线的消息（含发送者昵称与 cosmac.card 富卡）。 */
 export function listMessages(roomId: string): LiveMsg[] {
   const room = mx?.getRoom(roomId)

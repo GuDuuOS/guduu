@@ -27,6 +27,8 @@ import {
   roomIdsInSpace,
   createSpace,
   createChannelInSpace,
+  inviteToRoom,
+  normalizeUserId,
   BOT_ID,
   type LiveRoom,
   type LiveMsg,
@@ -223,6 +225,35 @@ async function createChannel() {
   } finally {
     newChCreating.value = false
   }
+}
+
+// ── 成员管理（邀请已有用户进当前频道/工作区）──
+// 注：「新建账号」需走 Synapse Admin API，而 admin API 不对外代理、也不该把 admin token 暴露到浏览器，
+// 所以建账号留给后端（业务后台）做；这里先做能从客户端真跑通的「邀请已有用户」。
+const memberOpen = ref(false)
+const inviteUserInput = ref('')
+const memberBusy = ref(false)
+// 邀请目标：优先当前打开的频道，否则当前工作区(Space)
+const memberTarget = computed(() => {
+  if (currentRoom.value) return { id: currentRoom.value, name: `#${currentName.value}` }
+  if (activeSpace.value) return { id: activeSpace.value, name: `${activeSpaceName.value} 工作区` }
+  return null
+})
+function openMembers() {
+  inviteUserInput.value = ''; memberOpen.value = true
+}
+async function doInvite() {
+  const t = memberTarget.value
+  const uid = normalizeUserId(inviteUserInput.value)
+  if (!t || !uid || memberBusy.value) return
+  memberBusy.value = true
+  try {
+    await inviteToRoom(t.id, uid)
+    toast('已邀请', `${uid} → ${t.name}`)
+    inviteUserInput.value = ''
+  } catch (e: any) {
+    toast('邀请失败', e?.message || String(e))
+  } finally { memberBusy.value = false }
 }
 
 // 频道列表：按当前工作区过滤 + 关键词筛选
@@ -636,7 +667,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
                 <span class="cs-dm-av bot">智<span class="dot-online" /></span>
                 <span class="cs-label">中枢 AI</span>
               </div>
-              <div class="cs-item cs-add-row" @click="onInvite">
+              <div class="cs-item cs-add-row" @click="openMembers">
                 <span class="cs-ic-box"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5v14" /></svg></span>
                 <span class="cs-label">邀请成员</span>
               </div>
@@ -935,6 +966,30 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
         <div class="nw-foot">
           <button class="nw-btn" :disabled="newChCreating" @click="newChOpen = false">取消</button>
           <button class="nw-btn primary" :disabled="!newChName.trim() || newChCreating" @click="createChannel">{{ newChCreating ? '创建中…' : '创建' }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 成员管理：邀请已有用户进当前频道/工作区（真功能 · Matrix invite）-->
+    <div v-if="memberOpen" class="nw-overlay" @click.self="memberOpen = false">
+      <div class="nw-modal">
+        <div class="nw-title">邀请成员</div>
+        <div class="nw-sub">
+          邀请进：<b v-if="memberTarget">{{ memberTarget.name }}</b><span v-else class="nw-warn">请先打开一个频道</span>
+        </div>
+
+        <div class="nw-field-label">用户名</div>
+        <div class="nw-inline">
+          <input v-model="inviteUserInput" class="nw-input" placeholder="用户名 或 @用户:cosmac.cc" @keyup.enter="doInvite" />
+          <button class="nw-btn primary" :disabled="!inviteUserInput.trim() || !memberTarget || memberBusy" @click="doInvite">{{ memberBusy ? '邀请中…' : '邀请' }}</button>
+        </div>
+
+        <div class="nw-note">
+          💡 <b>新建账号 / 邀请链接</b> 需要后端支持（Synapse Admin API 不对外开放，不能从浏览器用管理员令牌建号），放到后续「成员管理后台」模块做。现在可邀请<b>已有账号</b>的用户。
+        </div>
+
+        <div class="nw-foot">
+          <button class="nw-btn" :disabled="memberBusy" @click="memberOpen = false">关闭</button>
         </div>
       </div>
     </div>
@@ -1239,6 +1294,14 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 .nw-prev-ic { width: 24px; height: 24px; border-radius: 7px; background: var(--action); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; }
 .nw-prev-ch { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); padding: 3px 0 3px 6px; }
 .nw-prev-tip { font-size: 10px; color: var(--text-3); background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; padding: 0 6px; }
+.nw-inline { display: flex; gap: 8px; }
+.nw-inline .nw-input { flex: 1; }
+.nw-inline .nw-btn { flex-shrink: 0; }
+.nw-divider { height: 1px; background: var(--border-soft); margin: 16px 0 4px; }
+.nw-check { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; color: var(--text-2); cursor: pointer; }
+.nw-check input { width: 15px; height: 15px; accent-color: var(--accent); }
+.nw-warn { color: var(--warn); }
+.nw-note { margin-top: 14px; background: var(--accent-soft); border: 1px solid #f4e0bd; border-radius: 10px; padding: 10px 12px; font-size: 12px; line-height: 1.6; color: var(--text-2); }
 .nw-foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 .nw-btn { height: 36px; padding: 0 16px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg-panel); color: var(--text-2); font-size: 14px; cursor: pointer; }
 .nw-btn:hover { background: var(--bg-hover); color: var(--text); }
