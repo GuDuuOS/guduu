@@ -110,33 +110,44 @@ class CosmacBot:
         """从完整用户 id（@guduu:cosmac.cc）取出 localpart（guduu）。"""
         return self.config.bot_user_id.split(":", 1)[0].lstrip("@")
 
+    def _mention_tokens(self) -> List[str]:
+        """所有"算作在叫主 AI"的开头词（大小写不敏感比较）。
+
+        这样用户不用跟 Element 的 @ 弹窗较劲——消息开头直接打 'CosMac' 即可。
+        """
+        lp = self._bot_localpart()
+        return [
+            self.config.bot_user_id,        # @guduu:cosmac.cc（@pill）
+            f"@{lp}",                        # @guduu
+            self.config.bot_displayname,     # CosMac Star
+            "CosMac Star",
+            "@CosMac",
+            "CosMac",                        # 直接打名字开头就算叫它
+        ]
+
     def _is_bot_mentioned(self, content: Dict[str, Any]) -> bool:
-        """判断这条消息是否 @ 了主 AI。"""
+        """判断这条消息是否在叫主 AI（被 @ 或以它的名字开头）。"""
         # 1) 现代客户端：标准 m.mentions.user_ids 字段（最可靠）
         mentions = content.get("m.mentions") or {}
         if self.config.bot_user_id in (mentions.get("user_ids") or []):
             return True
-        # 2) 兜底：正文里直接出现 bot 的显示名 / 用户 id / @localpart
-        body = content.get("body", "") or ""
-        candidates = (
-            self.config.bot_user_id,
-            self.config.bot_displayname,
-            f"@{self._bot_localpart()}",
-        )
-        return any(c and c in body for c in candidates)
+        body = (content.get("body") or "").strip()
+        low = body.lower()
+        # 2) 以 bot 名字 / @ 开头 = 在叫它
+        if any(low.startswith(t.lower()) for t in self._mention_tokens()):
+            return True
+        # 3) 正文里出现完整用户 id（@pill）
+        return self.config.bot_user_id in body
 
     def _strip_mention(self, text: str) -> str:
-        """去掉消息开头的 @提及（显示名/用户id），留下真正的指令文本。"""
+        """去掉开头的"叫它"前缀（@pill / 名字），留下真正的指令文本。"""
         text = text.strip()
-        for token in (
-            self.config.bot_displayname,
-            self.config.bot_user_id,
-            f"@{self._bot_localpart()}",
-        ):
-            if token and text.startswith(token):
+        low = text.lower()
+        for token in self._mention_tokens():
+            if low.startswith(token.lower()):
                 text = text[len(token):]
                 break
-        return text.lstrip(" :：,，")
+        return text.lstrip(" :：,，@")
 
     # —— 主 AI 的"手"：把指令落成真实的 IM 操作 ——
     # 第一步用确定性的斜杠命令验证"建群+拉人+发富卡"全链路；
