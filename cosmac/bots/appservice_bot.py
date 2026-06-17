@@ -80,7 +80,7 @@ class CosmacBot:
                 self.client.join_room(room_id)
             return
 
-        # 2) 群里的文本消息 → 喂给 AI，生成回复并发回群
+        # 2) 群里的文本消息
         if event_type == "m.room.message":
             content = event.get("content", {})
             if content.get("msgtype") != "m.text":
@@ -88,9 +88,61 @@ class CosmacBot:
             user_text = content.get("body", "")
             logger.info("[房间 %s] %s 说: %s", room_id, sender, user_text)
 
-            # 调用可配置的 AI 后端生成回复
+            # 2a) 先看是不是"主 AI 控制 IM"的命令（建专班等）。命中就执行动作、不再走对话。
+            if self._try_handle_command(room_id, sender, user_text):
+                return
+
+            # 2b) 否则当普通对话，喂给可配置的 AI 后端生成回复
             reply = self.llm.complete([Message(role="user", content=user_text)])
             self.client.send_text(room_id, reply)
+
+    # —— 主 AI 的"手"：把指令落成真实的 IM 操作 ——
+    # 第一步用确定性的斜杠命令验证"建群+拉人+发富卡"全链路；
+    # 第二步会换成 LLM 工具调用，让自然语言自动触发这些动作。
+
+    def _try_handle_command(self, room_id: str, sender: str, text: str) -> bool:
+        """识别并执行 IM 控制命令。命中返回 True，否则 False（交回对话处理）。
+
+        目前支持：
+            /专班 <名字>   → 新建专班群、把发起人拉进去、并发一张派单富卡
+        """
+        text = text.strip()
+        if text.startswith("/专班"):
+            name = text[len("/专班"):].strip() or "新专班"
+            self._launch_campaign(room_id, sender, name)
+            return True
+        return False
+
+    def _launch_campaign(self, origin_room: str, requester: str, name: str) -> None:
+        """建一个专班群、拉发起人进来，并在群里发一张"派单"富卡。"""
+        new_room = self.client.create_room(name, invitees=[requester])
+        if not new_room:
+            self.client.send_text(origin_room, f"抱歉，建专班「{name}」失败了，请稍后再试。")
+            return
+
+        # 派单富卡：body 是纯文本兜底（Element 显示这个），card 是结构化数据（CosMac 客户端渲染）
+        card = {
+            "kind": "dispatch",
+            "title": f"{name} · 专班已建立",
+            "subtitle": "由 CosMac Star 中枢自动派单",
+            "rows": [
+                {"task": "选题锁定", "owner": "选题 Agent", "type": "ai"},
+                {"task": "脚本撰写", "owner": "文案 Agent", "type": "ai"},
+                {"task": "数据排期", "owner": "数据 Agent", "type": "ai"},
+                {"task": "拍板确认", "owner": requester, "type": "human"},
+            ],
+        }
+        body = (
+            f"【{name}】专班已建立，派单如下：\n"
+            "· 选题锁定 → 选题 Agent\n"
+            "· 脚本撰写 → 文案 Agent\n"
+            "· 数据排期 → 数据 Agent\n"
+            f"· 拍板确认 → {requester}"
+        )
+        self.client.send_card(new_room, body, card)
+        self.client.send_text(
+            origin_room, f"已为你建立专班「{name}」并把你拉进群，派单已发到新群里。"
+        )
 
 
 class _Handler(BaseHTTPRequestHandler):

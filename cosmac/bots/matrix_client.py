@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
 import requests
@@ -90,3 +90,60 @@ class MatrixClient:
                 logger.warning("设置显示名失败: %s %s", resp.status_code, resp.text)
         except requests.RequestException as exc:
             logger.warning("设置显示名异常: %s", exc)
+
+    # —— 主 AI 操作 IM 的能力（"手"）：建群 / 拉人 / 发富卡 ——
+
+    def create_room(self, name: str, invitees: Optional[List[str]] = None) -> Optional[str]:
+        """新建一个房间（专班群），可在创建时直接邀请一批用户。
+
+        参数：
+            name:     房间显示名（如"爆款专班·职场"）。
+            invitees: 创建时就邀请的用户 id 列表（如 ["@admin:cosmac.cc"]）。
+        返回：成功返回新房间 room_id，失败返回 None。
+        """
+        url = self._url("/_matrix/client/v3/createRoom")
+        body: Dict[str, Any] = {"name": name, "preset": "private_chat"}
+        if invitees:
+            body["invite"] = invitees
+        resp = requests.post(url, json=body, timeout=15)
+        if resp.status_code == 200:
+            room_id = resp.json().get("room_id")
+            logger.info("已创建房间 %s (%s)", name, room_id)
+            return room_id
+        logger.warning("创建房间失败: %s %s", resp.status_code, resp.text)
+        return None
+
+    def invite_user(self, room_id: str, user_id: str) -> None:
+        """把某用户邀请进房间。"""
+        url = self._url(f"/_matrix/client/v3/rooms/{quote(room_id)}/invite")
+        resp = requests.post(url, json={"user_id": user_id}, timeout=10)
+        if resp.status_code == 200:
+            logger.info("已邀请 %s 进 %s", user_id, room_id)
+        else:
+            logger.warning(
+                "邀请 %s 进 %s 失败: %s %s", user_id, room_id, resp.status_code, resp.text
+            )
+
+    def send_card(self, room_id: str, body: str, card: Dict[str, Any]) -> Optional[str]:
+        """往房间发一条"富卡"消息。
+
+        Matrix 协议不能改，所以用标准 m.room.message 承载：
+        - body：纯文本兜底，Element 等不认识富卡的客户端只显示这段文字。
+        - cosmac.card：自定义字段（命名空间 cosmac.*，不与协议的 m.* 冲突），
+          CosMac 自己的客户端据此把它渲染成结构化富卡。
+        返回 event_id 或 None。
+        """
+        txn = self._txn_id()
+        url = self._url(
+            f"/_matrix/client/v3/rooms/{quote(room_id)}/send/m.room.message/{txn}"
+        )
+        payload: Dict[str, Any] = {
+            "msgtype": "m.text",
+            "body": body,
+            "cosmac.card": card,
+        }
+        resp = requests.put(url, json=payload, timeout=10)
+        if resp.status_code == 200:
+            return resp.json().get("event_id")
+        logger.warning("发送富卡失败: %s %s", resp.status_code, resp.text)
+        return None
