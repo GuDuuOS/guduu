@@ -1,0 +1,210 @@
+import { computed, reactive, ref } from 'vue'
+import {
+  channelMembers,
+  channelSkills,
+  channelKnowledge,
+  channelRules,
+  type ChannelInfoItem
+} from '@/data/channels'
+import { tenant } from '@/config/tenant'
+import type { Member } from '@/types/channel'
+
+/** 频道管理弹窗的可见状态 */
+const visible = ref(false)
+
+/* ===== 隔离配置的类型 ===== */
+export type Confidential = '公开' | '内部' | '机密'
+export type AccessLevel = '禁用' | '只读' | '读写'
+
+export interface DataScope { label: string; level: Confidential; access: AccessLevel }
+export interface ChannelPersona { aiName: string; tone: string; prompt: string }
+export interface ChannelModel { model: string; tokenBudget: number; rateLimit: number }
+export interface ChannelMemory { longTerm: boolean; scope: '仅本群' | '本工作室' | '全平台'; retentionDays: number; audit: boolean }
+
+export const MODEL_OPTIONS = ['GuDuu-Pro', 'GuDuu-Lite', 'GuDuu-文案微调', 'GuDuu-Vision(封面识别)']
+
+/** 成员可被本群调取的数据项 */
+export interface MemberDatum { label: string; value: string; selected: boolean }
+export type AdminMember = Member & { data: MemberDatum[] }
+
+/** 一个群的完整隔离配置 */
+export interface GroupConfig {
+  members: AdminMember[]
+  skills: ChannelInfoItem[]
+  knowledge: ChannelInfoItem[]
+  rules: ChannelInfoItem[]
+  dataScopes: DataScope[]
+  persona: ChannelPersona
+  model: ChannelModel
+  memory: ChannelMemory
+}
+
+/* ===== 成员数据池（带领域标签，按群所属领域决定默认可调取项）===== */
+interface PoolItem { label: string; value: string; dom: string[] } // dom 含 '*' 表示所有群
+const MEMBER_POOL: Record<string, PoolItem[]> = {
+  'GuDuu': [
+    { label: 'AI 今日处理', value: '1,056 项', dom: ['*'] },
+    { label: '自动起草', value: '38 篇', dom: ['*'] },
+    { label: '节省工时', value: '6 小时', dom: ['*'] }
+  ],
+  '选题 Agent': [
+    { label: '今日入库选题', value: '8 条', dom: ['*'] },
+    { label: '热点命中', value: '3 条', dom: ['*'] },
+    { label: '对标账号', value: '86 个', dom: ['*'] }
+  ],
+  '数据 Agent': [
+    { label: '今日总播放', value: '8.6w', dom: ['*'] },
+    { label: '本月涨粉', value: '+12,480', dom: ['*'] },
+    { label: '平均完播率', value: '31%', dom: ['*'] }
+  ],
+  '文案 Agent': [
+    { label: '生成标题', value: '42 个', dom: ['*'] },
+    { label: '脚本初稿', value: '6 篇', dom: ['*'] },
+    { label: '合规自检', value: '通过', dom: ['*'] }
+  ],
+  '筱雨': [
+    { label: '全平台粉丝', value: '98.3w', dom: ['*'] },
+    { label: '本月商单', value: '2 单', dom: ['*'] },
+    { label: '本月收入', value: '¥ 4.8w', dom: ['*'] },
+    { label: '待发布', value: '4 条', dom: ['*'] }
+  ],
+  '小鹿': [
+    { label: '商单线索', value: '5 条', dom: ['*'] },
+    { label: '在谈合作', value: '3 个', dom: ['*'] },
+    { label: '私域社群', value: '1,480 人', dom: ['*'] }
+  ],
+  '老周': [
+    { label: '本周拍摄', value: '3 条', dom: ['*'] },
+    { label: '素材待剪', value: '5 条', dom: ['*'] }
+  ],
+  '阿杰': [
+    { label: '本周交付', value: '4 条', dom: ['*'] },
+    { label: '剪辑队列', value: '2 条', dom: ['*'] },
+    { label: '平均工期', value: '1.5 天', dom: ['*'] }
+  ]
+}
+
+/** 由频道名判断所属场景（决定成员默认可调取哪些数据）*/
+function domainOf(g: string): string {
+  if (/数据|涨粉|复盘|播放|增长/.test(g)) return 'data'
+  if (/选题|灵感|热点|对标/.test(g)) return 'topic'
+  if (/商单|合作|合同|报价|私域|社群|品牌/.test(g)) return 'biz'
+  if (/脚本|文案|分镜|成片|标题|交付/.test(g)) return 'content'
+  return 'general'
+}
+
+function memberDataForGroup(groupName: string, name: string): MemberDatum[] {
+  const dom = domainOf(groupName)
+  const pool = MEMBER_POOL[name] ?? []
+  const items = pool.map((d) => ({ label: d.label, value: d.value, selected: d.dom.includes('*') || d.dom.includes(dom) }))
+  if (items.length && !items.some((d) => d.selected)) items[0].selected = true
+  return items
+}
+
+/* ===== 其余配置的基础模板（各群独立克隆一份）===== */
+const BASE_DATASCOPES: DataScope[] = [
+  { label: '抖音创作者后台', level: '内部', access: '只读' },
+  { label: '小红书蒲公英',   level: '内部', access: '只读' },
+  { label: '视频号助手',     level: '内部', access: '只读' },
+  { label: '公众号后台',     level: '内部', access: '只读' },
+  { label: '商单合同库',     level: '机密', access: '禁用' },
+  { label: '私域用户数据',   level: '机密', access: '禁用' }
+]
+const BASE_PERSONA: ChannelPersona = {
+  aiName: 'GuDuu',
+  tone: '懂内容 · 数据优先',
+  prompt: `你是${tenant.aiOwner}的${tenant.productName}助手，基于接入的各平台数据与创作素材作答；给出建议须标注数据依据，发布、商单报价等对外动作必须经筱雨确认后执行。`
+}
+const BASE_MODEL: ChannelModel = { model: 'GuDuu-Pro', tokenBudget: 500, rateLimit: 60 }
+const BASE_MEMORY: ChannelMemory = { longTerm: true, scope: '仅本群', retentionDays: 90, audit: true }
+
+/** 为某个群生成一份独立配置（成员数据按群领域预选）*/
+function seedConfig(groupName: string): GroupConfig {
+  return {
+    members: channelMembers.map((m) => ({ ...m, data: memberDataForGroup(groupName, m.name) })) as AdminMember[],
+    skills: channelSkills.map((s) => ({ ...s })),
+    knowledge: channelKnowledge.map((k) => ({ ...k })),
+    rules: channelRules.map((r) => ({ ...r })),
+    dataScopes: BASE_DATASCOPES.map((d) => ({ ...d })),
+    persona: { ...BASE_PERSONA },
+    model: { ...BASE_MODEL },
+    memory: { ...BASE_MEMORY }
+  }
+}
+
+/* ===== 按群名存储的配置（每个群一份，互不影响）===== */
+const configs = reactive<Record<string, GroupConfig>>({ 本群: seedConfig('本群') })
+/** 当前正在查看/管理的群名 */
+const currentKey = ref('本群')
+const current = computed(() => configs[currentKey.value] ?? configs['本群'])
+
+function ensure(name: string) {
+  if (!configs[name]) configs[name] = seedConfig(name)
+}
+/** 切换当前群（频道视图挂载、或打开弹窗时调用）*/
+function setCurrent(name?: string) {
+  const k = name?.trim()
+  if (!k) return
+  ensure(k)
+  currentKey.value = k
+}
+
+/** 代理到当前群配置，使既有消费方（用 state.xxx）无需改动 */
+const state = {
+  get members() { return current.value.members },
+  get skills() { return current.value.skills },
+  get knowledge() { return current.value.knowledge },
+  get rules() { return current.value.rules },
+  get dataScopes() { return current.value.dataScopes },
+  get persona() { return current.value.persona },
+  get model() { return current.value.model },
+  get memory() { return current.value.memory }
+}
+
+const AVATAR_COLORS = ['#7a5a3a', '#5a7a8a', '#a07050', '#7a8a5a', '#8a6a8a', '#6a8a7a']
+
+export function useChannelAdmin() {
+  return {
+    visible,
+    state,
+    /** 当前群名（用于文案"被本群调取"）*/
+    groupName: currentKey,
+    setCurrent,
+    open: (name?: string) => {
+      setCurrent(name)
+      visible.value = true
+    },
+    close: () => { visible.value = false },
+
+    addMember(name: string, role: string) {
+      const n = name.trim()
+      if (!n) return
+      current.value.members.push({
+        name: n,
+        role: role.trim() || '成员',
+        avatar: [...n][0] ?? '?',
+        color: AVATAR_COLORS[current.value.members.length % AVATAR_COLORS.length],
+        online: true,
+        data: []
+      })
+    },
+    removeMember(i: number) { current.value.members.splice(i, 1) },
+
+    addItem(kind: 'skills' | 'knowledge' | 'rules', label: string, desc: string, tag?: string) {
+      const l = label.trim()
+      if (!l) return
+      const item: ChannelInfoItem = { label: l }
+      if (desc.trim()) item.desc = desc.trim()
+      if (tag && tag.trim()) item.tag = tag.trim()
+      current.value[kind].push(item)
+    },
+    removeItem(kind: 'skills' | 'knowledge' | 'rules', i: number) { current.value[kind].splice(i, 1) },
+
+    addScope(label: string, level: Confidential, access: AccessLevel) {
+      const l = label.trim()
+      if (!l) return
+      current.value.dataScopes.push({ label: l, level, access })
+    },
+    removeScope(i: number) { current.value.dataScopes.splice(i, 1) }
+  }
+}

@@ -1,0 +1,37 @@
+import { ref } from 'vue'
+import { useRightPanel } from '@/composables/useRightPanel'
+
+/** AI 助手侧栏的可见状态 */
+const visible = ref(false)
+/** dock 模式下：是否展开（720px 浮层） */
+const expanded = ref(false)
+/** 浮窗模式：完全脱离 dock，居中漂在页面上、可拖拽 */
+const floating = ref(false)
+
+/** 打开主 AI 时，自动收起右侧「关于此频道」面板，避免两栏挤占空间 */
+function closeRightPanel() {
+  useRightPanel().hide()
+}
+
+export function useAiPanel() {
+  return {
+    visible,
+    expanded,
+    floating,
+    show:           () => { visible.value = true; closeRightPanel() },
+    hide:           () => { visible.value = false; expanded.value = false; floating.value = false },
+    toggle:         () => {
+      visible.value = !visible.value
+      if (visible.value) closeRightPanel()
+      else { expanded.value = false; floating.value = false }
+    },
+    toggleExpanded: () => {
+      expanded.value = !expanded.value
+      if (expanded.value) floating.value = false
+    },
+    toggleFloating: () => {
+      floating.value = !floating.value
+      if (floating.value) expanded.value = false
+    }
+  }
+}
