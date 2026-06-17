@@ -7,6 +7,12 @@
 
 ---
 
+## 2026-06-18 — 客户端：工作区图标支持上传图片 + 简称限 2 字
+- 工作区设置：简称 maxlength 3→**2**；简称下方加**上传图片**做工作区图标（上传/更换/移除），有图用图、无图回退简称文字。
+- 头像走 Matrix 标准：`uploadContent` → mxc → 存 `m.room.avatar`；显示用 `mxcUrlToHttp`(走 /_matrix/media，已代理)。左栏图标、设置弹窗预览都识别。
+- `client.ts` 加 `uploadMedia` / `mxcToHttp` / `spaceAvatar`，`updateSpace` 支持 avatar(undefined不动/''清空/mxc设置)，`LiveSpace.avatarUrl`。
+- 端到端验证：上传测试图→左栏图标变图片→移除→回退文字，无残留。
+
 ## 2026-06-18 — 客户端：工作区"删除"改成按钮（UI 细节）
 - 「删除工作区」从上方红色小字 → 改为底部页脚**左侧的红框按钮**（取消/保存在右侧）；点一下变「确认删除（含 N 频道）」+「×」二次确认。更符合"按钮"直觉。
 

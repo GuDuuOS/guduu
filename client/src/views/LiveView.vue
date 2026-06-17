@@ -30,6 +30,8 @@ import {
   updateSpace,
   updateRoom,
   leaveAndForget,
+  uploadMedia,
+  mxcToHttp,
   inviteToRoom,
   normalizeUserId,
   BOT_ID,
@@ -161,13 +163,39 @@ const wsSetName = ref('')
 const wsSetLabel = ref('')
 const wsSetBusy = ref(false)
 const wsDeleteArm = ref(false) // 删除工作区的二次确认
+// 工作区头像：avatarChange=undefined 不动 / '' 移除 / mxc 新图；preview 仅用于弹窗内显示
+const wsSetAvatarChange = ref<string | undefined>(undefined)
+const wsSetAvatarPreview = ref('')
+const wsUploading = ref(false)
+const wsFileInput = ref<HTMLInputElement>()
 function openWsSettings() {
   if (!activeSpace.value) return
   const s = spaces.value.find((x) => x.id === activeSpace.value)
   wsSetName.value = s?.name || ''
   wsSetLabel.value = s?.label || ''
+  wsSetAvatarChange.value = undefined
+  wsSetAvatarPreview.value = s?.avatarUrl || ''
   wsDeleteArm.value = false
   wsSetOpen.value = true
+}
+async function onPickWsImage(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  wsUploading.value = true
+  try {
+    const mxc = await uploadMedia(file)
+    wsSetAvatarChange.value = mxc
+    wsSetAvatarPreview.value = mxcToHttp(mxc, 64)
+  } catch (err: any) {
+    toast('上传失败', err?.message || String(err))
+  } finally {
+    wsUploading.value = false
+    if (wsFileInput.value) wsFileInput.value.value = '' // 允许重选同一文件
+  }
+}
+function removeWsImage() {
+  wsSetAvatarChange.value = ''
+  wsSetAvatarPreview.value = ''
 }
 // 当前工作区下的频道数（删除确认提示用）
 const wsChildCount = computed(() => (activeSpace.value ? roomIdsInSpace(activeSpace.value).size : 0))
@@ -200,7 +228,7 @@ async function saveWsSettings() {
   if (!id || !name || wsSetBusy.value) return
   wsSetBusy.value = true
   try {
-    await updateSpace(id, { name, label: wsSetLabel.value.trim() })
+    await updateSpace(id, { name, label: wsSetLabel.value.trim(), avatar: wsSetAvatarChange.value })
     toast('已保存', `工作区改为「${name}」`)
     wsSetOpen.value = false
     setTimeout(refresh, 700)
@@ -666,10 +694,13 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
           v-for="s in spaces"
           :key="s.id"
           class="ws-icon"
-          :class="{ active: s.id === activeSpace }"
+          :class="{ active: s.id === activeSpace, 'has-img': !!s.avatarUrl }"
           :title="s.name"
           @click="selectSpace(s.id)"
-        >{{ s.label || wsLabel(s.name) }}</div>
+        >
+          <img v-if="s.avatarUrl" :src="s.avatarUrl" alt="" class="ws-img" />
+          <template v-else>{{ s.label || wsLabel(s.name) }}</template>
+        </div>
         <div class="ws-icon plus" title="新建工作区" @click="openNewWorkspace">+</div>
         <div class="ws-sep" />
         <div class="ws-icon ws-tool" title="AI Agent 商城" @click="onMarket">
@@ -1079,10 +1110,27 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
         <div class="nw-sub">改这个工作区的名称和左栏简称（实时写进后端）</div>
         <div class="nw-field-label">名称</div>
         <input v-model="wsSetName" class="nw-input" placeholder="工作区名称" @keyup.enter="saveWsSettings" />
-        <div class="nw-field-label">简称（左栏图标，最多 3 字）</div>
-        <input v-model="wsSetLabel" class="nw-input" maxlength="3" :placeholder="wsSetName ? wsLabel(wsSetName) : '如 制作'" />
+        <div class="nw-field-label">简称（左栏图标，最多 2 字；上传图片后以图片为准）</div>
+        <input v-model="wsSetLabel" class="nw-input" maxlength="2" :placeholder="wsSetName ? wsLabel(wsSetName) : '如 制作'" />
+
+        <div class="nw-field-label">图标（上传图片，可选）</div>
+        <div class="nw-avatar-row">
+          <span class="nw-avatar-prev" :style="!wsSetAvatarPreview ? { background: 'var(--action)' } : undefined">
+            <img v-if="wsSetAvatarPreview" :src="wsSetAvatarPreview" alt="" />
+            <template v-else>{{ wsSetLabel.trim() || wsLabel(wsSetName) || '?' }}</template>
+          </span>
+          <button class="nw-btn" :disabled="wsUploading" @click="wsFileInput?.click()">{{ wsUploading ? '上传中…' : (wsSetAvatarPreview ? '更换图片' : '上传图片') }}</button>
+          <button v-if="wsSetAvatarPreview" class="nw-btn" :disabled="wsUploading" @click="removeWsImage">移除</button>
+          <input ref="wsFileInput" type="file" accept="image/*" hidden @change="onPickWsImage" />
+        </div>
+
         <div class="nw-preview" v-if="wsSetName.trim()">
-          <div class="nw-prev-ws"><span class="nw-prev-ic">{{ wsSetLabel.trim() || wsLabel(wsSetName) }}</span>{{ wsSetName }}</div>
+          <div class="nw-prev-ws">
+            <span class="nw-prev-ic" :style="wsSetAvatarPreview ? { padding: 0, overflow: 'hidden' } : undefined">
+              <img v-if="wsSetAvatarPreview" :src="wsSetAvatarPreview" alt="" style="width:100%;height:100%;object-fit:cover" />
+              <template v-else>{{ wsSetLabel.trim() || wsLabel(wsSetName) }}</template>
+            </span>{{ wsSetName }}
+          </div>
         </div>
 
         <div class="nw-foot nw-foot-split">
@@ -1217,6 +1265,8 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 .ws-icon { width: 40px; height: 40px; border-radius: 10px; background: var(--chip); border: 2px solid transparent; display: flex; align-items: center; justify-content: center; font-family: var(--font-heading); font-weight: var(--fw-bold); color: var(--text); cursor: pointer; font-size: 13px; line-height: 1; letter-spacing: -.5px; user-select: none; transition: background .12s ease, border-color .12s ease, box-shadow .12s ease, color .12s ease; }
 .ws-icon:hover { background: var(--chip-hover); }
 .ws-icon.active { background: var(--bg-panel); color: var(--text); border-color: var(--ws-active); box-shadow: 0 0 0 2px var(--ws-active-soft); }
+.ws-icon.has-img { background: var(--bg-panel); overflow: hidden; padding: 0; }
+.ws-img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .ws-icon.plus { color: var(--text-3); font-size: 18px; border-style: dashed; border-color: var(--border); background: transparent; }
 .ws-icon.plus:hover { border-color: var(--text-3); background: var(--bg-hover); }
 .ws-sep { width: 24px; height: 1px; background: var(--border); margin-top: auto; flex-shrink: 0; }
@@ -1450,6 +1500,9 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 .nw-btn.danger-outline:hover { background: #fdecec; }
 .nw-foot-split { justify-content: space-between; }
 .nw-foot-left, .nw-foot-right { display: flex; gap: 10px; }
+.nw-avatar-row { display: flex; align-items: center; gap: 10px; }
+.nw-avatar-prev { width: 44px; height: 44px; border-radius: 11px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; color: #fff; font-size: 15px; font-weight: 700; overflow: hidden; }
+.nw-avatar-prev img { width: 100%; height: 100%; object-fit: cover; }
 
 /* ──── toast ──── */
 .toast-host { position: fixed; right: 18px; bottom: 18px; z-index: 200; display: flex; flex-direction: column; gap: 10px; }

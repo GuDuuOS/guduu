@@ -151,6 +151,8 @@ export interface LiveSpace {
   name: string
   /** 左栏图标的自定义简称（存在 cosmac.workspace 状态事件里；没有就由 UI 取名字前 2 字） */
   label?: string
+  /** 工作区头像（m.room.avatar）转好的 http 地址；有图就用图、没图用简称文字 */
+  avatarUrl?: string
 }
 
 /** 读某个 Space 的自定义简称（cosmac.workspace 状态事件 → label）。 */
@@ -159,13 +161,33 @@ function spaceLabel(room: any): string | undefined {
   return ev?.getContent?.()?.label || undefined
 }
 
+/** mxc:// 转成可显示的 http 地址（走 /_matrix/media，已被 nginx 代理）。 */
+export function mxcToHttp(mxc: string, size = 64): string {
+  if (!mx || !mxc) return ''
+  return (mx as any).mxcUrlToHttp?.(mxc, size, size, 'crop') || ''
+}
+
+/** 读某个 Space 的头像（m.room.avatar → mxc → http）。 */
+function spaceAvatar(room: any): string | undefined {
+  const ev = room?.currentState?.getStateEvents?.('m.room.avatar', '')
+  const url = ev?.getContent?.()?.url
+  return url ? mxcToHttp(url, 48) : undefined
+}
+
+/** 上传一张图片到 Matrix 媒体库，返回 mxc:// 地址。 */
+export async function uploadMedia(file: File): Promise<string> {
+  if (!mx) throw new Error('未登录')
+  const res: any = await (mx as any).uploadContent(file, { type: file.type })
+  return res?.content_uri || res?.contentUri || ''
+}
+
 /** 列出我加入的工作区（Space），按名称排序。 */
 export function listSpaces(): LiveSpace[] {
   if (!mx) return []
   return mx
     .getRooms()
     .filter((r) => (r as any).isSpaceRoom?.())
-    .map((r) => ({ id: r.roomId, name: r.name || r.roomId, label: spaceLabel(r) }))
+    .map((r) => ({ id: r.roomId, name: r.name || r.roomId, label: spaceLabel(r), avatarUrl: spaceAvatar(r) }))
     .sort((a, b) => a.name.localeCompare(b.name, 'zh'))
 }
 
@@ -215,7 +237,7 @@ export async function leaveAndForget(roomId: string): Promise<void> {
 /** 改工作区(Space)的名称 / 简称。name→m.room.name；label→cosmac.workspace 状态。 */
 export async function updateSpace(
   spaceId: string,
-  opts: { name?: string; label?: string } = {},
+  opts: { name?: string; label?: string; avatar?: string } = {},
 ): Promise<void> {
   if (!mx) throw new Error('未登录')
   if (opts.name) {
@@ -223,6 +245,10 @@ export async function updateSpace(
   }
   if (opts.label !== undefined) {
     await (mx as any).sendStateEvent(spaceId, 'cosmac.workspace', { label: opts.label }, '')
+  }
+  // avatar：undefined=不动；''=清空头像；mxc://=设置头像
+  if (opts.avatar !== undefined) {
+    await (mx as any).sendStateEvent(spaceId, 'm.room.avatar', opts.avatar ? { url: opts.avatar } : {}, '')
   }
 }
 
