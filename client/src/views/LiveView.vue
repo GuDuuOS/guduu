@@ -193,6 +193,34 @@ async function createWorkspace() {
   }
 }
 
+// ── 新建频道（在当前工作区下真建）──
+const newChOpen = ref(false)
+const newChName = ref('')
+const newChPublic = ref(false)
+const newChCreating = ref(false)
+function openNewChannel() {
+  if (!activeSpace.value) { toast('请先选一个工作区', '频道需要归属到某个工作区'); return }
+  newChName.value = ''; newChPublic.value = false; newChOpen.value = true
+}
+async function createChannel() {
+  const n = newChName.value.trim()
+  if (!n || newChCreating.value || !activeSpace.value) return
+  newChCreating.value = true
+  try {
+    const cid = await createChannelInSpace(activeSpace.value, n, { public: newChPublic.value })
+    toast('已创建频道', `# ${n} → ${activeSpaceName.value}`)
+    newChOpen.value = false
+    setTimeout(() => {
+      refresh()
+      openRoom(cid)
+    }, 900)
+  } catch (e: any) {
+    toast('创建失败', e?.message || String(e))
+  } finally {
+    newChCreating.value = false
+  }
+}
+
 // 频道列表：按当前工作区过滤 + 关键词筛选
 const filteredRooms = computed(() =>
   rooms.value.filter(
@@ -524,7 +552,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
             <span class="name">{{ activeSpaceName }}</span>
             <svg class="chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
           </button>
-          <button class="cs-add" title="添加" @click="onAddChannel">
+          <button class="cs-add" title="添加" @click="openNewChannel">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5v14" /></svg>
           </button>
         </div>
@@ -571,7 +599,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
                 <span class="cs-label">{{ r.name }}</span>
               </div>
               <p v-if="!filteredRooms.length" class="cs-empty">还没有频道</p>
-              <div class="cs-item cs-add-row" @click="onAddChannel">
+              <div class="cs-item cs-add-row" @click="openNewChannel">
                 <span class="cs-ic-box"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5v14" /></svg></span>
                 <span class="cs-label">添加频道</span>
               </div>
@@ -861,6 +889,29 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
         <div class="nw-foot">
           <button class="nw-btn" :disabled="newWsCreating" @click="newWsOpen = false">取消</button>
           <button class="nw-btn primary" :disabled="!newWsName.trim() || newWsCreating" @click="createWorkspace">{{ newWsCreating ? '创建中…' : '创建' }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 新建频道（在当前工作区下真建）-->
+    <div v-if="newChOpen" class="nw-overlay" @click.self="newChOpen = false">
+      <div class="nw-modal">
+        <div class="nw-title">新建频道</div>
+        <div class="nw-sub">将建在「{{ activeSpaceName }}」工作区下，并自动拉主 AI 进群</div>
+        <div class="nw-field-label">频道名称</div>
+        <input v-model="newChName" class="nw-input" placeholder="如：第二季筹备 / 海报评审" @keyup.enter="createChannel" />
+        <div class="nw-field-label">可见性</div>
+        <div class="nw-vis">
+          <button class="nw-vis-btn" :class="{ on: !newChPublic }" @click="newChPublic = false">私密 · 邀请制</button>
+          <button class="nw-vis-btn" :class="{ on: newChPublic }" @click="newChPublic = true">公开 · 可加入</button>
+        </div>
+        <div v-if="newChName.trim()" class="nw-preview">
+          <div class="nw-prev-h">将创建</div>
+          <div class="nw-prev-ch"># {{ newChName.trim() }}<span class="nw-prev-tip">含主 AI · 归属「{{ activeSpaceName }}」</span></div>
+        </div>
+        <div class="nw-foot">
+          <button class="nw-btn" :disabled="newChCreating" @click="newChOpen = false">取消</button>
+          <button class="nw-btn primary" :disabled="!newChName.trim() || newChCreating" @click="createChannel">{{ newChCreating ? '创建中…' : '创建' }}</button>
         </div>
       </div>
     </div>
