@@ -67,12 +67,26 @@ import UnitGrid from '@/components/canvas/UnitGrid.vue'
 import CommandCenter from '@/components/canvas/CommandCenter.vue'
 import BizPanels from '@/components/canvas/BizPanels.vue'
 import { getDashboard } from '@/data/dashboards'
+import { getTodos, type TodoItem } from '@/data/todos'
 import { useActiveWorkspace } from '@/composables/useActiveWorkspace'
 import '@/styles/canvas.css' // 看板样式，命名空间在 .canvas/.panel 下，不与 LiveView 撞
 const { activeId } = useActiveWorkspace()
 const dash = computed(() => getDashboard(activeId.value))
-const board = ref(true) // true=主区显示数据看板；false=显示频道（登录后默认落在看板）
-function openBoard() { board.value = true; currentRoom.value = '' }
+
+// 主区视图：board=数据看板 / tasks=任务看板 / 两者皆 false=频道（登录后默认数据看板）
+const board = ref(true)
+const tasks = ref(false)
+function openBoard() { board.value = true; tasks.value = false; currentRoom.value = '' }
+function openTasks() { tasks.value = true; board.value = false; currentRoom.value = '' }
+
+// 任务看板：所有任务按状态分到 3 列（待办/进行中/已完成）
+const taskItems = computed<TodoItem[]>(() => getTodos(activeId.value).groups.flatMap((g) => g.items))
+const taskCols = computed(() => [
+  { key: 'pending', title: '待办', items: taskItems.value.filter((t) => t.status === 'pending') },
+  { key: 'in_progress', title: '进行中', items: taskItems.value.filter((t) => t.status === 'in_progress') },
+  { key: 'done', title: '已完成', items: taskItems.value.filter((t) => t.status === 'done') },
+])
+function priLabel(p: string) { return p === 'high' ? '高' : p === 'mid' ? '中' : '低' }
 
 const HS = 'https://hs.cosmac.cc'
 
@@ -149,6 +163,7 @@ async function afterLogin(uid: string) {
   me.value = uid
   loggedIn.value = true
   board.value = true // 登录后第一屏 = 数据看板
+  tasks.value = false
   onUpdate(refresh)
   try {
     aiRoom.value = await ensureBotDm()
@@ -172,6 +187,7 @@ async function doLogin() {
 
 function openRoom(id: string) {
   board.value = false
+  tasks.value = false
   currentRoom.value = id
   msgs.value = listMessages(id)
 }
@@ -438,6 +454,12 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
             </span>
             <span class="cs-label">数据看板</span>
           </div>
+          <div class="cs-item pinned-item" :class="{ active: tasks }" @click="openTasks">
+            <span class="cs-ic">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>
+            </span>
+            <span class="cs-label">任务看板</span>
+          </div>
 
           <!-- 频道 group（真实房间）-->
           <div class="cs-group">
@@ -518,6 +540,40 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
                 <PanelChart :title="dash.pie.title" :config="dash.pie.build" :height="dash.pie.height ?? 180" />
               </div>
               <BizPanels />
+            </div>
+          </div>
+        </template>
+
+        <!-- ===== 任务看板（待办/进行中/已完成 三列）===== -->
+        <template v-else-if="tasks">
+          <div class="ch-header">
+            <div class="title">📋 任务看板</div>
+            <div class="ch-actions">
+              <span class="board-sub">{{ taskItems.length }} 项任务 · AI 制作中</span>
+            </div>
+          </div>
+          <div class="kanban">
+            <div v-for="col in taskCols" :key="col.key" class="kb-col">
+              <div class="kb-col-head">
+                <span class="kb-dot" :class="col.key" />
+                <span class="kb-col-title">{{ col.title }}</span>
+                <span class="kb-count">{{ col.items.length }}</span>
+              </div>
+              <div class="kb-cards">
+                <div v-for="t in col.items" :key="t.id" class="kb-card" :class="{ done: t.status === 'done' }">
+                  <div class="kb-card-title">{{ t.title }}</div>
+                  <div class="kb-card-meta">
+                    <span class="kb-pri" :class="`pri-${t.priority}`">{{ priLabel(t.priority) }}</span>
+                    <span v-if="t.refNo" class="kb-ref">{{ t.refNo }}</span>
+                  </div>
+                  <div v-if="t.sourceLabel" class="kb-src">📁 {{ t.sourceLabel }}</div>
+                  <div class="kb-foot">
+                    <span v-if="t.assignee" class="kb-assignee">{{ t.assignee }}</span>
+                    <span v-if="t.due" class="kb-due">⏱ {{ t.due }}</span>
+                  </div>
+                </div>
+                <p v-if="!col.items.length" class="kb-empty">暂无</p>
+              </div>
             </div>
           </div>
         </template>
@@ -804,6 +860,34 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 /* 数据看板滚动容器 */
 .board-scroll { flex: 1; overflow-y: auto; min-height: 0; }
 .pinned-item { color: var(--text-2); }
+.board-sub { font-size: 13px; color: var(--text-3); font-family: var(--mono); }
+
+/* ── 任务看板（kanban 三列）── */
+.kanban { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; padding: 16px var(--content-pad-x); overflow: hidden; }
+.kb-col { display: flex; flex-direction: column; min-height: 0; background: var(--bg-soft); border-radius: 12px; overflow: hidden; }
+.kb-col-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px; flex-shrink: 0; }
+.kb-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.kb-dot.pending { background: var(--text-dim); }
+.kb-dot.in_progress { background: var(--accent); }
+.kb-dot.done { background: var(--ok); }
+.kb-col-title { font-weight: 700; font-size: 14px; color: var(--text); }
+.kb-count { margin-left: auto; font-size: 12px; font-family: var(--mono); color: var(--text-3); background: var(--bg-panel); border: 1px solid var(--border); border-radius: 9px; padding: 1px 8px; }
+.kb-cards { flex: 1; overflow-y: auto; padding: 0 10px 12px; display: flex; flex-direction: column; gap: 10px; }
+.kb-card { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+.kb-card.done { opacity: .7; }
+.kb-card.done .kb-card-title { text-decoration: line-through; color: var(--text-3); }
+.kb-card-title { font-size: 14px; font-weight: 600; color: var(--text); line-height: 1.4; }
+.kb-card-meta { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.kb-pri { font-family: var(--mono); font-size: 10px; padding: 1px 7px; border-radius: 9px; letter-spacing: .5px; }
+.kb-pri.pri-high { background: #fee2e2; color: var(--danger); }
+.kb-pri.pri-mid { background: #fef3c7; color: var(--warn); }
+.kb-pri.pri-low { background: var(--bg-code); color: var(--text-3); }
+.kb-ref { font-family: var(--mono); font-size: 11px; color: var(--accent); }
+.kb-src { font-size: 12px; color: var(--text-3); margin-top: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kb-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; font-size: 12px; }
+.kb-assignee { font-weight: 600; color: var(--text-2); }
+.kb-due { font-family: var(--mono); color: var(--text-3); }
+.kb-empty { font-size: 12px; color: var(--text-dim); padding: 10px; text-align: center; }
 .ch-header { height: 50px; flex-shrink: 0; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; padding: 0 16px; background: var(--bg-panel); }
 .ch-fav { width: 28px; height: 28px; background: transparent; border: none; color: var(--text-3); border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
 .ch-fav:hover { background: var(--bg-hover); color: var(--text); }
