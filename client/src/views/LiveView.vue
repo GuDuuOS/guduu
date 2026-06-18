@@ -1059,7 +1059,6 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
           <div class="msg" :class="{ bot: isBot(m.sender), me: isMe(m.sender), grouped: !m.showHeader }">
             <!-- 回复预览：整行浮在头像上方（Discord 风：弯角连接线 + ↩ + 名字上色 + 正文淡色）-->
             <div v-if="m.replyToId" class="msg-reply">
-              <svg class="reply-ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7" /><path d="M20 18v-2a4 4 0 0 0-4-4H4" /></svg>
               <span class="reply-name" :style="{ color: nameColor(m.replyToName || '') }">@{{ (m.replyToName || '').replace(/^@/, '') }}</span>
               <span class="reply-body">{{ m.replyToBody }}</span>
             </div>
@@ -1602,7 +1601,9 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 /* 消息流（Discord 风：分组 / 悬停高亮 / 工具条 / 反应 / 回复）*/
 .stream { flex: 1; overflow-y: auto; padding: 8px var(--content-pad-x) 20px; }
 .msg { display: flex; flex-direction: column; padding: 4px 10px; margin: 0 -10px; border-radius: 4px; position: relative; }
-.msg:not(.grouped) { margin-top: 8px; }
+.msg:not(.grouped) { margin-top: 18px; }
+/* 有回复的消息：上方再多留点空，给连接线腾出"空行" */
+.msg:not(.grouped):has(.msg-reply) { margin-top: 22px; }
 .msg:hover { background: var(--bg-soft); }
 .msg.unread { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
 .msg-main { display: flex; gap: 12px; }
@@ -1632,7 +1633,6 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 .msg-reply { position: relative; display: flex; align-items: center; gap: 5px; font-size: 13px; line-height: 1.2; padding-left: 52px; margin-bottom: 2px; min-width: 0; color: var(--text-3); }
 /* 连接线：从回复行中部下探到下方头像，顶部弧向右接到回复文字 */
 .msg-reply::before { content: ""; position: absolute; left: 20px; top: 11px; bottom: -6px; width: 27px; border-left: 2px solid var(--border); border-top: 2px solid var(--border); border-top-left-radius: 8px; }
-.reply-ic { color: var(--text-3); flex-shrink: 0; }
 .reply-name { font-weight: 600; flex-shrink: 0; }
 .reply-name:hover { text-decoration: underline; cursor: pointer; }
 .reply-body { color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
