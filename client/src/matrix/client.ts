@@ -316,6 +316,25 @@ export async function setChannelConfig(roomId: string, patch: Record<string, any
   await (mx as any).sendStateEvent(roomId, CHANNEL_CONFIG_EVENT, next, '')
 }
 
+/* ===== 看板数据源（数据看板 / 任务看板的数据源配置）=====
+ * 按工作区(Space)存一条 state event `cosmac.board_sources`，内容 { dashboard: [...], tasks: [...] }。
+ * 数据源目前是配置占位（名称/类型/备注），真实取数以后接。Space 本身也是 Matrix 房间，复用 state event。
+ */
+const BOARD_SOURCES_EVENT = 'cosmac.board_sources'
+
+/** 读某工作区的看板数据源配置；无则返回空对象 {}。 */
+export function getBoardSources(spaceId: string): Record<string, any> {
+  const room = mx?.getRoom(spaceId)
+  const ev = room?.currentState?.getStateEvents?.(BOARD_SOURCES_EVENT, '')
+  return ev?.getContent?.() || {}
+}
+
+/** 写某工作区的看板数据源配置（整体覆盖；需该 Space 发状态事件的权限）。 */
+export async function setBoardSources(spaceId: string, data: Record<string, any>): Promise<void> {
+  if (!mx) throw new Error('未登录')
+  await (mx as any).sendStateEvent(spaceId, BOARD_SOURCES_EVENT, data, '')
+}
+
 /** 在某工作区(Space)下真建一个频道：建房间 + 邀请主 AI + 挂到 Space 下。返回 room_id。 */
 export async function createChannelInSpace(
   spaceId: string,

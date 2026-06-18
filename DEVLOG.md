@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-06-18 — 数据看板/任务看板：数据源「展示 + 编辑」+ 持久化
+- 需求：两个看板行的图标改成「数据源展示」，再加一个「数据源编辑」图标。数据源先当配置占位、做 UI + 持久化。
+- 左侧图标改为数据源图标：点击展开该看板的数据源列表（cs-src-list，显示 类型+名称，空则提示点 ✎ 添加）。
+- 行右侧加铅笔「编辑数据源」图标(hover 显示)：开 `BoardSourceModal` 弹窗增删数据源(名称/类型[频道聚合/外部平台/API接口/手动录入]/备注)。
+- 持久化：按当前工作区(Space)存一条 `cosmac.board_sources` state event(内容 {dashboard:[],tasks:[]})。matrix/client.ts 加 get/setBoardSources；新建 useBoardSources composable(防抖自动保存) + BoardSourceModal(复用 .cam-* 样式)。
+- 坑：activeSpace 变化时 Space 房间 state 可能还没 sync → 首次读为空。修复：openEditor/togglePopover 时再 load() 一遍(同 liveMembers 的 refresh-on-open)。
+- 验证(连生产 hs)：制作工作区加「抖音创作者后台」数据源 → 刷新仍在 → 删除复位，未留脏数据。数据源真实取数留待后续(配置占位)。
+
 ## 2026-06-18 — 右侧「关于此频道」与「中枢 AI」面板互斥
 - 需求：开「关于此频道」就收起中枢 AI，开中枢 AI 就收起「关于此频道」（右侧同时只留一个）。
 - 实现：LiveView 加两个 watcher —— `watch(rightPanelVisible→aiOpen=false)` / `watch(aiOpen→hideRightPanel())`。用 watcher 而非改每个按钮，自动覆盖所有入口(ℹ/顶栏/插件栏/输入条)。
