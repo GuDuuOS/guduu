@@ -152,6 +152,10 @@ const currentTopic = computed(
 // 传 currentRoom（真实 room id）→「人员」标签走真实 Matrix 成员
 watch([currentName, currentRoom], ([n, id]) => { if (n) setAdminChannel(n, id) }, { immediate: true })
 
+// 右侧两个面板互斥：开「关于此频道」就收起中枢 AI；开中枢 AI 就收起「关于此频道」（覆盖所有入口）
+watch(rightPanelVisible, (v) => { if (v) aiOpen.value = false })
+watch(aiOpen, (v) => { if (v) hideRightPanel() })
+
 // ── 工作区（Matrix Space）──────────────────────────────
 const spaces = ref<LiveSpace[]>([])
 const activeSpace = ref('')                       // 当前工作区 id
