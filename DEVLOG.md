@@ -7,6 +7,13 @@
 
 ---
 
+## 2026-06-19 — 主 AI：右侧中枢 AI 面板加「放大」按钮 → Cowork 式全屏弹窗
+- **需求**：右侧主 AI 顶栏加放大按钮，点开后是一个和 Claude Cowork 一致的弹窗。
+- **关键定位**：真正渲染的右侧主 AI 是**写死在 `LiveView.vue` 里的内联 `aside.ai-panel`**（`aiOpen` 控制），不是 `components/layout/AiChatPanel.vue`（那套连同 App.vue 是未挂载的演示稿，main.ts 只挂 LiveView）。一开始误改了 AiChatPanel，已回滚，改在 LiveView 内联面板上做。
+- **做法**：新增 `aiMax` 态 + 顶栏「放大/还原」图标按钮；放大态下 `.ai-panel.maximized` 脱离 dock、近全屏居中（inset 2.5vh/2.5vw）+ 半透明遮罩（点空白还原）。面板主体重构成 `ai-main`（默认单列 / 放大态三栏）：左栏**完整还原 Cowork 左导航**（对话·协作·代码 分段 → ＋新任务 → 项目/产物/定时任务/派发·Beta → 最近列表 → 底部用户），中栏复用原对话+输入，右栏 Progress 清单 + 项目文件。全部 scoped 在 LiveView，未碰未挂载的 AiChatPanel/ai-panel.css。
+- **决策**：线上面板原本只有关闭按钮，这次只加「放大↔还原」一个新态，最简且贴合需求；演示稿里的展开/浮窗多态不照搬。左栏导航项为演示态（toast 占位），「新任务」清空当前对话。
+- 验证：preview 直连，放大→三栏弹窗布局正确、还原回 360px dock、遮罩开合正常、无控制台报错。
+
 ## 2026-06-19 — 再复查修 3 项（token 进 URL / 新管理员卡住 / 文档过时）
 - **#1【P1 安全】as_token 拼进每个 URL 查询参数**：`matrix_client._url` 把高权限 as_token 放进 `?access_token=…`，会进 nginx/代理/错误日志。改用 `requests.Session` + `Authorization: Bearer <token>` 头，URL 里只留 `user_id`（身份标识、非密钥）；11 处请求调用全改走 session。新增 `test_matrix_client.py` 守这条红线。
 - **#2【P2】已有控制室的权限修复无法由受影响的新管理员触发**：reconcile 只有「已在房、有 power 的人」能跑，新管理员自己进不去也修不了。改法：在 `setUserAdmin(uid, true)`（把人提成管理员）成功后，趁**当前操作者**（已在控制室、power 100）在线，顺手 `ensureControlRoom()` 幂等对账，把新管理员邀进去并提权。尽力而为、失败不回滚提权。（残留极端态：控制室里有权限的人全不可用时仍需 Synapse 侧手工介入，可接受。）

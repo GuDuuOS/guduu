@@ -619,16 +619,54 @@ export async function setUserAdmin(userId: string, admin: boolean): Promise<void
     method: 'PUT',
     body: JSON.stringify({ admin }),
   })
-  // #2：刚把某人提成管理员时，趁**当前操作者**（已在控制室、有 power 100）在线，立刻
-  // 把新管理员拉进控制室并提权——否则新管理员自己既不在房、又没权限，无法自助修复，
-  // 只能干等原创建者某天登录保存。ensureControlRoom 会对已存在的房做幂等对账。
-  // 尽力而为：对账失败不回滚、不阻塞「提为管理员」这件已经成功的事。
+  // 控制室成员/权限随服务器管理员身份联动（尽力而为，失败不回滚已成功的提/撤权）：
   if (admin) {
+    // 提权：趁**当前操作者**（已在控制室、有 power）在线，把新管理员拉进控制室并提到 50。
+    // 否则新管理员自己既不在房、又没权限，无法自助修复，只能干等所有者某天登录保存。
     try {
       await ensureControlRoom()
     } catch {
-      /* 控制室对账失败（如操作者也不在房/无权限）：忽略，不影响提权 */
+      /* 对账失败（如操作者也不在房/无权限）：忽略 */
     }
+  } else {
+    // 撤权：把该用户在控制室**降权 + 踢出**，否则他仍是房间成员、仍能写 AI 配置。
+    try {
+      await removeFromControlRoom(userId)
+    } catch {
+      /* 操作者在控制室没有足够 power（非所有者）：忽略，需所有者再处理 */
+    }
+  }
+}
+
+/**
+ * 把某用户从控制室降权并踢出（撤销服务器管理员时调用）。
+ * ① 删掉他在 power_levels.users 里的条目（回落 users_default=0）；② kick 出房。
+ * 二者都需要**当前操作者的 power 高于对方**（通常是所有者 100 对 50），否则会失败——
+ * 静默忽略，留给所有者后续处理。绝不动其它字段、不碰所有者自己。
+ */
+async function removeFromControlRoom(userId: string): Promise<void> {
+  if (!mx || !userId) return
+  const rid = await resolveControlRoom()
+  if (!rid) return
+  const room = mx.getRoom(rid)
+  // ① 降权：只有真正读到 power_levels 才动它（同 reconcile，避免空对象覆盖）
+  const pl: any = (room as any)?.currentState
+    ?.getStateEvents?.('m.room.power_levels', '')
+    ?.getContent?.()
+  if (pl && typeof pl === 'object' && pl.users && userId in pl.users) {
+    const users: Record<string, number> = { ...pl.users }
+    delete users[userId] // 删掉 = 回落到 users_default（0），不再能写配置
+    try {
+      await (mx as any).sendStateEvent(rid, 'm.room.power_levels', { ...pl, users }, '')
+    } catch {
+      /* 无权改 power_levels：忽略 */
+    }
+  }
+  // ② 踢出控制室（kick 默认需 power≥50 且高于对方）
+  try {
+    await (mx as any).kick(rid, userId, '已撤销服务器管理员')
+  } catch {
+    /* 已不在房/无权限：忽略 */
   }
 }
 
@@ -770,13 +808,20 @@ async function resolveControlRoom(): Promise<string | null> {
   }
 }
 
+// —— 控制室权限模型 ——
+// 只保留**一个所有者**（建房者）= 100，独一份；普通服务器管理员 = ADMIN（50）：
+// 足够写 AI 配置 state event（state_default=50），又能被所有者降权/踢出。两个 100 的
+// 用户在 Matrix 里通常互相无法降权，所以普通管理员不能给 100，否则撤销后降不下来。
+// bot 是受信基础设施（只读配置、从不被管理），给 100 无妨。
+const CONTROL_OWNER_PL = 100
+const CONTROL_ADMIN_PL = 50
+
 /**
  * 确保控制室存在：解析不到就新建（带别名、私有）。返回 room_id。
  *
- * 邀请对象不只是主 AI bot，还包括**所有服务器管理员**——否则只有创建者一人是
- * 房间成员，其他管理员虽能看到 /admin 入口，却读不到/写不了 AI 配置 state event
- * （服务器管理员权限不等于房间权限）。同时把这些管理员的房间权限提到 100，
- * 否则他们进群后受 state_default=50 限制，连自定义 state event 都写不了，只能读。
+ * 邀请对象不只是主 AI bot，还包括**所有服务器管理员**——否则只有创建者一人是房间成员，
+ * 其他管理员虽能看到 /admin 入口，却读不到/写不了 AI 配置 state event。普通管理员给
+ * CONTROL_ADMIN_PL(50)：够写配置，又能被所有者(100)管理（撤销时降权/踢出）。
  */
 export async function ensureControlRoom(): Promise<string> {
   if (!mx) throw new Error('未登录')
@@ -802,9 +847,9 @@ export async function ensureControlRoom(): Promise<string> {
     return existing
   }
 
-  // 房间初始权限：创建者 + bot + 各管理员都给 100，确保都能读写 AI 配置 state event
-  const users: Record<string, number> = { [me]: 100, [botId()]: 100 }
-  for (const a of others) users[a] = 100
+  // 初始权限：所有者(创建者) + bot = 100；其他管理员 = 50（够写配置、可被所有者管理）
+  const users: Record<string, number> = { [me]: CONTROL_OWNER_PL, [botId()]: CONTROL_OWNER_PL }
+  for (const a of others) users[a] = CONTROL_ADMIN_PL
 
   const res: any = await (mx as any).createRoom({
     name: 'CosMac 控制室',
@@ -819,9 +864,10 @@ export async function ensureControlRoom(): Promise<string> {
 
 /**
  * 对**已存在**的控制室补齐其他管理员的权限与成员资格（幂等、尽力而为）。
- * ① 把 power < 100 的管理员提到 100（否则受 state_default=50 限制写不了自定义 state event）；
+ * ① 把 power < 50 的管理员提到 CONTROL_ADMIN_PL(50)（够写 AI 配置 state event）；
+ *    **只升不降**——不动已是 100 的所有者，也不会把谁降下来。
  * ② 邀请还没在房里（join/invite 都不算在）的管理员。
- * 仅当当前用户在该房有改 power_levels 的权限（创建者=100）时才生效；没权限就静默跳过，
+ * 仅当当前用户在该房有改 power_levels 的权限（所有者=100）时才生效；没权限就静默跳过，
  * 绝不阻塞「保存 AI 配置」主流程。
  */
 async function reconcileControlRoomAdmins(roomId: string, admins: string[]): Promise<void> {
@@ -838,8 +884,9 @@ async function reconcileControlRoomAdmins(roomId: string, admins: string[]): Pro
       const users: Record<string, number> = { ...(pl.users || {}) }
       let changed = false
       for (const a of admins) {
-        if ((users[a] ?? 0) < 100) {
-          users[a] = 100
+        // 只把"权限不足以写配置"的管理员提到 50；已 ≥50（含所有者 100）的不动
+        if ((users[a] ?? 0) < CONTROL_ADMIN_PL) {
+          users[a] = CONTROL_ADMIN_PL
           changed = true
         }
       }

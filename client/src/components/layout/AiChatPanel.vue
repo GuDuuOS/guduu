@@ -16,7 +16,7 @@
             <circle cx="12" cy="12" r="3" />
           </svg>
         </button>
-        <button v-if="!floating" class="ai-ic-btn" :title="expanded ? '收起' : '展开'" @click="toggleExpanded">
+        <button v-if="!maximized" class="ai-ic-btn" :title="expanded ? '收起' : '展开'" @click="toggleExpanded">
           <!-- 展开态：箭头朝内 -->
           <svg v-if="expanded" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="4 14 10 14 10 20" />
@@ -31,9 +31,9 @@
             <line x1="3" y1="21" x2="10" y2="14" />
           </svg>
         </button>
-        <button class="ai-ic-btn" :title="floating ? '收回侧栏' : '弹出浮窗'" @click="onToggleFloating">
-          <!-- floating 态：四角合并 -->
-          <svg v-if="floating" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <button class="ai-ic-btn" :title="maximized ? '收回侧栏' : '弹出浮窗'" @click="onToggleMaximized">
+          <!-- maximized 态：四角合并 -->
+          <svg v-if="maximized" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M3 7V3h4M21 7V3h-4M3 17v4h4M21 17v4h-4" />
           </svg>
           <!-- 默认态：windowed grid -->
@@ -50,11 +50,11 @@
       </div>
     </div>
 
-    <!-- 主体：默认单列；floating 时三栏 -->
+    <!-- 主体：默认单列；maximized 时三栏 -->
     <div class="ai-main">
 
-    <!-- 左栏：最近对话（仅 floating）-->
-    <div v-if="floating" class="ai-side ai-side-left">
+    <!-- 左栏：最近对话（仅 maximized）-->
+    <div v-if="maximized" class="ai-side ai-side-left">
       <button class="ai-new-chat-btn">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M5 12h14M12 5v14" />
@@ -601,8 +601,8 @@
     </div>
     </div><!-- /ai-center -->
 
-    <!-- 右栏：进度 + 上下文（仅 floating）-->
-    <div v-if="floating" class="ai-side ai-side-right">
+    <!-- 右栏：进度 + 上下文（仅 maximized）-->
+    <div v-if="maximized" class="ai-side ai-side-right">
       <div class="ai-side-sec">
         <div class="ai-side-title with-meta">
           <span>Progress</span>

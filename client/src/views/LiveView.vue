@@ -215,6 +215,10 @@ const aiRoom = ref('')
 const aiMsgs = ref<LiveMsg[]>([])
 const aiDraft = ref('')
 const aiOpen = ref(true)
+// 放大态：把中枢 AI 面板撑成 Cowork 式全屏弹窗（左导航 + 中对话 + 右进度/文件）
+const aiMax = ref(false)
+// 关闭面板时一并退出放大态，避免下次打开还停在放大
+watch(aiOpen, (v) => { if (!v) aiMax.value = false })
 
 // ── 纯界面态（折叠分组 / 下拉菜单 / 专注模式 / 收藏星）────
 const channelsOpen = ref(true)
@@ -1422,43 +1426,155 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
       <!-- 右：数据源面板（数据看板/任务看板头的数据源按钮开关）-->
       <BoardSourcePanel v-if="boardPanelOpen && !focused" />
 
-      <!-- 右：中枢 AI 面板（浮卡）-->
-      <aside class="ai-panel" v-if="aiOpen && !focused">
+      <!-- 放大态遮罩：盖住整页，点空白处还原 -->
+      <div v-if="aiOpen && aiMax && !focused" class="ai-backdrop" @click="aiMax = false" />
+
+      <!-- 右：中枢 AI 面板（浮卡；放大态撑成 Cowork 式全屏弹窗）-->
+      <aside class="ai-panel" :class="{ maximized: aiMax }" v-if="aiOpen && !focused">
+        <!-- 顶栏（放大态作为弹窗标题栏，横跨三栏）-->
         <div class="ai-head">
           <span class="ai-dot" />
           <span class="ai-title">中枢 AI · CosMac Star</span>
           <div class="ai-head-actions">
+            <!-- 放大 / 还原 -->
+            <button class="ai-ic-btn" :title="aiMax ? '还原' : '放大'" @click="aiMax = !aiMax">
+              <svg v-if="aiMax" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" /></svg>
+              <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" /></svg>
+            </button>
             <button class="ai-ic-btn" title="收起" @click="aiOpen = false">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
             </button>
           </div>
         </div>
-        <div class="ai-body">
-          <div v-for="m in aiMsgs" :key="m.id" class="ai-msg" :class="{ mine: isMe(m.sender) }">
-            <div v-if="!m.card" class="ai-bubble" v-html="renderMd(m.body)"></div>
-            <div v-else class="rich info">
-              <div class="r-head"><span class="t">🗂 {{ m.card.title }}</span></div>
-              <p v-if="m.card.subtitle">{{ m.card.subtitle }}</p>
-              <div class="kv">
-                <template v-for="(rw, i) in (m.card.rows || [])" :key="i">
-                  <span class="k">{{ rw.task }}</span>
-                  <span class="v" :class="rw.type">{{ rw.owner }}</span>
-                </template>
+
+        <!-- 主体：默认单列；放大态三栏（左导航 + 中对话 + 右进度/文件）-->
+        <div class="ai-main">
+
+          <!-- 左栏：完整还原 Cowork 左导航（仅放大态）-->
+          <div v-if="aiMax" class="ai-cw-left">
+            <div class="ai-cw-tabs">
+              <button class="ai-cw-tab" @click="toast('对话模式（演示）')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" /></svg>
+                对话
+              </button>
+              <button class="ai-cw-tab active">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
+                协作
+              </button>
+              <button class="ai-cw-tab" @click="toast('代码模式（演示）')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" /></svg>
+                代码
+              </button>
+            </div>
+
+            <button class="ai-cw-newtask" @click="aiMsgs = []; toast('已开新任务')">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5v14" /></svg>
+              新任务
+            </button>
+
+            <nav class="ai-cw-nav">
+              <button class="ai-cw-navitem" @click="toast('项目（演示）')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" /></svg>
+                项目
+              </button>
+              <button class="ai-cw-navitem" @click="toast('产物（演示）')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /><path d="m3.3 7 8.7 5 8.7-5M12 22V12" /></svg>
+                产物
+              </button>
+              <button class="ai-cw-navitem" @click="toast('定时任务（演示）')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+                定时任务
+              </button>
+              <button class="ai-cw-navitem" @click="toast('派发 · Beta（演示）')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><line x1="8.6" y1="10.5" x2="15.4" y2="6.5" /><line x1="8.6" y1="13.5" x2="15.4" y2="17.5" /></svg>
+                派发
+                <span class="ai-cw-beta">Beta</span>
+              </button>
+            </nav>
+
+            <div class="ai-cw-recents">
+              <div class="ai-cw-recents-h">
+                <span>最近</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6" /><line x1="7" y1="12" x2="17" y2="12" /><line x1="10" y1="18" x2="14" y2="18" /></svg>
+              </div>
+              <ul class="ai-cw-list">
+                <li class="act">本周爆款专班</li>
+                <li>《夜航星》分镜评审</li>
+                <li>《银河谣》配乐进度</li>
+                <li>虚拟明星·墨白 商单报价</li>
+                <li>抖音评论区舆情</li>
+                <li>本周发布排期</li>
+              </ul>
+            </div>
+
+            <div class="ai-cw-user">
+              <span class="ai-cw-user-ava">安</span>
+              <span class="ai-cw-user-nm">安其影视工作室</span>
+              <span class="ai-cw-user-plan">Max</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
+            </div>
+          </div>
+
+          <!-- 中栏：对话 + 输入（dock / 放大 共用）-->
+          <div class="ai-center">
+            <div class="ai-body">
+              <div v-for="m in aiMsgs" :key="m.id" class="ai-msg" :class="{ mine: isMe(m.sender) }">
+                <div v-if="!m.card" class="ai-bubble" v-html="renderMd(m.body)"></div>
+                <div v-else class="rich info">
+                  <div class="r-head"><span class="t">🗂 {{ m.card.title }}</span></div>
+                  <p v-if="m.card.subtitle">{{ m.card.subtitle }}</p>
+                  <div class="kv">
+                    <template v-for="(rw, i) in (m.card.rows || [])" :key="i">
+                      <span class="k">{{ rw.task }}</span>
+                      <span class="v" :class="rw.type">{{ rw.owner }}</span>
+                    </template>
+                  </div>
+                </div>
+              </div>
+              <p v-if="!aiMsgs.length" class="hint pad">跟中枢 AI 说句话，比如"帮我建个爆款专班"</p>
+            </div>
+            <div class="ai-composer">
+              <div class="ai-input-box">
+                <input v-model="aiDraft" placeholder="一句话下达目标…" @keyup.enter="aiSend" />
+                <div class="ai-toolbar">
+                  <div class="ai-tb-left">
+                    <button class="ai-tb-btn" title="附件" @click="onAttach"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 17.93 8.8L9.41 17.32a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg></button>
+                  </div>
+                  <button class="ai-send-ic" :disabled="!aiDraft.trim()" @click="aiSend"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13" /><path d="M22 2 15 22l-4-9-9-4Z" /></svg></button>
+                </div>
               </div>
             </div>
           </div>
-          <p v-if="!aiMsgs.length" class="hint pad">跟中枢 AI 说句话，比如"帮我建个爆款专班"</p>
-        </div>
-        <div class="ai-composer">
-          <div class="ai-input-box">
-            <input v-model="aiDraft" placeholder="一句话下达目标…" @keyup.enter="aiSend" />
-            <div class="ai-toolbar">
-              <div class="ai-tb-left">
-                <button class="ai-tb-btn" title="附件" @click="onAttach"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 17.93 8.8L9.41 17.32a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg></button>
+
+          <!-- 右栏：进度 + 项目文件（仅放大态，对齐 Cowork 右栏）-->
+          <div v-if="aiMax" class="ai-cw-right">
+            <div class="ai-cw-sec">
+              <div class="ai-cw-sec-h with-meta"><span>Progress</span><span class="ai-cw-meta">5/8</span></div>
+              <ul class="ai-cw-progress">
+                <li class="done">热点选题扫描</li>
+                <li class="done">对标账号拆解</li>
+                <li class="done">爆款标题生成</li>
+                <li class="done">脚本初稿草拟</li>
+                <li class="done">封面方案生成</li>
+                <li class="in">数据复盘报告生成中…</li>
+                <li>素材库去重</li>
+                <li>推送发布排期</li>
+              </ul>
+            </div>
+            <div class="ai-cw-sec">
+              <div class="ai-cw-proj-h">
+                <span class="ai-cw-proj-nm">安其影视 · 本周专班</span>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" /></svg>
               </div>
-              <button class="ai-send-ic" :disabled="!aiDraft.trim()" @click="aiSend"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13" /><path d="M22 2 15 22l-4-9-9-4Z" /></svg></button>
+              <ul class="ai-cw-files">
+                <li><span class="ic">📄</span>Instructions · CLAUDE.md</li>
+                <li><span class="ic">📊</span>全平台数据_2026Q2.xlsx</li>
+                <li><span class="ic">📑</span>平台规则与避雷.pdf</li>
+                <li><span class="ic">🧾</span>商单合作合同模板.docx</li>
+              </ul>
             </div>
           </div>
+
         </div>
       </aside>
 
@@ -2130,6 +2246,74 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 .ai-send-ic { margin-left: auto; background: var(--accent); color: #fff; border: none; width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: background .12s ease, opacity .12s ease; }
 .ai-send-ic:hover { background: var(--warn); }
 .ai-send-ic:disabled { background: var(--border); color: var(--text-dim); cursor: not-allowed; opacity: .7; }
+
+/* ════════ 中枢 AI · 放大态（Cowork 式全屏弹窗）════════ */
+/* 半透明遮罩：盖住整页，点空白处还原 */
+.ai-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.38); z-index: 79; animation: ai-bd-in .16s ease; }
+@keyframes ai-bd-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* 放大态：脱离 dock、近全屏居中 */
+.ai-panel.maximized {
+  position: fixed; top: 2.5vh; bottom: 2.5vh; left: 2.5vw; right: 2.5vw;
+  width: auto; height: auto; margin: 0; z-index: 80;
+  border-radius: 14px;
+  box-shadow: 0 24px 64px rgba(0,0,0,.22), 0 4px 12px rgba(0,0,0,.10), 0 0 0 1px var(--border);
+}
+
+/* 主体容器：默认单列（中栏吃满）；放大态横向三栏 */
+.ai-main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.ai-center { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
+.ai-panel.maximized .ai-main { flex-direction: row; }
+.ai-panel.maximized .ai-center { border-left: 1px solid var(--border); border-right: 1px solid var(--border); }
+
+/* —— 左导航栏（Chat/Cowork/Code → ＋新任务 → 项目/产物/定时/派发 → 最近 → 用户）—— */
+.ai-cw-left { width: 248px; flex-shrink: 0; display: flex; flex-direction: column; padding: 12px 10px; background: var(--bg-soft); overflow: hidden; }
+.ai-cw-tabs { display: flex; gap: 2px; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 10px; padding: 3px; margin-bottom: 12px; }
+.ai-cw-tab { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 6px 4px; border: none; background: transparent; color: var(--text-3); font-family: var(--font-body); font-size: var(--fs-75); font-weight: var(--fw-bold); border-radius: 7px; cursor: pointer; transition: background .12s ease, color .12s ease; }
+.ai-cw-tab:hover { color: var(--text); }
+.ai-cw-tab.active { background: var(--bg-panel); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+.ai-cw-tab svg { flex-shrink: 0; }
+.ai-cw-newtask { display: inline-flex; align-items: center; gap: 7px; width: 100%; padding: 9px 12px; background: var(--accent); color: #fff; border: none; border-radius: 9px; font-family: var(--font-body); font-size: var(--fs-100); font-weight: var(--fw-bold); cursor: pointer; margin-bottom: 10px; transition: filter .12s ease; }
+.ai-cw-newtask:hover { filter: brightness(1.05); }
+.ai-cw-nav { display: flex; flex-direction: column; gap: 1px; margin-bottom: 8px; }
+.ai-cw-navitem { display: inline-flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: none; background: transparent; color: var(--text-2); font-family: var(--font-body); font-size: var(--fs-100); border-radius: 8px; cursor: pointer; text-align: left; transition: background .12s ease, color .12s ease; }
+.ai-cw-navitem:hover { background: var(--bg-hover); color: var(--text); }
+.ai-cw-navitem svg { flex-shrink: 0; color: var(--text-3); }
+.ai-cw-beta { margin-left: auto; font-size: 9px; font-weight: var(--fw-bold); color: var(--accent); background: var(--accent-soft); padding: 1px 6px; border-radius: 6px; letter-spacing: .5px; }
+.ai-cw-recents { flex: 1; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--border-soft); padding-top: 10px; }
+.ai-cw-recents-h { display: flex; align-items: center; justify-content: space-between; font-size: var(--fs-75); color: var(--text-3); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 1.5px; padding: 0 6px 6px; }
+.ai-cw-recents-h svg { cursor: pointer; }
+.ai-cw-list { list-style: none; margin: 0; padding: 0; flex: 1; min-height: 0; overflow-y: auto; }
+.ai-cw-list li { padding: 8px 10px; border-radius: 6px; font-size: var(--fs-100); color: var(--text-2); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ai-cw-list li:hover { background: var(--bg-hover); color: var(--text); }
+.ai-cw-list li.act { background: var(--bg-panel); color: var(--text); font-weight: var(--fw-bold); box-shadow: inset 3px 0 0 var(--accent); }
+.ai-cw-user { display: flex; align-items: center; gap: 9px; margin-top: 8px; padding: 8px 10px; border-top: 1px solid var(--border-soft); border-radius: 8px; cursor: pointer; }
+.ai-cw-user:hover { background: var(--bg-hover); }
+.ai-cw-user-ava { width: 26px; height: 26px; flex-shrink: 0; border-radius: 50%; background: var(--accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: var(--fs-75); font-weight: var(--fw-bold); }
+.ai-cw-user-nm { font-size: var(--fs-100); font-weight: var(--fw-bold); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ai-cw-user-plan { font-size: 10px; color: var(--text-3); border: 1px solid var(--border); border-radius: 6px; padding: 0 5px; flex-shrink: 0; }
+.ai-cw-user > svg { margin-left: auto; color: var(--text-3); flex-shrink: 0; }
+
+/* —— 右栏：进度 + 项目文件 —— */
+.ai-cw-right { width: 300px; flex-shrink: 0; display: flex; flex-direction: column; padding: 14px 12px; background: var(--bg-panel); overflow-y: auto; }
+.ai-cw-sec { margin-bottom: 18px; }
+.ai-cw-sec-h { font-size: var(--fs-75); color: var(--text-3); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 8px; padding: 0 4px; }
+.ai-cw-sec-h.with-meta { display: flex; justify-content: space-between; }
+.ai-cw-meta { color: var(--accent); font-weight: var(--fw-bold); }
+.ai-cw-progress, .ai-cw-files { list-style: none; margin: 0; padding: 0; }
+.ai-cw-progress li { display: flex; align-items: center; gap: 8px; padding: 5px 4px; font-size: var(--fs-100); color: var(--text-2); position: relative; padding-left: 26px; }
+.ai-cw-progress li::before { content: ""; position: absolute; left: 4px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--text-dim); }
+.ai-cw-progress li.done { color: var(--text-3); text-decoration: line-through; }
+.ai-cw-progress li.done::before { background: var(--ok); border-color: var(--ok); }
+.ai-cw-progress li.done::after { content: ""; position: absolute; left: 7.5px; top: 50%; width: 7px; height: 4px; border-left: 2px solid #fff; border-bottom: 2px solid #fff; transform: translateY(-65%) rotate(-45deg); }
+.ai-cw-progress li.in { color: var(--accent); font-weight: var(--fw-bold); }
+.ai-cw-progress li.in::before { border-color: var(--accent); background: var(--accent-soft); }
+.ai-cw-proj-h { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; padding: 0 4px; }
+.ai-cw-proj-nm { font-size: var(--fs-100); font-weight: var(--fw-bold); color: var(--text); }
+.ai-cw-proj-h svg { color: var(--text-3); }
+.ai-cw-files li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; font-size: var(--fs-100); color: var(--text-2); cursor: pointer; }
+.ai-cw-files li:hover { background: var(--bg-hover); color: var(--text); }
+.ai-cw-files li .ic { width: 16px; text-align: center; flex-shrink: 0; }
 
 /* ──── 右侧插件竖栏（40 宽，pr-icon 32 圆形）──── */
 .plugin-rail { width: var(--plugin-rail-w); background: var(--bg-soft); display: flex; flex-direction: column; align-items: center; padding: 10px 0; gap: 8px; flex-shrink: 0; }
