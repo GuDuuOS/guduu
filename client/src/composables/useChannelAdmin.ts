@@ -173,10 +173,15 @@ function loadConfigFromRoom(name: string, roomId: string) {
   const saved = getChannelConfig(roomId)
   const cfg = configs[name]
   suppressPersist = true
+  // 单值配置：有存的就 merge，没存的保留中性默认（人设模板/默认模型/默认记忆）
   if (saved.persona) Object.assign(cfg.persona, saved.persona)
   if (saved.model) Object.assign(cfg.model, saved.model)
   if (saved.memory) Object.assign(cfg.memory, saved.memory)
-  // 后续标签页逐个接：skills / knowledge / rules / dataScopes
+  // 列表配置：真实频道一律以"已存的为准、没存就空"——清掉 seedConfig 里的 demo mock，内容由用户真填
+  cfg.skills = Array.isArray(saved.skills) ? saved.skills : []
+  cfg.knowledge = Array.isArray(saved.knowledge) ? saved.knowledge : []
+  cfg.rules = Array.isArray(saved.rules) ? saved.rules : []
+  cfg.dataScopes = Array.isArray(saved.dataScopes) ? saved.dataScopes : []
   nextTick(() => { suppressPersist = false })
 }
 
@@ -235,6 +240,27 @@ watch(
     if (suppressPersist || !currentRoomId.value) return
     persist({ memory: { ...mem } })
   },
+  { deep: true },
+)
+// 列表型配置（技能/知识库/规则/数据权限）：增删改 → 防抖整列表写回
+watch(
+  () => current.value.skills,
+  (v) => { if (!suppressPersist && currentRoomId.value) persist({ skills: v.map((x) => ({ ...x })) }) },
+  { deep: true },
+)
+watch(
+  () => current.value.knowledge,
+  (v) => { if (!suppressPersist && currentRoomId.value) persist({ knowledge: v.map((x) => ({ ...x })) }) },
+  { deep: true },
+)
+watch(
+  () => current.value.rules,
+  (v) => { if (!suppressPersist && currentRoomId.value) persist({ rules: v.map((x) => ({ ...x })) }) },
+  { deep: true },
+)
+watch(
+  () => current.value.dataScopes,
+  (v) => { if (!suppressPersist && currentRoomId.value) persist({ dataScopes: v.map((x) => ({ ...x })) }) },
   { deep: true },
 )
 

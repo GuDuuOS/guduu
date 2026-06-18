@@ -112,12 +112,14 @@
             </div>
             <button class="cam-del" title="移除" @click="removeItem('skills', i)">×</button>
           </div>
+          <p v-if="isLive && !state.skills.length" class="cam-row-desc" style="padding:8px 2px">还没有技能 —— 在下方添加，会自动保存到本频道。</p>
           <div class="cam-add">
             <input v-model="sLabel" class="cam-input" placeholder="技能名称" @keyup.enter="doAddSkill" />
             <input v-model="sTag" class="cam-input cam-input-sm" placeholder="/命令（可选）" @keyup.enter="doAddSkill" />
             <input v-model="sDesc" class="cam-input" placeholder="说明（可选）" @keyup.enter="doAddSkill" />
             <button class="cam-add-btn" :disabled="!sLabel.trim()" @click="doAddSkill">＋ 添加技能</button>
           </div>
+          <div v-if="isLive" class="cam-help" :style="saveHintStyle">{{ saveHint }}</div>
         </template>
 
         <!-- 知识库 -->
@@ -129,11 +131,13 @@
             </div>
             <button class="cam-del" title="移除" @click="removeItem('knowledge', i)">×</button>
           </div>
+          <p v-if="isLive && !state.knowledge.length" class="cam-row-desc" style="padding:8px 2px">还没有知识库 —— 在下方添加，会自动保存到本频道。</p>
           <div class="cam-add">
             <input v-model="kLabel" class="cam-input" placeholder="知识库名称" @keyup.enter="doAddKnowledge" />
             <input v-model="kDesc" class="cam-input" placeholder="说明（如 1,240 篇）" @keyup.enter="doAddKnowledge" />
             <button class="cam-add-btn" :disabled="!kLabel.trim()" @click="doAddKnowledge">＋ 添加来源</button>
           </div>
+          <div v-if="isLive" class="cam-help" :style="saveHintStyle">{{ saveHint }}</div>
         </template>
 
         <!-- 数据权限 -->
@@ -151,6 +155,7 @@
             </select>
             <button class="cam-del" title="移除" @click="removeScope(i)">×</button>
           </div>
+          <p v-if="isLive && !state.dataScopes.length" class="cam-row-desc" style="padding:8px 2px">还没有配置数据源 —— 在下方添加，会自动保存到本频道。</p>
           <div class="cam-add">
             <input v-model="dLabel" class="cam-input" placeholder="系统 / 数据源名称" @keyup.enter="doAddScope" />
             <select v-model="dLevel" class="cam-select cam-select-sm">
@@ -161,6 +166,7 @@
             </select>
             <button class="cam-add-btn" :disabled="!dLabel.trim()" @click="doAddScope">＋ 添加</button>
           </div>
+          <div v-if="isLive" class="cam-help" :style="saveHintStyle">{{ saveHint }}</div>
         </template>
 
         <!-- 规则 -->
@@ -172,11 +178,13 @@
             </div>
             <button class="cam-del" title="移除" @click="removeItem('rules', i)">×</button>
           </div>
+          <p v-if="isLive && !state.rules.length" class="cam-row-desc" style="padding:8px 2px">还没有规则 —— 在下方添加，会自动保存到本频道。</p>
           <div class="cam-add">
             <input v-model="rLabel" class="cam-input" placeholder="规则名称" @keyup.enter="doAddRule" />
             <input v-model="rDesc" class="cam-input" placeholder="说明（可选）" @keyup.enter="doAddRule" />
             <button class="cam-add-btn" :disabled="!rLabel.trim()" @click="doAddRule">＋ 添加规则</button>
           </div>
+          <div v-if="isLive" class="cam-help" :style="saveHintStyle">{{ saveHint }}</div>
         </template>
 
         <!-- 模型 & 配额 -->
