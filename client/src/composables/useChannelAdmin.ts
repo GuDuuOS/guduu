@@ -174,7 +174,9 @@ function loadConfigFromRoom(name: string, roomId: string) {
   const cfg = configs[name]
   suppressPersist = true
   if (saved.persona) Object.assign(cfg.persona, saved.persona)
-  // 后续标签页逐个接：model / memory / skills / knowledge / rules / dataScopes
+  if (saved.model) Object.assign(cfg.model, saved.model)
+  if (saved.memory) Object.assign(cfg.memory, saved.memory)
+  // 后续标签页逐个接：skills / knowledge / rules / dataScopes
   nextTick(() => { suppressPersist = false })
 }
 
@@ -210,12 +212,28 @@ function persist(patch: Record<string, any>) {
   }, 700)
 }
 
-// 人设变更 → 自动持久化（深度监听；加载期 suppress；demo 无 roomId 不写）
+// 人设 / 模型 / 记忆 变更 → 自动持久化（深度监听；加载期 suppress；demo 无 roomId 不写）
 watch(
   () => current.value.persona,
   (p) => {
     if (suppressPersist || !currentRoomId.value) return
     persist({ persona: { ...p } })
+  },
+  { deep: true },
+)
+watch(
+  () => current.value.model,
+  (m) => {
+    if (suppressPersist || !currentRoomId.value) return
+    persist({ model: { ...m } })
+  },
+  { deep: true },
+)
+watch(
+  () => current.value.memory,
+  (mem) => {
+    if (suppressPersist || !currentRoomId.value) return
+    persist({ memory: { ...mem } })
   },
   { deep: true },
 )

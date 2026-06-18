@@ -196,6 +196,7 @@
             <input v-model.number="state.model.rateLimit" type="number" min="0" class="cam-input" />
           </div>
           <div class="cam-help">为本群独立分配模型与额度，便于成本归集与防滥用。</div>
+          <div v-if="isLive" class="cam-help" :style="saveHintStyle">{{ saveHint }}</div>
         </template>
 
         <!-- 记忆 & 审计 -->
@@ -223,6 +224,7 @@
             </button>
           </div>
           <div class="cam-help">记忆与上下文按群隔离，A 群对话不会泄漏到 B 群；审计日志用于事后追溯。</div>
+          <div v-if="isLive" class="cam-help" :style="saveHintStyle">{{ saveHint }}</div>
         </template>
       </div>
     </div>

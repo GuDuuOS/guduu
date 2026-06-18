@@ -7,6 +7,13 @@
 
 ---
 
+## 2026-06-18 — 频道管理「模型 + 记忆审计」标签 → 真实持久化
+- 复用上一条建好的 state event 机制，把**模型**(模型/Token预算/速率限制)和**记忆审计**(长期记忆/上下文范围/留存天数/审计日志)也接通自动保存。
+- `useChannelAdmin`：loadConfigFromRoom 增读 model/memory；新增两个深度 watch → 改动防抖写回 cosmac.channel_config。`ChannelAdminModal` 模型页、记忆页加保存状态提示。
+- 本地 preview 验证（连生产 hs）：夜航星改 Token 预算 507 + 关长期记忆 → 刷新后仍在；测试值已复位(预算500/长期记忆开)，未留生产脏数据。
+- TODO：模型档位 MODEL_OPTIONS 仍是品牌占位名(CosMac Star-Pro/Lite)，要让 bot 真按它跑(任务#3)需映射到真实 provider/model。
+- 已真实持久化的标签页：角色 / 模型 / 记忆审计。余下 技能/知识库/规则/数据权限(列表型，待确认真实内容来源)。
+
 ## 2026-06-18 — 频道管理「角色(人设)」标签 → 真实持久化（配置存进房间 state event）
 - 建好配置持久化地基并接通**角色标签**：人设（AI 名称/语气/System Prompt）改一下就自动存进频道。
 - `matrix/client.ts`：新增 `getChannelConfig`/`setChannelConfig`，存成每频道一条自定义 state event `cosmac.channel_config`（与 cosmac.workspace 同命名）。选 state event 而非 account data：群级共享、多端一致、留在房间、不改 Synapse 核心。写需房间发状态事件权限（一般管理员）。
