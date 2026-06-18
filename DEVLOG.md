@@ -7,6 +7,12 @@
 
 ---
 
+## 2026-06-18 — 个人主页接入 URL（/me）；其余覆盖层确认保持弹窗
+- 路由覆盖审计：主导航(board/tasks/频道/admin)已全覆盖；临时态(菜单/各设置弹窗/侧栏折叠/AI侧栏/专注模式)按惯例不接。剩 5 个页面级覆盖层(个人主页/市场/插件商城/资产/CLI)原本无地址。
+- 按负责人选择：只给**个人主页**接 `/me`(它最像页面、该能刷新留存/分享)；市场/商城/资产/CLI 保持弹窗(刷新落在工具弹窗里体验怪)。
+- 实现：`useProfileHome().visible` 接进集中同步——`computePath` 加 `/me` 分支、`applyFromRoute` 把 admin/profile 两个全屏覆盖层按地址互斥开关、watch 数组加 `profileVisible`；router 补 `/me`→Blank。
+- preview 验证：开个人主页→`#/me`、后退→关闭回 board、**刷新 `/me`→直达个人主页**。build 通过。
+
 ## 2026-06-18 — 工作台接入 URL 路由（每个视图有独立地址 + 后退/刷新/深链）
 - 问题：整个 app 是单个 `LiveView` 根组件、用内部状态切视图，点来点去 **URL 从不变**——刷新回默认页、不能分享链接、浏览器后退无效。
 - 方案：**集中式双向 URL 同步**，不动任何点击 handler（导航本就收敛在 `selectSpace/openBoard/openTasks/openRoom + adminOpen`）。状态变→`router.push` 写地址；地址变(后退/前进/手改/深链)→还原状态；首屏按地址恢复一次(深链到频道要等房间加载)。用 hash history(已有)，无需改 nginx。

@@ -18,6 +18,7 @@ const Blank = { render: () => null }
 const routes: RouteRecordRaw[] = [
   { path: '/admin',     name: 'admin',     component: AdminView },
   // —— 工作台内部视图（地址同步用；component 不会被渲染）——
+  { path: '/me',                component: Blank }, // 个人主页覆盖层
   { path: '/s/:space',          component: Blank },
   { path: '/s/:space/board',    component: Blank },
   { path: '/s/:space/tasks',    component: Blank },

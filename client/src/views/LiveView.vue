@@ -82,7 +82,8 @@ const { visible: rightPanelVisible, toggle: toggleRightPanel, hide: hideRightPan
 // 看板数据源：数据看板/任务看板的数据源展示(展开列表) + 编辑(弹窗)，按工作区持久化
 const { sources, panelOpen: boardPanelOpen, toggleSourcePanel, closeSourcePanel: closeBoardSrcPanel, setSpace: setBoardSpace } = useBoardSources()
 const { open: openCli } = useCli()
-const { open: openProfileHome } = useProfileHome()
+// profileVisible 接入 URL 同步（个人主页是页面级覆盖层，给它 /me 地址）
+const { open: openProfileHome, visible: profileVisible } = useProfileHome()
 const { open: openPluginStore } = usePluginStore()
 const { open: openAssets } = useCustomAssets()
 const { openSettings } = useUserProfile()
@@ -883,6 +884,7 @@ let urlRestored = false       // 首屏只按地址还原一次（见 refresh）
 /** 由当前导航状态算出对应地址 */
 function computePath(): string {
   if (adminOpen.value) return '/admin'
+  if (profileVisible.value) return '/me'
   const s = activeSpace.value
   if (!s) return '/'
   if (currentRoom.value) return `/s/${encodeURIComponent(s)}/c/${encodeURIComponent(currentRoom.value)}`
@@ -895,8 +897,10 @@ function applyFromRoute() {
   applyingFromRoute = true
   try {
     const p = route.path
-    if (p.startsWith('/admin')) { adminOpen.value = true; return }
-    adminOpen.value = false
+    // 两个全屏覆盖层先按地址决定开关（互斥）
+    adminOpen.value = p.startsWith('/admin')
+    profileVisible.value = p.startsWith('/me')
+    if (adminOpen.value || profileVisible.value) return
     // 匹配 /s/:space、/s/:space/board、/s/:space/tasks、/s/:space/c/:roomId
     const m = p.match(/^\/s\/([^/]+)(?:\/(board|tasks)|\/c\/(.+))?$/)
     if (!m) return // 根路径或无法识别 → 保持现状
@@ -921,7 +925,7 @@ function applyFromRoute() {
 }
 
 // 状态 → 地址：用 push 让浏览器后退可用
-watch([activeSpace, board, tasks, currentRoom, adminOpen], () => {
+watch([activeSpace, board, tasks, currentRoom, adminOpen, profileVisible], () => {
   if (!syncReady || applyingFromRoute) return
   const path = computePath()
   if (route.path !== path) router.push(path).catch(() => {})
