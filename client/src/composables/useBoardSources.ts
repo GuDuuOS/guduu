@@ -24,9 +24,11 @@ const sources = reactive<Record<BoardKey, BoardSource[]>>({ dashboard: [], tasks
 const saveState = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
 
 // UI 状态
-const editorOpen = ref(false)                                 // 数据源编辑弹窗是否打开
+const editorOpen = ref(false)                                 // 数据源编辑弹窗是否打开（旧入口，保留）
 const editorBoard = ref<BoardKey>('dashboard')                // 弹窗在编辑哪个看板
-const popoverBoard = ref<BoardKey | null>(null)               // 哪个看板的"数据源展示"列表展开着
+const popoverBoard = ref<BoardKey | null>(null)               // 哪个看板的"数据源展示"列表展开着（旧下拉，保留）
+const panelOpen = ref(false)                                  // 右侧「数据源」面板是否打开
+const panelBoard = ref<BoardKey>('dashboard')                 // 右侧面板在看哪个看板的数据源
 
 let suppress = false                                          // 加载期抑制回写
 
@@ -69,6 +71,20 @@ export function useBoardSources() {
     editorOpen,
     editorBoard,
     popoverBoard,
+    panelOpen,
+    panelBoard,
+    /** 打开/切换右侧「数据源」面板（看某个看板的数据源）*/
+    toggleSourcePanel(board: BoardKey) {
+      if (panelOpen.value && panelBoard.value === board) {
+        panelOpen.value = false
+        return
+      }
+      load() // 打开前刷新一遍，防 Space 状态还没 sync
+      panelBoard.value = board
+      saveState.value = 'idle'
+      panelOpen.value = true
+    },
+    closeSourcePanel() { panelOpen.value = false },
     /** 切换当前工作区（LiveView 在 activeSpace 变化时调用）*/
     setSpace(id?: string) {
       spaceId.value = id || ''
