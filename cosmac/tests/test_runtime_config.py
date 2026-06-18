@@ -93,6 +93,28 @@ class TestRuntimeConfig(unittest.TestCase):
         # 不应抛异常
         bot._apply_runtime_config()
 
+    def test_transient_failure_keeps_tool_restriction(self) -> None:
+        # 回归：读配置抖动失败绝不能"失效开放"把工具限制清空。
+        bot = _bot("!ctrl:host", {"enabled_tools": ["create_room"]})
+        bot._apply_runtime_config()
+        self.assertEqual([s.name for s in bot.toolbox.specs()], ["create_room"])
+
+        def boom(*_a, **_k):
+            raise RuntimeError("403")  # 模拟无权限/网络抖动
+
+        bot.client.get_state_event = boom  # type: ignore
+        bot._cfg_cache_ts = float("-inf")  # 让 20s 缓存失效，强制重读
+        bot._apply_runtime_config()
+        # 关键：仍只剩 create_room，没有恢复成全部 4 个工具
+        self.assertEqual([s.name for s in bot.toolbox.specs()], ["create_room"])
+
+    def test_require_tokens_raises_when_missing(self) -> None:
+        # appservice 密钥缺失必须明确报错（不再硬编码、不静默用泄露的旧 key）
+        with self.assertRaises(RuntimeError):
+            CosmacConfig(as_token="", hs_token="").require_tokens()
+        # 两个都有值则正常通过
+        CosmacConfig(as_token="a", hs_token="b").require_tokens()
+
 
 if __name__ == "__main__":
     unittest.main()

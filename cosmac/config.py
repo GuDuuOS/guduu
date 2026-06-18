@@ -33,9 +33,13 @@ class CosmacConfig:
     server_name: str = "guduu.local"
     bot_user_id: str = "@guduu:guduu.local"
 
-    # —— 与 run/synapse/guduu-bot.yaml 中的值一致（开发用，生产务必更换）——
-    as_token: str = "d9b3d04cf7ec509499c725019809ff3a89b391d60bee50708cd3f30fe2e328f8"
-    hs_token: str = "6ff1df99b42d8de0839c4789e2a310988cd9d2d0edc5664843142c4f19b7ac8a"
+    # —— appservice 密钥：绝不硬编码进代码（会随 git 泄露）——
+    # 默认空串；真实值由 from_env() 按优先级注入：
+    #   1) 环境变量 GUDUU_AS_TOKEN / GUDUU_HS_TOKEN（生产用 Secret Manager 注入）
+    #   2) appservice 注册文件 run/synapse/guduu-bot.yaml（本地开发用，该文件已 gitignore）
+    # 两者都拿不到则保持空串，启动时 require_tokens() 会报错而不是静默用泄露的旧 key。
+    as_token: str = ""
+    hs_token: str = ""
 
     listen_host: str = "127.0.0.1"
     listen_port: int = 9000
@@ -60,14 +64,22 @@ class CosmacConfig:
 
     @staticmethod
     def from_env() -> "CosmacConfig":
-        """从环境变量读取配置，未设置的项用上面的开发默认值。"""
+        """从环境变量读取配置，未设置的项用上面的开发默认值。
+
+        appservice 密钥（as_token/hs_token）特殊处理：环境变量优先；环境变量没给时，
+        回退去读 appservice 注册文件（本地开发用，文件已 gitignore，不会泄露）。
+        """
         defaults = CosmacConfig()
+        # 密钥按优先级解析：环境变量 → 注册文件。两者都空就保持空（启动时报错）。
+        reg = _load_registration_tokens()
+        as_token = os.environ.get("GUDUU_AS_TOKEN") or reg.get("as_token", "")
+        hs_token = os.environ.get("GUDUU_HS_TOKEN") or reg.get("hs_token", "")
         return CosmacConfig(
             homeserver_url=os.environ.get("GUDUU_HS_URL", defaults.homeserver_url),
             server_name=os.environ.get("GUDUU_SERVER_NAME", defaults.server_name),
             bot_user_id=os.environ.get("GUDUU_BOT_USER_ID", defaults.bot_user_id),
-            as_token=os.environ.get("GUDUU_AS_TOKEN", defaults.as_token),
-            hs_token=os.environ.get("GUDUU_HS_TOKEN", defaults.hs_token),
+            as_token=as_token,
+            hs_token=hs_token,
             listen_host=os.environ.get("GUDUU_LISTEN_HOST", defaults.listen_host),
             listen_port=int(os.environ.get("GUDUU_LISTEN_PORT", defaults.listen_port)),
             llm_provider=os.environ.get("GUDUU_LLM_PROVIDER", defaults.llm_provider),
@@ -82,6 +94,54 @@ class CosmacConfig:
                 f"#cosmac-ctrl:{os.environ.get('GUDUU_SERVER_NAME', defaults.server_name)}",
             ),
         )
+
+    def require_tokens(self) -> None:
+        """启动前校验：appservice 密钥必须存在，否则直接报错（而不是带空 token 静默连不上）。
+
+        给出明确指引，避免把泄露的旧 key 当默认值用。生产用环境变量注入，
+        本地把密钥放进 run/synapse/guduu-bot.yaml（已 gitignore）。
+        """
+        missing = [
+            name
+            for name, val in (("as_token", self.as_token), ("hs_token", self.hs_token))
+            if not val
+        ]
+        if missing:
+            raise RuntimeError(
+                f"缺少 appservice 密钥 {missing}：请设环境变量 GUDUU_AS_TOKEN/GUDUU_HS_TOKEN，"
+                "或在 run/synapse/guduu-bot.yaml 里配置。密钥不再硬编码进代码。"
+            )
+
+
+# appservice 注册文件路径：默认本机开发布局 run/synapse/guduu-bot.yaml，可用环境变量覆盖。
+_REGISTRATION_YAML = os.environ.get(
+    "GUDUU_REGISTRATION_YAML",
+    os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "run",
+        "synapse",
+        "guduu-bot.yaml",
+    ),
+)
+
+
+def _load_registration_tokens() -> dict:
+    """从 appservice 注册 yaml 读 as_token/hs_token（本地开发回退用）。
+
+    文件不存在/读不出就返回空 dict——交给 require_tokens() 报错。
+    解析失败绝不抛异常拖垮启动（环境变量路径仍可用）。
+    """
+    try:
+        import yaml  # synapse 运行环境必带，按需导入避免无谓依赖
+
+        with open(_REGISTRATION_YAML, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        return {
+            "as_token": str(data.get("as_token", "")),
+            "hs_token": str(data.get("hs_token", "")),
+        }
+    except Exception:
+        return {}
 
 
 # 管理后台写、bot 读的"AI 配置"state event 类型（cosmac.* 命名空间，不与协议 m.* 冲突）

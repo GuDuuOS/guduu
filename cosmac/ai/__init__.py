@@ -1,9 +1,10 @@
 """CosMac Star AI 层 —— 主 AI 的大脑 + 多模型抽象。
 
 这里定义统一的 LLM 接口（base.py），并按配置提供具体实现：
-  - echo   ：占位回显，用于打通骨架（无需任何 key）
-  - claude ：Anthropic Claude（需 ANTHROPIC_API_KEY）
-  - openai ：OpenAI GPT（需 OPENAI_API_KEY）
+  - echo            ：占位回显，用于打通骨架（无需任何 key）
+  - claude          ：Anthropic Claude（需 ANTHROPIC_API_KEY）
+  - openai          ：OpenAI GPT（需 OPENAI_API_KEY）
+  - deepseek / ark  ：火山引擎方舟（OpenAI 兼容，接 DeepSeek 等，需 ARK_API_KEY）
 
 业务代码只依赖统一接口，绝不直接调用某家厂商的 SDK，方便随时切换模型后端。
 未装对应 SDK 或未配置 API key 时，会自动优雅降级到 echo，保证 bot 始终能跑。
@@ -63,7 +64,21 @@ def get_provider(config: "CosmacConfig") -> LLMProvider:
             return EchoProvider()
         return OpenAIProvider(model=config.llm_model, system_prompt=config.system_prompt)
 
-    raise ValueError(f"未知的 LLM provider: {name!r}（可选 echo/claude/openai）")
+    # 火山引擎方舟（OpenAI 兼容）：接 DeepSeek 等。deepseek 是 ark 的别名。
+    if name in ("ark", "deepseek"):
+        if not os.environ.get("ARK_API_KEY"):
+            logger.warning("未设置 ARK_API_KEY，主 AI 暂时降级为 echo 占位。")
+            return EchoProvider()
+        try:
+            from cosmac.ai.ark import ArkProvider
+        except ImportError:
+            logger.warning("未安装 openai SDK（方舟复用它），主 AI 暂时降级为 echo 占位。")
+            return EchoProvider()
+        return ArkProvider(model=config.llm_model, system_prompt=config.system_prompt)
+
+    raise ValueError(
+        f"未知的 LLM provider: {name!r}（可选 echo/claude/openai/deepseek/ark）"
+    )
 
 
 __all__ = [

@@ -140,34 +140,41 @@ class CosmacBot:
     # —— 运行时 AI 配置：管理后台写控制室 state event，bot 读并应用 ——
 
     def _read_overrides(self) -> Dict[str, Any]:
-        """从控制室读取 AI 配置覆盖。带 20s 缓存；任何失败都返回上次缓存/空，
-        从而**完全回退到启动配置**（控制室不存在/未加入/网络错都不影响正常回话）。
+        """从控制室读取 AI 配置覆盖。带 20s 缓存。
+
+        关键安全语义（修掉"失效开放"）：
+          - 读成功且有配置 → 用新配置并缓存；
+          - 读成功但控制室没有配置(别名 404 / state 404) → 覆盖确实为空（属正常，
+            全工具启用），缓存空；
+          - 读失败(403 / 网络错 / 5xx 等) → **保留上次成功的缓存**，绝不因一次抖动
+            把管理员设的工具限制/人设清空（client 的 resolve_alias/get_state_event
+            现在对这类失败会抛异常，正好走 except 分支）。
+
+        别名每轮都重新解析：控制室被删/重建/重指向后能跟上新 room_id（不再永久缓存）。
         """
         now = time.monotonic()
         if now - self._cfg_cache_ts < 20:
             return self._cfg_cache
-        overrides: Dict[str, Any] = {}
         try:
-            # 别名只解析一次，之后缓存 room_id
-            if not self._control_room:
-                self._control_room = self.client.resolve_alias(
-                    self.config.control_room_alias
-                )
-            if self._control_room:
-                ev = self.client.get_state_event(
-                    self._control_room, AI_CONFIG_EVENT_TYPE
-                )
+            # 别名→room_id：每轮重解析；404 返回 None（控制室还没建），其它失败抛异常
+            room = self.client.resolve_alias(self.config.control_room_alias)
+            self._control_room = room  # 仅记录当前解析结果，不再当永久缓存
+            overrides: Dict[str, Any] = {}
+            if room:
+                ev = self.client.get_state_event(room, AI_CONFIG_EVENT_TYPE)
                 if isinstance(ev, dict):
                     # 只取我们认识的字段，避免脏数据
                     for k in ("model", "system_prompt", "enabled_tools"):
                         if k in ev:
                             overrides[k] = ev[k]
-        except Exception:  # 读配置绝不能拖垮回话
-            logger.exception("读取运行时 AI 配置失败，沿用启动配置")
-            overrides = self._cfg_cache  # 沿用上次成功的
-        self._cfg_cache = overrides
-        self._cfg_cache_ts = now
-        return overrides
+            # 读成功（含"控制室/配置不存在"这种正常的空）→ 更新缓存
+            self._cfg_cache = overrides
+            self._cfg_cache_ts = now
+            return overrides
+        except Exception:  # 读失败：保留上次成功配置，绝不失效开放
+            logger.exception("读取运行时 AI 配置失败，沿用上次成功配置")
+            self._cfg_cache_ts = now  # 20s 退避，避免每条消息都猛打故障中的服务器
+            return self._cfg_cache
 
     def _apply_runtime_config(self) -> None:
         """把控制室下发的配置应用到 llm/agent/toolbox（按需热重建，幂等）。"""

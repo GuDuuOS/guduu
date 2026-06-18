@@ -7,6 +7,23 @@
 
 ---
 
+## 2026-06-19 — 多模型新增 DeepSeek（走火山引擎方舟，OpenAI 兼容）
+- 接入 DeepSeek：方舟 Chat Completions 与 OpenAI 完全兼容，所以新增 `cosmac/ai/ark.py`（`ArkProvider`），复用 `openai` SDK，只把 base_url 指向方舟、key 用 `ARK_API_KEY`。实现 `complete` + `complete_with_tools`（OpenAI 工具格式：tools/tool_calls/tool 角色），所以 DeepSeek 也能用主 AI 的工具调用。
+- `get_provider` 注册 `deepseek` / `ark` 两个名（deepseek 是 ark 别名）；无 `ARK_API_KEY` 自动降级 echo。模型 id 用 `GUDUU_LLM_MODEL` 填方舟的 Model ID 或 Endpoint ID(ep-...)，默认 `deepseek-v3.2`；可选 `ARK_BASE_URL` 换区域。
+- system 提示去重：`_build_messages` 仅在历史无 system 消息时才用构造人设兜底，避免和 Agent 传入的 system 重复。
+- 验证：新增 `test_ark_provider.py`（选 provider 回退 + 消息/工具翻译，构造 client 不联网）；cosmac 21 单测全过、ruff 通过。`openai>=1.50` 已在 requirements。CLAUDE.md/AGENTS.md §9 补 DeepSeek 启用说明。
+- 启用：服务器 `Environment=GUDUU_LLM_PROVIDER=deepseek` + `Environment=ARK_API_KEY=...` + `Environment=GUDUU_LLM_MODEL=<方舟模型id>`，daemon-reload+restart。
+
+## 2026-06-19 — 代码审查修复（6 项：安全/正确性/工具友好性）
+- 对一轮代码审查发现的 6 个问题逐条核实后全部修复。
+- **#1【P1 安全】appservice 密钥硬编码进 git**：`config.py` 的 `as_token`/`hs_token` 默认值改空串；`from_env` 按「环境变量 → 注册文件 `run/synapse/guduu-bot.yaml`(已 gitignore)」优先级注入；新增 `require_tokens()` 启动校验，缺失即报错，不再静默用泄露的旧 key。⚠️ **旧 token 仍在 git 历史，必须在服务器侧轮换**。
+- **#2【P1】`BOT_ID` 写死 `cosmac.cc`**：本地 `guduu.local` 下会邀请不存在的账号。改为函数 `botId()`=`@guduu:${serverName()}`，按当前登录服务器动态拼（登录后求值，避开模块加载期 mx 未就绪）。
+- **#3【P1】控制室只有创建者可访问**：`ensureControlRoom` 现邀请**全部服务器管理员**并把他们的房间权限提到 100（否则受 state_default=50 限制，写不了 `cosmac.ai.config`）。
+- **#4【P1】配置读失败"失效开放"**：`get_state_event`/`resolve_alias` 现在区分 404(确实没有→None) 与 403/网络错(抛异常)；`_read_overrides` 仅在读成功时更新缓存，读失败保留上次成功配置——一次抖动不再把管理员设的工具限制清空。
+- **#5【P2】控制室 room_id 永久缓存**：别名改为每轮（20s 缓存窗口）重解析，控制室重建/重指向后能跟上。
+- **#6【P3】Vue 源混入 4 个 NUL 字节**：`LiveView.vue` 的 markdown 占位哨兵由字面 NUL 字节改为转义序列 `\x00`（运行时等价），文件恢复为纯文本，`rg`/`file`/diff 不再当二进制。
+- 验证：`test_runtime_config.py` 加 2 个回归测试（抖动不失效开放 / 缺密钥报错），cosmac 单测全过、ruff 通过、client `npm run build` 通过；`from_env` 本地能从 yaml 读到密钥（本地开发不回归）。
+
 ## 2026-06-19 — 管理后台入口改回「仅管理员可见」
 - 之前为破 CORS 鸡生蛋把入口改成常显；现 CORS 已通、`isServerAdmin()` 探测正常，按用户要求改回：登录后探测是服务器管理员才显示「管理后台」入口，普通用户菜单里看不到（手敲 /#/admin 仍被 AdminView "无权限"闸 + Admin API 403 双重挡回）。
 - LiveView：恢复 isAdmin ref + afterLogin 里 isServerAdmin 探测 + 入口 v-if=isAdmin。preview 验证 @admin 登录可见入口、isAdmin=true。

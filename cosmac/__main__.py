@@ -22,6 +22,8 @@ def main() -> None:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
     config = CosmacConfig.from_env()
+    # 启动前先校验 appservice 密钥存在（密钥不再硬编码，缺失就明确报错）
+    config.require_tokens()
     run(config)
 
 

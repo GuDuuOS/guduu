@@ -174,10 +174,16 @@ export GUDUU_LLM_PROVIDER=claude
 export ANTHROPIC_API_KEY=sk-ant-...
 # 或 OpenAI（默认 gpt-4o）
 # export GUDUU_LLM_PROVIDER=openai ; export OPENAI_API_KEY=sk-...
+# 或 DeepSeek（走火山引擎方舟，OpenAI 兼容）：
+# export GUDUU_LLM_PROVIDER=deepseek    # 等价 ark
+# export ARK_API_KEY=方舟APIKey
+# export GUDUU_LLM_MODEL=deepseek-v3.2  # 填你方舟账号的 Model ID 或 Endpoint ID(ep-...)
+# 可选换区域：export ARK_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
 .venv/bin/python -m cosmac
 ```
 没配 key 时会自动降级回 echo（bot 照常能跑）。可选：`GUDUU_LLM_MODEL` 换模型、`GUDUU_SYSTEM_PROMPT` 改人设。
-部署到 Google Cloud 时，把 `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` 配进服务的环境变量/Secret Manager 即可。
+部署到 Google Cloud 时，把 `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`ARK_API_KEY` 配进服务的环境变量/Secret Manager 即可。
+> 方舟(DeepSeek)复用 `openai` SDK，只是 base_url 指向方舟。模型 id 以你方舟控制台实际开通/创建的接入点为准。
 CosMac Star 服务依赖见 `cosmac/requirements.txt`。
 
 ---

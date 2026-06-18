@@ -149,36 +149,44 @@ class MatrixClient:
         return None
 
     def resolve_alias(self, alias: str) -> Optional[str]:
-        """把房间别名（#cosmac-ctrl:host）解析成 room_id。解析不到返回 None。"""
+        """把房间别名（#cosmac-ctrl:host）解析成 room_id。
+
+        语义区分（让调用方能安全回退、不"失效开放"）：
+          - 200 → 返回 room_id；
+          - 404 → 别名确实不存在 → 返回 None（控制室还没建，属正常）；
+          - 其它状态码 / 网络异常 → **抛异常**，让调用方保留上次配置，
+            而不是把"读失败"误当成"控制室不存在"。
+        """
         url = self._url(f"/_matrix/client/v3/directory/room/{quote(alias)}")
-        try:
-            resp = requests.get(url, timeout=10)
-            if resp.status_code == 200:
-                return resp.json().get("room_id")
-        except requests.RequestException as exc:
-            logger.warning("解析别名 %s 异常: %s", alias, exc)
-        return None
+        resp = requests.get(url, timeout=10)  # 网络异常向上抛
+        if resp.status_code == 200:
+            return resp.json().get("room_id")
+        if resp.status_code == 404:
+            return None
+        raise RuntimeError(f"解析别名 {alias} 失败: HTTP {resp.status_code}")
 
     def get_state_event(
         self, room_id: str, event_type: str, state_key: str = ""
     ) -> Optional[Dict[str, Any]]:
-        """读某房间的一个 state event 内容（如 AI 配置）。读不到返回 None。
+        """读某房间的一个 state event 内容（如 AI 配置）。
 
-        需要 bot 已加入该房间。任何失败（未加入/网络错/不存在）都返回 None，
-        交给调用方回退——绝不抛异常拖垮消息处理。
+        需要 bot 已加入该房间。语义区分（避免读失败被当成"没配置"而失效开放）：
+          - 200 → 返回内容 dict；
+          - 404 → 该房间确实没有这个 state event → 返回 None（正常，无覆盖）；
+          - 403/网络错/5xx 等 → **抛异常**，让调用方保留上次成功的配置。
         """
         url = self._url(
             f"/_matrix/client/v3/rooms/{quote(room_id)}/state/"
             f"{quote(event_type)}/{quote(state_key)}"
         )
-        try:
-            resp = requests.get(url, timeout=10)
-            if resp.status_code == 200:
-                return resp.json()
-            logger.debug("读 state %s@%s: %s", event_type, room_id, resp.status_code)
-        except requests.RequestException as exc:
-            logger.warning("读 state event 异常: %s", exc)
-        return None
+        resp = requests.get(url, timeout=10)  # 网络异常向上抛
+        if resp.status_code == 200:
+            return resp.json()
+        if resp.status_code == 404:
+            return None
+        raise RuntimeError(
+            f"读 state {event_type}@{room_id} 失败: HTTP {resp.status_code}"
+        )
 
     def get_members(self, room_id: str) -> List[Dict[str, str]]:
         """查房间已加入的成员列表（主 AI 的"眼睛"之一）。
