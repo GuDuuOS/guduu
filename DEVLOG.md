@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-06-19 — 复查修 1 个真 bug：控制室对账会自我锁权
+- 对「多模型 + 后台 provider + 控制室」一轮复查，发现并修掉一个潜伏 bug。
+- **bug**：`reconcileControlRoomAdmins`（#2 给已有控制室补管理员权限那段）在控制室**没同步进本地**时，`pl` 退化成 `{}`，而传入的管理员列表不含创建者，于是 `sendStateEvent('m.room.power_levels', { users })` 会**抹掉 events_default/state_default 等全部字段、并丢掉创建者自己的 100 权限 → 自我锁权**。
+- **修法**：只有**真正读到** power_levels（房间已同步、事件存在）才提权；读不到就跳过，绝不用空对象覆盖。邀请那步不受影响。
+- 触发面：当前仅 1 个管理员 → `others` 为空、reconcile 直接 return，故线上未触发；加第二个管理员前修掉。
+- 复查同时确认多模型四家代码（build_provider/openai_compat/claude/ark）无问题。client build 通过、preview 无报错。
+- （本次 dist 还顺带带上并行会话给 `onUpdate` 加的 80ms 防抖：初始同步的历史消息整批一次渲染、不再逐条蹦。）
+
 ## 2026-06-19 — 多模型四家 + 后台可选 provider/模型（密钥仍走服务端，安全加固）
 - 多模型扩成四家：新增通用 `cosmac/ai/openai_compat.py`（OpenAI 兼容，参数化 api_key/base_url/model，含工具调用）；`ark.py` 改薄成它的子类；`claude.py` 加 api_key 参数。`ai/__init__.py` 加 **build_provider**（claude / openai / deepseek·ark / **gemini**，key 缺则降级 echo，gemini 走 Google 的 OpenAI 兼容端点）。
 - 管理后台「AI 配置」加 **模型后端下拉**（默认/DeepSeek/Claude/ChatGPT/Gemini）+ 模型 id；bot 从控制室读 `provider/model` 热切（按签名重建）。

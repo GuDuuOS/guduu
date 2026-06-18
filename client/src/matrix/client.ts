@@ -132,13 +132,23 @@ export function logout(): void {
   mx = null
 }
 
-/** 注册"有更新就回调"——同步完成或来新消息时触发，UI 据此刷新。 */
+/** 注册"有更新就回调"——同步完成或来新消息时触发，UI 据此刷新。
+ *
+ * 关键：登录/重连的**初始同步**会把一批历史消息逐条灌进时间线，`Room.timeline`
+ * 因此密集触发；若每条都立刻 refresh，历史消息就会"一条一条蹦出来"。这里做个
+ * 80ms 短防抖：把这一**批**密集事件合并成**一次**渲染——历史整批瞬间出现；
+ * 而真正的新消息（彼此间隔远大于 80ms）仍各自触发一次，逐条自然出现。 */
 export function onUpdate(cb: () => void): void {
   if (!mx) return
+  let timer: number | null = null
+  const fire = () => {
+    if (timer !== null) clearTimeout(timer)
+    timer = window.setTimeout(() => { timer = null; cb() }, 80)
+  }
   ;(mx as any).on('sync', (state: string) => {
-    if (state === 'PREPARED' || state === 'SYNCING') cb()
+    if (state === 'PREPARED' || state === 'SYNCING') fire()
   })
-  ;(mx as any).on('Room.timeline', () => cb())
+  ;(mx as any).on('Room.timeline', () => fire())
 }
 
 /** 列出我加入的群频道（排除 Space 空间本身、"中枢 AI"私聊和无名 DM；按名称排序）。 */
@@ -807,21 +817,27 @@ async function reconcileControlRoomAdmins(roomId: string, admins: string[]): Pro
   if (!mx || !admins.length) return
   const room = mx.getRoom(roomId)
   try {
-    // ① 提权：保留原 power_levels 其它字段，只补 users 里缺的管理员
-    const pl =
-      (room as any)?.currentState?.getStateEvents?.('m.room.power_levels', '')?.getContent?.() || {}
-    const users: Record<string, number> = { ...(pl.users || {}) }
-    let changed = false
-    for (const a of admins) {
-      if ((users[a] ?? 0) < 100) {
-        users[a] = 100
-        changed = true
+    // ① 提权：**只有真正读到 power_levels 时才动它**。
+    //    若房间没同步进本地（pl 读不到），绝不用空对象去 sendStateEvent——否则会把
+    //    events_default/state_default/创建者自己的 100 等全部抹掉，造成自我锁权。
+    const pl: any = (room as any)?.currentState
+      ?.getStateEvents?.('m.room.power_levels', '')
+      ?.getContent?.()
+    if (pl && typeof pl === 'object') {
+      const users: Record<string, number> = { ...(pl.users || {}) }
+      let changed = false
+      for (const a of admins) {
+        if ((users[a] ?? 0) < 100) {
+          users[a] = 100
+          changed = true
+        }
+      }
+      if (changed) {
+        // 保留原事件全部字段，只覆盖 users
+        await (mx as any).sendStateEvent(roomId, 'm.room.power_levels', { ...pl, users }, '')
       }
     }
-    if (changed) {
-      await (mx as any).sendStateEvent(roomId, 'm.room.power_levels', { ...pl, users }, '')
-    }
-    // ② 邀请还不在房里的管理员
+    // ② 邀请还不在房里的管理员（房间没同步时 present 为空，invite 已在者会被忽略）
     const present = new Set(
       ((room as any)?.getMembers?.() || [])
         .filter((m: any) => m.membership === 'join' || m.membership === 'invite')
