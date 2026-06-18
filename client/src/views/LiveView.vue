@@ -123,6 +123,23 @@ const taskCols = computed(() => [
 ])
 function priLabel(p: string) { return p === 'high' ? '高' : p === 'mid' ? '中' : '低' }
 
+// 当前剧集（用于进度条/时间线的名字与配色）
+const activeProd = computed(() => productionTabs.find((p) => p.key === activeShow.value) ?? productionTabs[0])
+// 剧集整体进度：done=100% / 进行中=50% / 待办=0%，按任务数加权平均（动态算）
+const showProgress = computed(() => {
+  const items = taskItems.value
+  if (!items.length) return 0
+  const done = items.filter((t) => t.status === 'done').length
+  const doing = items.filter((t) => t.status === 'in_progress').length
+  return Math.round((done * 100 + doing * 50) / items.length)
+})
+// 时间线：已完成(过去) → 进行中(现在) → 待办(将来)
+const STATUS_ORDER: Record<string, number> = { done: 0, in_progress: 1, pending: 2 }
+const showTimeline = computed(() =>
+  [...taskItems.value].sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status]),
+)
+function statusLabel(s: string) { return s === 'done' ? '已完成' : s === 'in_progress' ? '进行中' : '待办' }
+
 const HS = 'https://hs.cosmac.cc'
 
 // ── 登录态 ──────────────────────────────────────────────
@@ -1054,6 +1071,22 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
               </button>
             </div>
           </div>
+          <!-- 剧集进度条 + 时间线（跟选中的剧集走）-->
+          <div class="show-band">
+            <div class="show-prog">
+              <span class="sp-label">{{ activeProd.name }} · 制作进度</span>
+              <div class="sp-bar"><div class="sp-fill" :style="{ width: showProgress + '%', background: activeProd.color }" /></div>
+              <span class="sp-pct">{{ showProgress }}%</span>
+            </div>
+            <div class="show-tl">
+              <div v-for="t in showTimeline" :key="t.id" class="tl-row" :class="t.status">
+                <span class="tl-dot" />
+                <span class="tl-name">{{ t.title }}</span>
+                <span class="tl-meta">{{ statusLabel(t.status) }} · {{ t.assignee }} · {{ t.due }}</span>
+              </div>
+            </div>
+          </div>
+
           <div class="kanban">
             <div v-for="col in taskCols" :key="col.key" class="kb-col">
               <div class="kb-col-head">
@@ -1626,6 +1659,24 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 .prod-tab-av { width: 18px; height: 18px; border-radius: 5px; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; flex-shrink: 0; }
 .prod-tab-n { font-size: 10px; color: var(--text-3); background: var(--bg-hover); border-radius: 8px; padding: 0 5px; min-width: 14px; text-align: center; }
 .prod-tab.active .prod-tab-n { background: var(--accent); color: #fff; }
+/* 剧集进度条 + 时间线 */
+.show-band { flex-shrink: 0; padding: 12px var(--content-pad-x) 6px; }
+.show-prog { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.sp-label { font-size: 12px; color: var(--text-2); font-weight: 600; flex-shrink: 0; }
+.sp-bar { flex: 1; height: 8px; border-radius: 6px; background: var(--bg-hover); overflow: hidden; }
+.sp-fill { height: 100%; border-radius: 6px; transition: width .3s ease; }
+.sp-pct { font-size: 12px; color: var(--text-2); font-weight: 600; min-width: 34px; text-align: right; }
+.show-tl { display: flex; flex-direction: column; padding-left: 3px; }
+.tl-row { display: flex; align-items: center; gap: 10px; padding: 5px 0 5px 18px; position: relative; font-size: 13px; }
+.tl-row::before { content: ''; position: absolute; left: 5px; top: 0; bottom: 0; width: 2px; background: var(--border); }
+.tl-row:first-child::before { top: 50%; }
+.tl-row:last-child::before { bottom: 50%; }
+.tl-dot { position: absolute; left: 0; width: 12px; height: 12px; border-radius: 50%; background: var(--text-3); box-shadow: 0 0 0 3px var(--bg-soft); }
+.tl-row.done .tl-dot { background: #6b8e4e; }
+.tl-row.in_progress .tl-dot { background: var(--accent); }
+.tl-name { color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-row.done .tl-name { color: var(--text-3); text-decoration: line-through; }
+.tl-meta { font-size: 11px; color: var(--text-3); flex-shrink: 0; }
 .kanban { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; padding: 16px var(--content-pad-x); overflow: hidden; }
 .kb-col { display: flex; flex-direction: column; min-height: 0; background: var(--bg-soft); border-radius: 12px; overflow: hidden; }
 .kb-col-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px; flex-shrink: 0; }
