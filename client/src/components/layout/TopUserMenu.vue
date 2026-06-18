@@ -37,6 +37,12 @@
 
       <div class="um-sep" />
 
+      <!-- 管理后台入口（仅服务器管理员可见；非管理员进去也会被权限闸挡回）-->
+      <button v-if="isAdmin" class="um-item" @click="goAdmin">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></svg>
+        <span>管理后台</span>
+      </button>
+
       <button class="um-item danger" @click="close">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="m16 17 5-5-5-5" /><path d="M21 12H9" /></svg>
         <span>退出登录</span>
@@ -47,15 +53,22 @@
 
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useUserProfile, type UserSettingsTab } from '@/composables/useUserProfile'
+import { isServerAdmin } from '@/matrix/client'
 
 const { user, handle, openSettings } = useUserProfile()
+const router = useRouter()
 
 const open = ref(false)
 const root = ref<HTMLElement | null>(null)
+// 是否服务器管理员：决定要不要显示「管理后台」入口（异步探测，默认隐藏）
+const isAdmin = ref(false)
 function close() { open.value = false }
 /** 打开个人设置到指定标签，并关闭下拉 */
 function go(tab: UserSettingsTab) { openSettings(tab); open.value = false }
+/** 跳转管理后台并关闭下拉 */
+function goAdmin() { router.push('/admin'); open.value = false }
 
 function onDocClick(e: MouseEvent) {
   if (open.value && root.value && !root.value.contains(e.target as Node)) open.value = false
@@ -66,6 +79,8 @@ function onKey(e: KeyboardEvent) {
 onMounted(() => {
   document.addEventListener('click', onDocClick)
   document.addEventListener('keydown', onKey)
+  // 异步探测当前账号是不是管理员，是才显示「管理后台」入口
+  isServerAdmin().then((ok) => { isAdmin.value = ok }).catch(() => {})
 })
 onBeforeUnmount(() => {
   document.removeEventListener('click', onDocClick)

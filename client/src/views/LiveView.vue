@@ -42,6 +42,7 @@ import {
   isFavourite,
   setFavourite,
   normalizeUserId,
+  isServerAdmin,
   BOT_ID,
   type LiveRoom,
   type LiveMsg,
@@ -58,6 +59,8 @@ import CustomAssetsModal from '@/components/layout/CustomAssetsModal.vue'
 import UserSettingsModal from '@/components/layout/UserSettingsModal.vue'
 import ProfileHome from '@/components/layout/ProfileHome.vue'
 import CliConsole from '@/components/layout/CliConsole.vue'
+// 平台管理后台（覆盖层；仅服务器管理员可入）
+import AdminView from '@/views/AdminView.vue'
 import ChannelAdminModal from '@/components/channel/ChannelAdminModal.vue'
 import RightPanel from '@/components/layout/RightPanel.vue'
 import { useRightPanel } from '@/composables/useRightPanel'
@@ -216,6 +219,9 @@ const channelsOpen = ref(true)
 const dmsOpen = ref(true)
 const appMenuOpen = ref(false)
 const userMenuOpen = ref(false)
+// 管理后台：isAdmin 决定菜单入口是否显示；adminOpen 控制覆盖层
+const isAdmin = ref(false)
+const adminOpen = ref(false)
 const focused = ref(false)
 const fav = ref(false)
 const rootEl = ref<HTMLElement | null>(null)
@@ -623,6 +629,8 @@ async function afterLogin(uid: string) {
   } catch (e) {
     /* 没建成私聊也不影响频道功能 */
   }
+  // 探测当前账号是不是服务器管理员：是才显示「管理后台」入口
+  isServerAdmin().then((ok) => { isAdmin.value = ok }).catch(() => { isAdmin.value = false })
   refresh()
 }
 
@@ -938,6 +946,10 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
             <button class="um-item" @click="onSettings('profile')"><span class="um-ic">👤</span>个人资料</button>
             <button class="um-item" @click="onSettings('perms')"><span class="um-ic">🔒</span>我的权限</button>
             <button class="um-item" @click="onSettings('share')"><span class="um-ic">🔔</span>数据调用授权</button>
+            <template v-if="isAdmin">
+              <div class="um-sep" />
+              <button class="um-item" @click="adminOpen = true; userMenuOpen = false"><span class="um-ic">⚙</span>管理后台</button>
+            </template>
             <div class="um-sep" />
             <button class="um-item danger" @click="doLogout"><span class="um-ic">⎋</span>退出登录</button>
           </div>
@@ -1380,6 +1392,9 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
     <ProfileHome />
     <CliConsole />
     <ChannelAdminModal />
+
+    <!-- 平台管理后台（全屏覆盖层；仅管理员可从用户菜单进入）-->
+    <AdminView v-if="adminOpen" @close="adminOpen = false" />
 
     <!-- 单集甘特图弹窗（点在制单集卡打开）-->
     <div v-if="ganttEp" class="gantt-overlay" @click.self="ganttEp = null">

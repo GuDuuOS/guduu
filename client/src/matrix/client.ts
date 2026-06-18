@@ -493,6 +493,124 @@ export async function createUser(
   return uid
 }
 
+/* ========================================================================
+ *  平台管理后台（/admin）—— 用户管理
+ *  全部走 Synapse Admin API（/_synapse/admin/...），用当前登录管理员的 token。
+ *  需当前账号是服务器管理员（@admin 之类）；非管理员调用会被 Synapse 拒（403）。
+ * ===================================================================== */
+
+/** 统一的 Admin API 请求封装：自动带上 base 地址与管理员 token，出错抛带原因的错误。 */
+async function adminFetch(path: string, init: RequestInit = {}): Promise<any> {
+  if (!mx) throw new Error('未登录')
+  const base = (mx as any).baseUrl as string
+  const token = (mx as any).getAccessToken?.() as string
+  const res = await fetch(`${base}${path}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      ...(init.headers || {}),
+    },
+  })
+  if (!res.ok) {
+    let msg = `${res.status}`
+    try { msg = (await res.json())?.error || msg } catch { /* ignore */ }
+    throw new Error(msg)
+  }
+  // 有些 Admin 端点回空体，容错处理
+  try { return await res.json() } catch { return {} }
+}
+
+/** 管理后台用的精简用户结构 */
+export interface AdminUser {
+  id: string            // 完整 id，如 @alice:cosmac.cc
+  name: string          // 显示名（没设就退回 localpart）
+  admin: boolean        // 是否服务器管理员
+  deactivated: boolean  // 是否已停用
+  isBot: boolean        // 是否中枢 AI（按 BOT_ID 判定）
+}
+
+/**
+ * 当前登录者是否服务器管理员。
+ * 非管理员访问 /admin 时用它挡回。查询失败（如 403）一律按"不是管理员"处理。
+ */
+export async function isServerAdmin(): Promise<boolean> {
+  try {
+    const uid = mx?.getUserId() || ''
+    const data = await adminFetch(`/_synapse/admin/v1/users/${encodeURIComponent(uid)}/admin`)
+    return !!data.admin
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 拉全部用户列表（Synapse Admin API v2，自动翻页直到取完）。
+ * guests=false 不含访客；deactivated=true 连已停用的也返回（后台要能看到并恢复）。
+ */
+export async function listUsers(): Promise<AdminUser[]> {
+  const out: AdminUser[] = []
+  let from = 0
+  const limit = 100
+  // Synapse 用 next_token 分页；没有 next_token 表示取完了
+  for (let guard = 0; guard < 100; guard++) {
+    const data = await adminFetch(
+      `/_synapse/admin/v2/users?from=${from}&limit=${limit}&guests=false&deactivated=true`,
+    )
+    for (const u of data.users || []) {
+      const localpart = (u.name || '').replace(/^@/, '').split(':')[0]
+      out.push({
+        id: u.name,
+        name: u.displayname || localpart,
+        admin: !!u.admin,
+        deactivated: !!u.deactivated,
+        isBot: u.name === BOT_ID,
+      })
+    }
+    if (data.next_token === undefined || data.next_token === null) break
+    from = Number(data.next_token)
+  }
+  return out
+}
+
+/**
+ * 停用某账号（POST deactivate）。erase=false 只停用、不抹除内容（可恢复账号本身）。
+ * 注意：停用是软删除——账号不能再登录，但 id 仍占用。
+ */
+export async function deactivateUser(userId: string): Promise<void> {
+  await adminFetch(`/_synapse/admin/v1/deactivate/${encodeURIComponent(userId)}`, {
+    method: 'POST',
+    body: JSON.stringify({ erase: false }),
+  })
+}
+
+/**
+ * 恢复一个已停用的账号：Synapse 要求"恢复"时必须同时设一个新密码。
+ * 用 PUT users 把 deactivated 置回 false 并写入新密码。
+ */
+export async function reactivateUser(userId: string, newPassword: string): Promise<void> {
+  await adminFetch(`/_synapse/admin/v2/users/${encodeURIComponent(userId)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ deactivated: false, password: newPassword }),
+  })
+}
+
+/** 给某账号重置密码；logout_devices=true 同时把该用户已登录的设备全部踢下线。 */
+export async function resetPassword(userId: string, newPassword: string): Promise<void> {
+  await adminFetch(`/_synapse/admin/v1/reset_password/${encodeURIComponent(userId)}`, {
+    method: 'POST',
+    body: JSON.stringify({ new_password: newPassword, logout_devices: true }),
+  })
+}
+
+/** 设/撤某账号的服务器管理员权限（PUT users 的 admin 字段）。 */
+export async function setUserAdmin(userId: string, admin: boolean): Promise<void> {
+  await adminFetch(`/_synapse/admin/v2/users/${encodeURIComponent(userId)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ admin }),
+  })
+}
+
 /** 读某个频道当前时间线的消息（含发送者昵称与 cosmac.card 富卡）。 */
 export function listMessages(roomId: string): LiveMsg[] {
   const room = mx?.getRoom(roomId)

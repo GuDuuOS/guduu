@@ -1,0 +1,450 @@
+<template>
+  <div class="admin-view channel-view">
+    <!-- 关闭管理后台，回到工作台 -->
+    <button class="adm-close" title="关闭" @click="emit('close')">✕</button>
+    <!-- 左侧管理菜单（用户管理已就绪，其余占位，后续逐块填） -->
+    <aside class="adm-nav">
+      <div class="adm-brand">
+        <span class="adm-logo">⚙</span>
+        <div>
+          <div class="adm-title">管理后台</div>
+          <div class="adm-sub">CosMac Star 运营控制台</div>
+        </div>
+      </div>
+      <nav class="adm-menu">
+        <button class="adm-mi active">
+          <span class="adm-mi-ic">👤</span> 用户管理
+        </button>
+        <button class="adm-mi" disabled>
+          <span class="adm-mi-ic">＃</span> 频道管理 <span class="adm-soon">敬请期待</span>
+        </button>
+        <button class="adm-mi" disabled>
+          <span class="adm-mi-ic">🤖</span> AI 配置 <span class="adm-soon">敬请期待</span>
+        </button>
+        <button class="adm-mi" disabled>
+          <span class="adm-mi-ic">📊</span> 数据概览 <span class="adm-soon">敬请期待</span>
+        </button>
+      </nav>
+    </aside>
+
+    <!-- 右侧内容区 -->
+    <section class="adm-main">
+      <!-- 1) 权限校验中 -->
+      <div v-if="state === 'checking'" class="adm-center">
+        <div class="adm-spin" /> 正在校验管理员权限…
+      </div>
+
+      <!-- 2) 无权限 -->
+      <div v-else-if="state === 'denied'" class="adm-center adm-denied">
+        <div class="adm-denied-ic">🔒</div>
+        <div class="adm-denied-t">无法进入管理后台</div>
+        <div class="adm-denied-d">
+          可能原因：① 当前账号不是服务器管理员（请用 <code>@admin</code> 登录）；
+          ② 服务器未对管理接口 <code>/_synapse/admin</code> 开放跨域（CORS），
+          导致浏览器无法调用。若你确认是管理员，多半是第 ② 种，需在 hs 的 nginx 放开 CORS。
+        </div>
+        <button class="adm-btn" @click="check">重新校验</button>
+      </div>
+
+      <!-- 3) 用户管理面板 -->
+      <template v-else>
+        <header class="adm-head">
+          <div>
+            <h1 class="adm-h1">用户管理</h1>
+            <p class="adm-hint">
+              共 {{ users.length }} 个账号 ·
+              管理员 {{ users.filter(u => u.admin).length }} ·
+              已停用 {{ users.filter(u => u.deactivated).length }}
+            </p>
+          </div>
+          <div class="adm-actions">
+            <button class="adm-btn ghost" :disabled="loading" @click="loadUsers">
+              {{ loading ? '刷新中…' : '刷新' }}
+            </button>
+            <button class="adm-btn" @click="showCreate = true">＋ 新建用户</button>
+          </div>
+        </header>
+
+        <div v-if="loading" class="adm-center"><div class="adm-spin" /> 加载用户列表…</div>
+
+        <table v-else class="adm-table">
+          <thead>
+            <tr>
+              <th>用户</th>
+              <th>角色</th>
+              <th>状态</th>
+              <th class="adm-ops-h">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="u in users" :key="u.id" :class="{ off: u.deactivated }">
+              <td>
+                <div class="adm-user">
+                  <span class="adm-ava">{{ avatarOf(u) }}</span>
+                  <div class="adm-u-id">
+                    <div class="adm-u-name">
+                      {{ u.name }}
+                      <span v-if="u.isBot" class="adm-tag bot">中枢AI</span>
+                    </div>
+                    <div class="adm-u-handle">{{ u.id }}</div>
+                  </div>
+                </div>
+              </td>
+              <td>
+                <span class="adm-tag" :class="u.admin ? 'admin' : 'member'">
+                  {{ u.admin ? '管理员' : '成员' }}
+                </span>
+              </td>
+              <td>
+                <span class="adm-tag" :class="u.deactivated ? 'off' : 'ok'">
+                  {{ u.deactivated ? '已停用' : '正常' }}
+                </span>
+              </td>
+              <td class="adm-ops">
+                <button class="adm-op" :disabled="u.isBot || busy === u.id" @click="toggleAdmin(u)">
+                  {{ u.admin ? '撤销管理员' : '设为管理员' }}
+                </button>
+                <button class="adm-op" :disabled="busy === u.id" @click="doResetPassword(u)">
+                  重置密码
+                </button>
+                <button
+                  v-if="!u.deactivated"
+                  class="adm-op danger"
+                  :disabled="u.isBot || busy === u.id"
+                  @click="doDeactivate(u)"
+                >停用</button>
+                <button v-else class="adm-op" :disabled="busy === u.id" @click="doReactivate(u)">
+                  恢复
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </template>
+    </section>
+
+    <!-- 新建用户弹窗 -->
+    <div v-if="showCreate" class="adm-mask" @click.self="showCreate = false">
+      <div class="adm-modal">
+        <div class="adm-modal-h">新建用户</div>
+        <label class="adm-field">
+          <span>用户名</span>
+          <input v-model.trim="form.username" placeholder="如 alice（自动补 :{{ domain }}）" />
+        </label>
+        <label class="adm-field">
+          <span>显示名（可选）</span>
+          <input v-model.trim="form.displayname" placeholder="如 爱丽丝" />
+        </label>
+        <label class="adm-field">
+          <span>初始密码</span>
+          <input v-model="form.password" type="text" placeholder="至少 8 位" />
+        </label>
+        <div class="adm-modal-f">
+          <button class="adm-btn ghost" @click="showCreate = false">取消</button>
+          <button class="adm-btn" :disabled="!canCreate || busy === 'create'" @click="doCreate">
+            {{ busy === 'create' ? '创建中…' : '创建' }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed, onMounted, reactive, ref } from 'vue'
+import {
+  isServerAdmin,
+  listUsers,
+  createUser,
+  deactivateUser,
+  reactivateUser,
+  resetPassword,
+  setUserAdmin,
+  serverName,
+  type AdminUser,
+} from '@/matrix/client'
+import { useToast } from '@/composables/useToast'
+
+// 作为覆盖层使用：关闭时通知父组件（LiveView）收起
+const emit = defineEmits<{ (e: 'close'): void }>()
+
+const { success, warn } = useToast()
+
+// 页面状态机：checking 校验中 / denied 无权限 / ok 已是管理员
+const state = ref<'checking' | 'denied' | 'ok'>('checking')
+const loading = ref(false)
+const users = ref<AdminUser[]>([])
+// busy 存"正在操作的用户 id"或 'create'，用于禁用对应按钮、防重复点击
+const busy = ref<string | null>(null)
+
+const domain = computed(() => serverName())
+
+// 新建用户表单
+const showCreate = ref(false)
+const form = reactive({ username: '', displayname: '', password: '' })
+const canCreate = computed(
+  () => form.username.length > 0 && form.password.length >= 8,
+)
+
+/** 取头像首字（显示名首字，没有就用 id 首字母） */
+function avatarOf(u: AdminUser): string {
+  const s = u.name || u.id.replace(/^@/, '')
+  return s.charAt(0).toUpperCase()
+}
+
+/** 进页面先校验管理员；是管理员才拉用户列表 */
+async function check() {
+  state.value = 'checking'
+  const ok = await isServerAdmin()
+  if (!ok) { state.value = 'denied'; return }
+  state.value = 'ok'
+  await loadUsers()
+}
+
+async function loadUsers() {
+  loading.value = true
+  try {
+    users.value = await listUsers()
+  } catch (e: any) {
+    warn('加载失败', e?.message || '无法获取用户列表')
+  } finally {
+    loading.value = false
+  }
+}
+
+async function toggleAdmin(u: AdminUser) {
+  const next = !u.admin
+  if (!confirm(`确认${next ? '把' : '撤销'} ${u.name} ${next ? '设为管理员' : '的管理员权限'}？`)) return
+  busy.value = u.id
+  try {
+    await setUserAdmin(u.id, next)
+    u.admin = next
+    success('已更新', `${u.name} 现在是${next ? '管理员' : '普通成员'}`)
+  } catch (e: any) {
+    warn('操作失败', e?.message || '权限修改失败')
+  } finally {
+    busy.value = null
+  }
+}
+
+async function doResetPassword(u: AdminUser) {
+  const pwd = prompt(`给 ${u.name} 设置新密码（至少 8 位，会同时踢下线所有设备）：`)
+  if (!pwd) return
+  if (pwd.length < 8) { warn('密码太短', '至少 8 位'); return }
+  busy.value = u.id
+  try {
+    await resetPassword(u.id, pwd)
+    success('密码已重置', `${u.name} 需用新密码重新登录`)
+  } catch (e: any) {
+    warn('重置失败', e?.message || '无法重置密码')
+  } finally {
+    busy.value = null
+  }
+}
+
+async function doDeactivate(u: AdminUser) {
+  if (!confirm(`确认停用 ${u.name}？停用后该账号无法登录（可恢复）。`)) return
+  busy.value = u.id
+  try {
+    await deactivateUser(u.id)
+    u.deactivated = true
+    success('已停用', `${u.name} 已无法登录`)
+  } catch (e: any) {
+    warn('停用失败', e?.message || '无法停用账号')
+  } finally {
+    busy.value = null
+  }
+}
+
+async function doReactivate(u: AdminUser) {
+  const pwd = prompt(`恢复 ${u.name} 需同时设新密码（Synapse 要求，至少 8 位）：`)
+  if (!pwd) return
+  if (pwd.length < 8) { warn('密码太短', '至少 8 位'); return }
+  busy.value = u.id
+  try {
+    await reactivateUser(u.id, pwd)
+    u.deactivated = false
+    success('已恢复', `${u.name} 可用新密码登录了`)
+  } catch (e: any) {
+    warn('恢复失败', e?.message || '无法恢复账号')
+  } finally {
+    busy.value = null
+  }
+}
+
+async function doCreate() {
+  busy.value = 'create'
+  try {
+    const uid = await createUser(form.username, form.password, form.displayname || undefined)
+    success('已创建', uid)
+    showCreate.value = false
+    form.username = ''; form.displayname = ''; form.password = ''
+    await loadUsers()
+  } catch (e: any) {
+    warn('创建失败', e?.message || '无法创建账号')
+  } finally {
+    busy.value = null
+  }
+}
+
+onMounted(check)
+</script>
+
+<style scoped>
+/* 全屏覆盖层：盖住整个工作台，自带关闭按钮 */
+.admin-view {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  min-height: 0;
+  background: var(--bg);
+  color: var(--text);
+  animation: adm-fade 0.15s ease;
+}
+@keyframes adm-fade { from { opacity: 0; } to { opacity: 1; } }
+
+.adm-close {
+  position: absolute;
+  top: 14px; right: 18px;
+  z-index: 3;
+  width: 30px; height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  color: var(--text-3);
+  font-size: 15px; cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+.adm-close:hover { background: var(--bg-soft); color: var(--text); }
+
+/* —— 左侧菜单 —— */
+.adm-nav {
+  width: 220px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg-panel);
+  display: flex;
+  flex-direction: column;
+  padding: 16px 12px;
+  gap: 18px;
+}
+.adm-brand { display: flex; align-items: center; gap: 10px; padding: 4px; }
+.adm-logo {
+  width: 34px; height: 34px; border-radius: 9px;
+  background: var(--accent); color: #fff;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 17px;
+}
+.adm-title { font-size: var(--fs-200); font-weight: var(--fw-bold); }
+.adm-sub { font-size: var(--fs-75); color: var(--text-3); margin-top: 1px; }
+.adm-menu { display: flex; flex-direction: column; gap: 2px; }
+.adm-mi {
+  display: flex; align-items: center; gap: 9px;
+  padding: 9px 10px; border: none; border-radius: 8px;
+  background: transparent; color: var(--text-2);
+  font-size: var(--fs-100); text-align: left; cursor: pointer;
+  transition: background 0.1s ease;
+}
+.adm-mi:hover:not(:disabled) { background: var(--bg-soft); color: var(--text); }
+.adm-mi.active { background: var(--accent-soft); color: var(--accent); font-weight: var(--fw-bold); }
+.adm-mi:disabled { color: var(--text-3); cursor: default; }
+.adm-mi-ic { width: 18px; text-align: center; }
+.adm-soon {
+  margin-left: auto; font-size: 10px; color: var(--text-3);
+  background: var(--bg-soft); padding: 1px 6px; border-radius: 8px;
+}
+
+/* —— 右侧内容 —— */
+.adm-main { flex: 1; min-width: 0; overflow-y: auto; padding: 22px 26px; }
+.adm-head { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 18px; }
+.adm-h1 { font-size: 20px; font-weight: var(--fw-bold); }
+.adm-hint { font-size: var(--fs-75); color: var(--text-3); margin-top: 4px; }
+.adm-actions { display: flex; gap: 8px; }
+
+.adm-btn {
+  border: none; border-radius: 8px; cursor: pointer;
+  padding: 8px 14px; font-size: var(--fs-100);
+  background: var(--accent); color: #fff; font-weight: var(--fw-bold);
+  transition: opacity 0.1s ease;
+}
+.adm-btn:hover:not(:disabled) { opacity: 0.88; }
+.adm-btn:disabled { opacity: 0.5; cursor: default; }
+.adm-btn.ghost { background: var(--bg-soft); color: var(--text-2); font-weight: 400; }
+
+/* 表格 */
+.adm-table { width: 100%; border-collapse: collapse; font-size: var(--fs-100); }
+.adm-table th {
+  text-align: left; font-size: var(--fs-75); color: var(--text-3); font-weight: 400;
+  padding: 8px 10px; border-bottom: 1px solid var(--border);
+}
+.adm-ops-h { text-align: right; }
+.adm-table td { padding: 11px 10px; border-bottom: 1px solid var(--border-soft); vertical-align: middle; }
+.adm-table tr.off td { opacity: 0.55; }
+
+.adm-user { display: flex; align-items: center; gap: 10px; }
+.adm-ava {
+  width: 32px; height: 32px; border-radius: 8px; flex-shrink: 0;
+  background: var(--accent); color: #fff;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 600;
+}
+.adm-u-name { font-weight: var(--fw-bold); display: flex; align-items: center; gap: 6px; }
+.adm-u-handle { font-size: var(--fs-75); color: var(--text-3); font-family: var(--mono); margin-top: 1px; }
+
+.adm-tag { font-size: 11px; padding: 2px 8px; border-radius: 8px; }
+.adm-tag.admin { color: var(--accent); background: var(--accent-soft); }
+.adm-tag.member { color: var(--text-3); background: var(--bg-soft); }
+.adm-tag.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.adm-tag.off { color: var(--danger); background: #fee2e2; }
+.adm-tag.bot { color: #fff; background: var(--accent); }
+
+.adm-ops { text-align: right; white-space: nowrap; }
+.adm-op {
+  border: 1px solid var(--border); background: var(--bg-panel); color: var(--text-2);
+  font-size: var(--fs-75); padding: 5px 9px; border-radius: 7px; margin-left: 6px; cursor: pointer;
+  transition: background 0.1s ease;
+}
+.adm-op:hover:not(:disabled) { background: var(--bg-soft); color: var(--text); }
+.adm-op:disabled { opacity: 0.4; cursor: default; }
+.adm-op.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
+.adm-op.danger:hover:not(:disabled) { background: #fee2e2; }
+
+/* 居中态（loading / denied） */
+.adm-center {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 60px 0; color: var(--text-3); font-size: var(--fs-100);
+}
+.adm-spin {
+  width: 18px; height: 18px; border-radius: 50%;
+  border: 2px solid var(--border); border-top-color: var(--accent);
+  animation: adm-rot 0.7s linear infinite;
+}
+@keyframes adm-rot { to { transform: rotate(360deg); } }
+
+.adm-denied { flex-direction: column; gap: 8px; text-align: center; padding-top: 80px; }
+.adm-denied-ic { font-size: 40px; }
+.adm-denied-t { font-size: 17px; font-weight: var(--fw-bold); color: var(--text); }
+.adm-denied-d { max-width: 380px; line-height: 1.6; }
+.adm-denied-d code { font-family: var(--mono); color: var(--accent); }
+
+/* 新建弹窗 */
+.adm-mask {
+  position: fixed; inset: 0; z-index: 80;
+  background: rgba(0, 0, 0, 0.28);
+  display: flex; align-items: center; justify-content: center;
+}
+.adm-modal {
+  width: 380px; background: var(--bg-panel);
+  border: 1px solid var(--border); border-radius: 14px; padding: 20px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18);
+}
+.adm-modal-h { font-size: var(--fs-200); font-weight: var(--fw-bold); margin-bottom: 14px; }
+.adm-field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+.adm-field span { font-size: var(--fs-75); color: var(--text-3); }
+.adm-field input {
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+  font-size: var(--fs-100); background: var(--bg); color: var(--text);
+}
+.adm-field input:focus { outline: none; border-color: var(--accent); }
+.adm-modal-f { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+</style>

@@ -7,8 +7,10 @@ import DuuChatView from '@/views/DuuChatView.vue'
 import TodoView from '@/views/TodoView.vue'
 import OpsChannelView from '@/views/OpsChannelView.vue'
 import LiveView from '@/views/LiveView.vue'
+import AdminView from '@/views/AdminView.vue'
 
 const routes: RouteRecordRaw[] = [
+  { path: '/admin',     name: 'admin',     component: AdminView },
   { path: '/live',      name: 'live',      component: LiveView },
   { path: '/',          name: 'dashboard', component: DashboardView },
   { path: '/safety',    name: 'safety',    component: SafetyView },

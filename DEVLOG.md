@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-06-18 — 管理后台①：用户管理（MVP，覆盖层集成进 LiveView）
+- 新模块：平台管理后台。按"一次只推一个"先做**用户管理**：列表 / 新建 / 停用 / 恢复 / 重置密码 / 设撤管理员。
+- 关键架构发现：真实 app 的根组件是 `views/LiveView.vue`（`main.ts` 挂它），**不是** App.vue —— `<router-view>` 不渲染，所以加 `/admin` 路由没用。改成把 `AdminView.vue` 作为**全屏覆盖层**集成进 LiveView：用户菜单加「管理后台」入口（仅管理员 `isServerAdmin()` 探测为真才显示），点开覆盖层、× 关闭。（已存 memory: client-root-is-liveview）
+- 后端复用 Synapse Admin API（`/_synapse/admin/...`），用登录管理员 token：`client.ts` 补 `isServerAdmin/listUsers/deactivateUser/reactivateUser/resetPassword/setUserAdmin` + `adminFetch` 封装。
+- **本地验证发现真问题**：浏览器从 app 源直连 hs 的 `/_synapse/admin/*` 被 **CORS 拦**（`/_matrix/*` 200、admin 路径 Failed to fetch）—— Synapse 只给 `/_matrix` 发跨域头。即原有 `createUser` 跨域下也不通。解决要在 hs 的 nginx 给 `/_synapse/admin/` 放开 CORS（限 app 源 + 允许 Authorization + 处理 OPTIONS 预检）。否则连真 @admin 也进不去（已把权限闸文案改成同时提示这两种原因）。
+- 已验证：AdminView 覆盖层 + 左侧菜单（用户管理 active，频道/AI/数据「敬请期待」占位）+ 权限闸渲染正常；build/类型通过。happy path（列表/操作）待 nginx 放 CORS 后线上点验。
+- 仅做只读验证（未对生产执行任何停用/改密/建号）。
+
 ## 2026-06-18 — 主 AI 控制层②：LLM 工具调用（AI 真能动手了）
 - 模块 1 后半段落地：主 AI 从「只会聊天」升级到「会调用 IM 能力动手」。整条链路：用户自然语言 → 模型决定调工具 → 真执行（建群/发消息/查成员/读记录）→ 结果回灌 → 给最终回复。
 - 关键设计（守 CLAUDE.md：厂商差异只锁在抽象层）：
