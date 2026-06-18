@@ -77,7 +77,7 @@ const { open: openAdmin, setCurrent: setAdminChannel } = useChannelAdmin()
 // 频道头 ℹ 按钮：复刻 DEMO，点了开/关右侧「关于此频道」面板（真实成员 + 真实技能/知识库/规则总览）
 const { visible: rightPanelVisible, toggle: toggleRightPanel, hide: hideRightPanel } = useRightPanel()
 // 看板数据源：数据看板/任务看板的数据源展示(展开列表) + 编辑(弹窗)，按工作区持久化
-const { sources, popoverBoard, togglePopover, openEditor: openSrcEditor, setSpace: setBoardSpace } = useBoardSources()
+const { sources, popoverBoard, togglePopover, closePopover: closeBoardSrcPopover, openEditor: openSrcEditor, setSpace: setBoardSpace } = useBoardSources()
 const { open: openCli } = useCli()
 const { open: openProfileHome } = useProfileHome()
 const { open: openPluginStore } = usePluginStore()
@@ -769,6 +769,7 @@ function onDocClick(e: MouseEvent) {
   if (!(e.target as HTMLElement)?.closest?.('.tas-wrap')) appMenuOpen.value = false
   if (!(e.target as HTMLElement)?.closest?.('.um-wrap')) userMenuOpen.value = false
   if (!(e.target as HTMLElement)?.closest?.('.emoji-pop, .msg-tools, .rxn.add')) emojiPicker.value = null
+  if (!(e.target as HTMLElement)?.closest?.('.bs-hdr')) closeBoardSrcPopover()  // 看板数据源下拉：点外面关闭
 }
 
 onMounted(async () => {
@@ -920,33 +921,16 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
         <div class="cs-list">
           <!-- 置顶：数据看板（影视公司制作驾驶舱）-->
           <div class="cs-item pinned-item" :class="{ active: board }" @click="openBoard">
-            <button class="cs-ic cs-src-btn" :class="{ on: popoverBoard === 'dashboard' }" :title="`数据源（${sources.dashboard.length}）· 点击展开`" @click.stop="togglePopover('dashboard')">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3" /></svg>
-            </button>
+            <span class="cs-ic">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1" /><rect x="14" y="3" width="7" height="5" rx="1" /><rect x="14" y="12" width="7" height="9" rx="1" /><rect x="3" y="16" width="7" height="5" rx="1" /></svg>
+            </span>
             <span class="cs-label">数据看板</span>
-            <button class="cs-src-edit" title="编辑数据源" @click.stop="openSrcEditor('dashboard')">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
-            </button>
           </div>
-          <!-- 数据源展示：展开列表（数据看板）-->
-          <div v-if="popoverBoard === 'dashboard'" class="cs-src-list">
-            <div v-if="!sources.dashboard.length" class="cs-src-empty">未配置数据源 · 点 ✎ 添加</div>
-            <div v-for="(s, i) in sources.dashboard" :key="i" class="cs-src-item"><span class="ty">{{ s.type }}</span><span class="nm">{{ s.name }}</span></div>
-          </div>
-
           <div class="cs-item pinned-item" :class="{ active: tasks }" @click="openTasks">
-            <button class="cs-ic cs-src-btn" :class="{ on: popoverBoard === 'tasks' }" :title="`数据源（${sources.tasks.length}）· 点击展开`" @click.stop="togglePopover('tasks')">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3" /></svg>
-            </button>
+            <span class="cs-ic">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>
+            </span>
             <span class="cs-label">任务看板</span>
-            <button class="cs-src-edit" title="编辑数据源" @click.stop="openSrcEditor('tasks')">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
-            </button>
-          </div>
-          <!-- 数据源展示：展开列表（任务看板）-->
-          <div v-if="popoverBoard === 'tasks'" class="cs-src-list">
-            <div v-if="!sources.tasks.length" class="cs-src-empty">未配置数据源 · 点 ✎ 添加</div>
-            <div v-for="(s, i) in sources.tasks" :key="i" class="cs-src-item"><span class="ty">{{ s.type }}</span><span class="nm">{{ s.name }}</span></div>
           </div>
 
           <!-- 频道 group（真实房间）-->
@@ -1001,6 +985,22 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
           <div class="ch-header">
             <div class="title">📊 数据看板</div>
             <div class="ch-actions">
+              <!-- 数据源：展示(下拉列表) + 编辑(弹窗) -->
+              <div class="bs-hdr">
+                <button class="ch-ic-btn bs-srcbtn" :class="{ active: popoverBoard === 'dashboard' }" :title="`数据源（${sources.dashboard.length}）`" @click.stop="togglePopover('dashboard')">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3" /></svg>
+                  <span v-if="sources.dashboard.length" class="bs-badge">{{ sources.dashboard.length }}</span>
+                </button>
+                <div v-if="popoverBoard === 'dashboard'" class="bs-pop" @click.stop>
+                  <div class="bs-pop-h">数据源 · 数据看板（{{ sources.dashboard.length }}）</div>
+                  <div v-if="!sources.dashboard.length" class="bs-pop-empty">未配置数据源 · 点编辑添加</div>
+                  <div v-for="(s, i) in sources.dashboard" :key="i" class="bs-pop-item"><span class="ty">{{ s.type }}</span><span class="nm">{{ s.name }}</span></div>
+                  <button class="bs-pop-edit" @click="openSrcEditor('dashboard')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>编辑数据源</button>
+                </div>
+              </div>
+              <button class="ch-ic-btn" title="编辑数据源" @click="openSrcEditor('dashboard')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+              </button>
               <button class="ch-ic-btn" :class="{ active: aiOpen }" :title="aiOpen ? '关闭中枢 AI' : '打开中枢 AI'" @click="aiOpen = !aiOpen">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" /></svg>
               </button>
@@ -1036,6 +1036,22 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
             <div class="title">📋 任务看板</div>
             <div class="ch-actions">
               <span class="board-sub">{{ taskItems.length }} 项任务 · AI 制作中</span>
+              <!-- 数据源：展示(下拉列表) + 编辑(弹窗) -->
+              <div class="bs-hdr">
+                <button class="ch-ic-btn bs-srcbtn" :class="{ active: popoverBoard === 'tasks' }" :title="`数据源（${sources.tasks.length}）`" @click.stop="togglePopover('tasks')">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3" /></svg>
+                  <span v-if="sources.tasks.length" class="bs-badge">{{ sources.tasks.length }}</span>
+                </button>
+                <div v-if="popoverBoard === 'tasks'" class="bs-pop" @click.stop>
+                  <div class="bs-pop-h">数据源 · 任务看板（{{ sources.tasks.length }}）</div>
+                  <div v-if="!sources.tasks.length" class="bs-pop-empty">未配置数据源 · 点编辑添加</div>
+                  <div v-for="(s, i) in sources.tasks" :key="i" class="bs-pop-item"><span class="ty">{{ s.type }}</span><span class="nm">{{ s.name }}</span></div>
+                  <button class="bs-pop-edit" @click="openSrcEditor('tasks')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>编辑数据源</button>
+                </div>
+              </div>
+              <button class="ch-ic-btn" title="编辑数据源" @click="openSrcEditor('tasks')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+              </button>
             </div>
           </div>
           <div class="kanban">
@@ -1582,19 +1598,19 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 .cs-item.active .cs-chan-av { box-shadow: 0 0 0 1.5px rgba(255,255,255,.5); }
 .cs-item.active .cs-ic { color: var(--text); }
 .cs-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* 看板数据源：左侧"数据源展示"图标按钮 + 右侧"编辑"图标 + 展开列表 */
-.cs-src-btn { background: transparent; border: none; padding: 0; cursor: pointer; }
-.cs-src-btn:hover { color: var(--text); }
-.cs-src-btn.on { color: var(--accent); }
-.cs-src-edit { width: 22px; height: 22px; flex-shrink: 0; background: transparent; border: none; border-radius: 5px; color: var(--text-3); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; opacity: .65; transition: opacity .12s, background .12s, color .12s; }
-.cs-item:hover .cs-src-edit { opacity: 1; }
-.cs-src-edit:hover { background: var(--bg-panel); color: var(--accent); opacity: 1; }
-.cs-src-list { margin: 0 0 4px 30px; display: flex; flex-direction: column; gap: 2px; padding: 2px 0; }
-.cs-src-empty { font-size: 12px; color: var(--text-3); padding: 2px 6px; }
-.cs-src-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); padding: 3px 6px; border-radius: 5px; }
-.cs-src-item:hover { background: var(--bg-hover); }
-.cs-src-item .ty { font-size: 10px; color: var(--text-3); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; flex-shrink: 0; }
-.cs-src-item .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 看板头数据源：展示按钮(带数量角标) + 下拉列表 */
+.bs-hdr { position: relative; display: inline-flex; }
+.bs-srcbtn { position: relative; }
+.bs-badge { position: absolute; top: -3px; right: -3px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; background: var(--accent); color: #fff; font-size: 9px; line-height: 14px; text-align: center; font-weight: 700; }
+.bs-pop { position: absolute; top: 34px; right: 0; z-index: 60; min-width: 230px; max-width: 300px; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,.16); padding: 8px; }
+.bs-pop-h { font-size: 12px; font-weight: 600; color: var(--text-2); padding: 2px 6px 6px; }
+.bs-pop-empty { font-size: 12px; color: var(--text-3); padding: 4px 6px 8px; }
+.bs-pop-item { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); padding: 5px 6px; border-radius: 6px; }
+.bs-pop-item:hover { background: var(--bg-hover); }
+.bs-pop-item .ty { font-size: 10px; color: var(--text-3); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; flex-shrink: 0; }
+.bs-pop-item .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bs-pop-edit { margin-top: 6px; width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 6px; border: 1px solid var(--border); border-radius: 7px; background: transparent; color: var(--text-2); font-size: 12px; cursor: pointer; }
+.bs-pop-edit:hover { background: var(--bg-hover); color: var(--accent); border-color: var(--accent); }
 .cs-empty { font-size: 12px; color: var(--text-3); padding: 6px 10px; }
 .cs-add-row { color: var(--text-3); }
 .cs-ic-box { width: 18px; height: 18px; border: 1px dashed var(--border); border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-3); flex-shrink: 0; }
