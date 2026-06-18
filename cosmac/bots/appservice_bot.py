@@ -18,12 +18,11 @@ from __future__ import annotations
 import json
 import logging
 import time
-from dataclasses import replace
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from cosmac.ai import get_provider
+from cosmac.ai import build_provider, get_provider
 from cosmac.ai.agent import Agent
 from cosmac.ai.base import LLMProvider
 from cosmac.ai.tools import Toolbox, ToolContext
@@ -62,9 +61,10 @@ class CosmacBot:
         # 上次读取时间（缓存 20s，别每条消息都打服务器）。
         # 用 -inf 当"从未读过"的哨兵：保证首次必读（monotonic 起点不定，别用 0）。
         self._cfg_cache_ts: float = float("-inf")
-        # 当前已生效的 (provider, model, system_prompt) 签名；变了才热重建模型/Agent
-        self._applied_sig: Tuple[str, str, str] = (
-            config.llm_provider, config.llm_model, config.system_prompt,
+        # 当前已生效的 (provider, model, system_prompt, _) 签名；任一项变了才热重建模型/Agent。
+        # 第 4 段保留位恒为 ""（key 只走环境变量、绝不进签名，见 _apply_runtime_config）。
+        self._applied_sig: Tuple[str, str, str, str] = (
+            config.llm_provider, config.llm_model, config.system_prompt, "",
         )
 
     # —— 事件分发 ——
@@ -163,8 +163,12 @@ class CosmacBot:
             if room:
                 ev = self.client.get_state_event(room, AI_CONFIG_EVENT_TYPE)
                 if isinstance(ev, dict):
-                    # 只取我们认识的字段，避免脏数据
-                    for k in ("model", "system_prompt", "enabled_tools"):
+                    # 只取我们认识的字段，避免脏数据。
+                    # 安全：**绝不**从控制室事件读 api_key——state event 无法加密、会明文
+                    # 进 DB/历史/被全员可读。密钥只走服务端环境变量/Secret Manager。
+                    for k in (
+                        "provider", "model", "system_prompt", "enabled_tools"
+                    ):
                         if k in ev:
                             overrides[k] = ev[k]
             # 读成功（含"控制室/配置不存在"这种正常的空）→ 更新缓存
@@ -177,24 +181,31 @@ class CosmacBot:
             return self._cfg_cache
 
     def _apply_runtime_config(self) -> None:
-        """把控制室下发的配置应用到 llm/agent/toolbox（按需热重建，幂等）。"""
+        """把控制室下发的配置应用到 llm/agent/toolbox（按需热重建，幂等）。
+
+        管理后台可下发 provider / model / 人设 / 工具开关。任一缺省时用启动配置兜底。
+        **api_key 永远不从网页/控制室来**：密钥只走服务端环境变量/Secret Manager
+        （build_provider 传 api_key="" 即让各 SDK 自己读环境变量）。
+        """
         ov = self._read_overrides()
-        # 模型/人设：与启动配置合并（覆盖项缺省时用启动值）。
-        # provider 本期不开放前端改（避免切到没 key 的后端→静默降级 echo）。
+        provider = ov.get("provider") or self.config.llm_provider
         model = ov.get("model") or self.config.llm_model
         system_prompt = ov.get("system_prompt") or self.config.system_prompt
-        sig = (self.config.llm_provider, model, system_prompt)
+        sig = (provider, model, system_prompt, "")
         if sig != self._applied_sig:
             try:
-                cfg = replace(
-                    self.config, llm_model=model, system_prompt=system_prompt
+                # api_key="" → 各 provider SDK 从环境变量读密钥（绝不接受网页传入的 key）
+                self.llm = build_provider(
+                    provider, api_key="", model=model, system_prompt=system_prompt
                 )
-                self.llm = get_provider(cfg)
                 self.agent = Agent(
                     llm=self.llm, toolbox=self.toolbox, system_prompt=system_prompt
                 )
                 self._applied_sig = sig
-                logger.info("已应用运行时 AI 配置: model=%s 人设已更新", model or "默认")
+                logger.info(
+                    "已应用运行时 AI 配置: provider=%s model=%s 人设已更新",
+                    provider, model or "默认",
+                )
             except Exception:
                 logger.exception("应用运行时 AI 配置失败，沿用当前模型")
         # 工具开关：enabled_tools 是字符串列表 → 只启用这些；缺省/非法 = 全开

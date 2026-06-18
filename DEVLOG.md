@@ -7,6 +7,13 @@
 
 ---
 
+## 2026-06-19 — 多模型四家 + 后台可选 provider/模型（密钥仍走服务端，安全加固）
+- 多模型扩成四家：新增通用 `cosmac/ai/openai_compat.py`（OpenAI 兼容，参数化 api_key/base_url/model，含工具调用）；`ark.py` 改薄成它的子类；`claude.py` 加 api_key 参数。`ai/__init__.py` 加 **build_provider**（claude / openai / deepseek·ark / **gemini**，key 缺则降级 echo，gemini 走 Google 的 OpenAI 兼容端点）。
+- 管理后台「AI 配置」加 **模型后端下拉**（默认/DeepSeek/Claude/ChatGPT/Gemini）+ 模型 id；bot 从控制室读 `provider/model` 热切（按签名重建）。
+- **关键安全决策（推翻"密钥填后台"的初版）**：API Key **绝不进 Matrix**。state event 无法加密、会明文进 DB/历史/同步给全员，所以密钥只走**服务端环境变量/Secret Manager**；后台只选 provider+模型，UI 明示"切到服务器没配 key 的后端 AI 将无法回话"。`appservice_bot._read_overrides` 不读 api_key、`build_provider(api_key="")` 让各 SDK 自己读环境变量。
+- 验证：新增 `test_build_provider.py`（4 家分派 + base_url + 缺 key 降级 + 未知报错）；cosmac 31 单测全过、ruff 通过、client build 通过；preview 直连生产验证后台选 DeepSeek+模型写读 round-trip、provider 热切（测试数据已清回默认）。
+- 启用某后端：仍在服务器 systemd 配该家的 key 环境变量（ARK_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY），后台只管"用哪家+哪个模型"。
+
 ## 2026-06-19 — 多模型新增 DeepSeek（走火山引擎方舟，OpenAI 兼容）
 - 接入 DeepSeek：方舟 Chat Completions 与 OpenAI 完全兼容，所以新增 `cosmac/ai/ark.py`（`ArkProvider`），复用 `openai` SDK，只把 base_url 指向方舟、key 用 `ARK_API_KEY`。实现 `complete` + `complete_with_tools`（OpenAI 工具格式：tools/tool_calls/tool 角色），所以 DeepSeek 也能用主 AI 的工具调用。
 - `get_provider` 注册 `deepseek` / `ark` 两个名（deepseek 是 ark 别名）；无 `ARK_API_KEY` 自动降级 echo。模型 id 用 `GUDUU_LLM_MODEL` 填方舟的 Model ID 或 Endpoint ID(ep-...)，默认 `deepseek-v3.2`；可选 `ARK_BASE_URL` 换区域。

@@ -205,16 +205,28 @@
         <div v-if="aiLoading" class="adm-center"><div class="adm-spin" /> 加载配置…</div>
 
         <div v-else class="adm-form">
+          <!-- 模型后端：选 provider + 模型 id。API Key 不在网页配，只在服务端 -->
+          <label class="adm-field">
+            <span>模型后端</span>
+            <select v-model="aiForm.provider">
+              <option v-for="p in AI_PROVIDERS" :key="p.value" :value="p.value">{{ p.label }}</option>
+            </select>
+            <em class="adm-note">选「默认」= 用服务器配置的后端；选某家则切到它（需服务器已配好它的 API Key）。</em>
+          </label>
+
+          <template v-if="aiForm.provider">
+            <label class="adm-field">
+              <span>模型 id</span>
+              <input v-model.trim="aiForm.model" :placeholder="providerMeta.modelPlaceholder" />
+              <em class="adm-note">⚠️ 填错会让 AI 回话报错；DeepSeek/Gemini 填方舟/Google 的模型 id 或接入点。</em>
+            </label>
+            <em class="adm-note">🔒 出于安全，<b>API Key 不在网页配置</b>——密钥只在服务器环境变量/Secret&nbsp;Manager 里设（Matrix 事件无法加密，存进去会明文泄露）。切到服务器没配 key 的后端，AI 将无法回话。</em>
+          </template>
+
           <label class="adm-field">
             <span>主 AI 人设（system prompt）</span>
             <textarea v-model="aiForm.system_prompt" rows="5"
               placeholder="留空 = 用服务器默认人设" />
-          </label>
-
-          <label class="adm-field">
-            <span>模型 id（留空 = 用服务器默认）</span>
-            <input v-model.trim="aiForm.model" placeholder="如 claude-opus-4-8 / gpt-4o" />
-            <em class="adm-note">⚠️ 填错的模型 id 会让 AI 回话报错；不确定就留空。模型后端（Claude/OpenAI）由服务器环境变量决定，此处不改。</em>
           </label>
 
           <div class="adm-field">
@@ -371,6 +383,7 @@ import {
   getAiConfig,
   setAiConfig,
   AI_TOOL_CATALOG,
+  AI_PROVIDERS,
   type AdminUser,
   type AdminRoom,
 } from '@/matrix/client'
@@ -563,11 +576,22 @@ const aiLoading = ref(false)
 const aiSaving = ref(false)
 const aiLoaded = ref(false)
 // enabled_tools=null 表示全开；UI 里用一个集合表示"当前开启的工具"
-const aiForm = reactive<{ system_prompt: string; model: string; tools: Set<string> }>({
-  system_prompt: '',
+const aiForm = reactive<{
+  provider: string
+  model: string
+  system_prompt: string
+  tools: Set<string>
+}>({
+  provider: '',
   model: '',
+  system_prompt: '',
   tools: new Set(AI_TOOL_CATALOG.map((t) => t.name)), // 默认全开
 })
+
+// 当前选中 provider 的元信息（模型占位符等）
+const providerMeta = computed(
+  () => AI_PROVIDERS.find((p) => p.value === aiForm.provider) || AI_PROVIDERS[0],
+)
 
 function isToolOn(name: string): boolean {
   return aiForm.tools.has(name)
@@ -586,9 +610,9 @@ async function loadAi() {
   aiLoading.value = true
   try {
     const cfg = await getAiConfig()
-    aiForm.system_prompt = cfg?.system_prompt || ''
+    aiForm.provider = cfg?.provider || ''
     aiForm.model = cfg?.model || ''
-    // null = 全开；否则按存储的集合
+    aiForm.system_prompt = cfg?.system_prompt || ''
     const all = AI_TOOL_CATALOG.map((t) => t.name)
     aiForm.tools = new Set(cfg?.enabled_tools ?? all)
     aiLoaded.value = true
@@ -600,14 +624,19 @@ async function loadAi() {
 }
 
 async function saveAi() {
+  // 选了某家 provider → 提醒「key 在服务器配」（网页不再收 key）
+  if (aiForm.provider) {
+    if (!confirm(`已选「${providerMeta.value.label}」。请确认服务器已为它配好 API Key（环境变量/Secret Manager），否则 AI 无法回话。仍要保存吗？`)) return
+  }
   aiSaving.value = true
   try {
     const all = AI_TOOL_CATALOG.map((t) => t.name)
     // 全开 → 存 null（表示不限制）；否则存当前集合
     const enabled = all.every((n) => aiForm.tools.has(n)) ? null : [...aiForm.tools]
     await setAiConfig({
-      system_prompt: aiForm.system_prompt,
+      provider: aiForm.provider,
       model: aiForm.model,
+      system_prompt: aiForm.system_prompt,
       enabled_tools: enabled,
     })
     success('已保存', '主 AI 约 20 秒内热生效')
@@ -828,13 +857,15 @@ onMounted(check)
 /* AI 配置表单 */
 .adm-form { max-width: 640px; display: flex; flex-direction: column; gap: 18px; }
 .adm-form .adm-field textarea,
-.adm-form .adm-field input {
+.adm-form .adm-field input,
+.adm-form .adm-field select {
   border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px;
   font-size: var(--fs-100); background: var(--bg); color: var(--text);
   font-family: inherit; resize: vertical; line-height: 1.5;
 }
 .adm-form .adm-field textarea:focus,
-.adm-form .adm-field input:focus { outline: none; border-color: var(--accent); }
+.adm-form .adm-field input:focus,
+.adm-form .adm-field select:focus { outline: none; border-color: var(--accent); }
 .adm-note { font-size: var(--fs-75); color: var(--text-3); font-style: normal; line-height: 1.5; }
 .adm-tools { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
 .adm-tool {

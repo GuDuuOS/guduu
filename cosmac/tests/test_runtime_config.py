@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import os
 import unittest
 from typing import Any, Dict, Optional
 
@@ -60,6 +61,33 @@ class TestRuntimeConfig(unittest.TestCase):
         self.assertEqual(bot._applied_sig[2], "你是测试版人设")
         self.assertIsNot(bot.agent, old_agent)
         self.assertEqual(bot.agent.system_prompt, "你是测试版人设")
+
+    def test_provider_switch_via_control_room(self) -> None:
+        # 控制室下发 provider+model → bot 热切到对应后端（不再只能改人设）。
+        # key 只走服务端环境变量：这里临时设 ARK_API_KEY 模拟服务器已配好密钥。
+        from unittest import mock
+
+        from cosmac.ai.openai_compat import OpenAICompatProvider
+        bot = _bot(
+            "!ctrl:host",
+            {"provider": "deepseek", "model": "deepseek-v3.2"},
+        )
+        with mock.patch.dict(os.environ, {"ARK_API_KEY": "env-key"}):
+            bot._apply_runtime_config()
+        self.assertEqual(bot._applied_sig[0], "deepseek")
+        self.assertIsInstance(bot.llm, OpenAICompatProvider)
+
+    def test_api_key_from_control_room_is_ignored(self) -> None:
+        # 安全回归：即便控制室事件里塞了 api_key，bot 也绝不采用它——
+        # 密钥只走服务端环境变量；签名里的 key 段恒为 ""（build_provider 传 api_key=""）。
+        bot = _bot(
+            "!ctrl:host",
+            {"provider": "deepseek", "api_key": "leaked-key", "model": "x"},
+        )
+        bot._apply_runtime_config()
+        self.assertEqual(bot._applied_sig[3], "")  # 网页/事件传的 key 不进签名、不被使用
+        # overrides 也不该把 api_key 读出来
+        self.assertNotIn("api_key", bot._read_overrides())
 
     def test_tool_toggle_filters_specs(self) -> None:
         # 只启用 create_room → specs 只剩它；停用的工具执行被拒

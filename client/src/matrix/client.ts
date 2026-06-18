@@ -711,8 +711,27 @@ export const AI_TOOL_CATALOG: { name: string; label: string }[] = [
   { name: 'get_recent_messages', label: '读取聊天记录' },
 ]
 
-/** 管理后台编辑的 AI 配置。enabled_tools=null 表示全部启用。 */
+/** 可选的模型后端目录（管理后台「AI 配置」的 provider 下拉用）。
+ *  value '' = 用服务器环境变量启动配置（不在网页改 provider）。
+ *  其余四家：填对应 API Key + 模型 id 即可在网页切换、热生效。 */
+export const AI_PROVIDERS: {
+  value: string
+  label: string
+  keyLabel: string
+  modelPlaceholder: string
+}[] = [
+  { value: '', label: '默认（用服务器配置）', keyLabel: '', modelPlaceholder: '留空＝服务器默认' },
+  { value: 'deepseek', label: 'DeepSeek（火山方舟）', keyLabel: '方舟 API Key', modelPlaceholder: '如 deepseek-v3.2 或 ep-… 接入点' },
+  { value: 'claude', label: 'Claude（Anthropic）', keyLabel: 'Anthropic API Key', modelPlaceholder: '默认 claude-opus-4-8' },
+  { value: 'openai', label: 'ChatGPT（OpenAI）', keyLabel: 'OpenAI API Key', modelPlaceholder: '默认 gpt-4o' },
+  { value: 'gemini', label: 'Gemini（Google）', keyLabel: 'Google API Key', modelPlaceholder: '默认 gemini-2.0-flash' },
+]
+
+/** 管理后台编辑的 AI 配置。provider='' 表示用服务器环境变量；enabled_tools=null=全部启用。
+ *  注意：**不含 API Key**——密钥只在服务端配（环境变量/Secret Manager），绝不写进
+ *  Matrix 事件（state event 无法加密，会明文进 DB/历史/被全员可读）。 */
 export interface AiConfig {
+  provider: string
   model: string
   system_prompt: string
   enabled_tools: string[] | null
@@ -740,12 +759,9 @@ async function resolveControlRoom(): Promise<string | null> {
  */
 export async function ensureControlRoom(): Promise<string> {
   if (!mx) throw new Error('未登录')
-  const existing = await resolveControlRoom()
-  if (existing) return existing
-
   const me = mx.getUserId() || ''
   // 拉服务器管理员名单（需管理员 token；能进到这步的本就是管理员）。
-  // 失败就退化为"只有创建者"——至少自己能用，不阻塞建房。
+  // 失败就退化为"只有创建者"——至少自己能用，不阻塞。
   let admins: string[] = []
   try {
     admins = (await listUsers())
@@ -756,6 +772,14 @@ export async function ensureControlRoom(): Promise<string> {
   }
   // 除创建者外的其他管理员（创建者建房自动入群，无需 invite）
   const others = admins.filter((a) => a && a !== me)
+
+  const existing = await resolveControlRoom()
+  if (existing) {
+    // #2 修复：已存在的控制室也要补齐管理员的成员与权限——早先（多管理员逻辑之前）
+    // 建的房只有创建者一人，后加的服务器管理员既进不来也没权限写 AI 配置。
+    await reconcileControlRoomAdmins(existing, others)
+    return existing
+  }
 
   // 房间初始权限：创建者 + bot + 各管理员都给 100，确保都能读写 AI 配置 state event
   const users: Record<string, number> = { [me]: 100, [botId()]: 100 }
@@ -772,6 +796,51 @@ export async function ensureControlRoom(): Promise<string> {
   return res.room_id
 }
 
+/**
+ * 对**已存在**的控制室补齐其他管理员的权限与成员资格（幂等、尽力而为）。
+ * ① 把 power < 100 的管理员提到 100（否则受 state_default=50 限制写不了自定义 state event）；
+ * ② 邀请还没在房里（join/invite 都不算在）的管理员。
+ * 仅当当前用户在该房有改 power_levels 的权限（创建者=100）时才生效；没权限就静默跳过，
+ * 绝不阻塞「保存 AI 配置」主流程。
+ */
+async function reconcileControlRoomAdmins(roomId: string, admins: string[]): Promise<void> {
+  if (!mx || !admins.length) return
+  const room = mx.getRoom(roomId)
+  try {
+    // ① 提权：保留原 power_levels 其它字段，只补 users 里缺的管理员
+    const pl =
+      (room as any)?.currentState?.getStateEvents?.('m.room.power_levels', '')?.getContent?.() || {}
+    const users: Record<string, number> = { ...(pl.users || {}) }
+    let changed = false
+    for (const a of admins) {
+      if ((users[a] ?? 0) < 100) {
+        users[a] = 100
+        changed = true
+      }
+    }
+    if (changed) {
+      await (mx as any).sendStateEvent(roomId, 'm.room.power_levels', { ...pl, users }, '')
+    }
+    // ② 邀请还不在房里的管理员
+    const present = new Set(
+      ((room as any)?.getMembers?.() || [])
+        .filter((m: any) => m.membership === 'join' || m.membership === 'invite')
+        .map((m: any) => m.userId),
+    )
+    for (const a of admins) {
+      if (!present.has(a)) {
+        try {
+          await mx.invite(roomId, a)
+        } catch {
+          /* 已在房/无权限：忽略 */
+        }
+      }
+    }
+  } catch {
+    /* 无权限或读取失败：静默跳过，不影响保存 */
+  }
+}
+
 /** 读取当前 AI 配置；控制室或配置不存在时返回 null（前端用默认值兜底）。 */
 export async function getAiConfig(): Promise<AiConfig | null> {
   if (!mx) return null
@@ -780,6 +849,7 @@ export async function getAiConfig(): Promise<AiConfig | null> {
   try {
     const ev = await (mx as any).getStateEvent(rid, AI_CONFIG_EVENT_TYPE, '')
     return {
+      provider: ev?.provider || '',
       model: ev?.model || '',
       system_prompt: ev?.system_prompt || '',
       enabled_tools: Array.isArray(ev?.enabled_tools) ? ev.enabled_tools : null,
@@ -789,11 +859,27 @@ export async function getAiConfig(): Promise<AiConfig | null> {
   }
 }
 
-/** 写入 AI 配置（必要时先建控制室）。bot 会在 ~20s 内读到并热应用。 */
+/**
+ * 写入 AI 配置（必要时先建控制室）。bot 会在 ~20s 内读到并热应用。
+ *
+ * 安全：**不写 api_key**——密钥只在服务端配（环境变量/Secret Manager）。这里用不含
+ * api_key 的内容**整体覆盖**旧事件，顺带抹掉历史上可能存过的明文 key（注：Matrix
+ * 旧版本事件仍留在房间历史里，曾经存过的 key 仍需在服务端轮换才算彻底作废）。
+ */
 export async function setAiConfig(cfg: AiConfig): Promise<void> {
   if (!mx) throw new Error('未登录')
   const rid = await ensureControlRoom()
-  await (mx as any).sendStateEvent(rid, AI_CONFIG_EVENT_TYPE, { ...cfg }, '')
+  await (mx as any).sendStateEvent(
+    rid,
+    AI_CONFIG_EVENT_TYPE,
+    {
+      provider: cfg.provider,
+      model: cfg.model,
+      system_prompt: cfg.system_prompt,
+      enabled_tools: cfg.enabled_tools,
+    },
+    '',
+  )
 }
 
 /** 读某个频道当前时间线的消息（含发送者昵称与 cosmac.card 富卡）。 */

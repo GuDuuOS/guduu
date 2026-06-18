@@ -35,14 +35,15 @@ class ClaudeProvider(LLMProvider):
 
     name = "claude"
 
-    def __init__(self, model: str = "", system_prompt: str = ""):
+    def __init__(self, model: str = "", system_prompt: str = "", api_key: str = ""):
         # 延迟导入：只有真正用 Claude 时才依赖 anthropic 包
         from anthropic import Anthropic
 
         self.model = model or DEFAULT_CLAUDE_MODEL
         self.system_prompt = system_prompt
-        # Anthropic() 会自动从环境变量 ANTHROPIC_API_KEY 取 key
-        self._client = Anthropic()
+        # api_key 显式传入时用它（管理后台下发）；留空则 Anthropic() 从
+        # 环境变量 ANTHROPIC_API_KEY 取（启动配置那条路径）。
+        self._client = Anthropic(api_key=api_key) if api_key else Anthropic()
 
     # —— 内部：把中立结构翻译成 anthropic 所需的格式 ——
 
