@@ -21,8 +21,8 @@
         <button class="adm-mi" disabled>
           <span class="adm-mi-ic">🤖</span> AI 配置 <span class="adm-soon">敬请期待</span>
         </button>
-        <button class="adm-mi" disabled>
-          <span class="adm-mi-ic">📊</span> 数据概览 <span class="adm-soon">敬请期待</span>
+        <button class="adm-mi" :class="{ active: tab === 'overview' }" @click="switchToOverview">
+          <span class="adm-mi-ic">📊</span> 数据概览
         </button>
       </nav>
     </aside>
@@ -182,6 +182,80 @@
           </tbody>
         </table>
       </template>
+
+      <!-- 数据概览面板 -->
+      <template v-else-if="tab === 'overview'">
+        <header class="adm-head">
+          <div>
+            <h1 class="adm-h1">数据概览</h1>
+            <p class="adm-hint">
+              平台实时概况 · 数据来自 Synapse Admin API
+              <span v-if="ov.version"> · 服务端 {{ ov.version }}</span>
+            </p>
+          </div>
+          <div class="adm-actions">
+            <button class="adm-btn ghost" :disabled="ovLoading" @click="loadOverview">
+              {{ ovLoading ? '刷新中…' : '刷新' }}
+            </button>
+          </div>
+        </header>
+
+        <div v-if="ovLoading" class="adm-center"><div class="adm-spin" /> 统计中…</div>
+
+        <template v-else>
+          <!-- KPI 卡片 -->
+          <div class="adm-kpis">
+            <div class="adm-kpi">
+              <div class="adm-kpi-v">{{ ov.userTotal }}</div>
+              <div class="adm-kpi-l">账号总数</div>
+              <div class="adm-kpi-s">管理员 {{ ov.adminCount }} · 停用 {{ ov.deactivated }}</div>
+            </div>
+            <div class="adm-kpi">
+              <div class="adm-kpi-v">{{ ov.roomTotal }}</div>
+              <div class="adm-kpi-l">频道总数</div>
+              <div class="adm-kpi-s">公开 {{ ov.publicRooms }} · 加密 {{ ov.encryptedRooms }}</div>
+            </div>
+            <div class="adm-kpi">
+              <div class="adm-kpi-v">{{ ov.memberSum }}</div>
+              <div class="adm-kpi-l">成员人次合计</div>
+              <div class="adm-kpi-s">平均每频道 {{ ov.avgMembers }}</div>
+            </div>
+            <div class="adm-kpi">
+              <div class="adm-kpi-v">{{ ov.activeRooms }}</div>
+              <div class="adm-kpi-l">活跃频道</div>
+              <div class="adm-kpi-s">成员 ≥ 2 的频道数</div>
+            </div>
+          </div>
+
+          <!-- 最活跃频道 Top -->
+          <h2 class="adm-h2">最活跃频道 Top {{ ov.topRooms.length }}</h2>
+          <table class="adm-table">
+            <thead>
+              <tr><th>频道</th><th>成员</th><th>类型</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="r in ov.topRooms" :key="r.id">
+                <td>
+                  <div class="adm-user">
+                    <span class="adm-ava">{{ (r.name || '#').charAt(0).toUpperCase() }}</span>
+                    <div class="adm-u-id">
+                      <div class="adm-u-name">{{ r.name }}</div>
+                      <div class="adm-u-handle">{{ r.alias || r.id }}</div>
+                    </div>
+                  </div>
+                </td>
+                <td>{{ r.members }}</td>
+                <td>
+                  <span class="adm-tag" :class="r.isPublic ? 'admin' : 'member'">
+                    {{ r.isPublic ? '公开' : '私有' }}
+                  </span>
+                </td>
+              </tr>
+              <tr v-if="!ov.topRooms.length"><td colspan="3" class="adm-empty">暂无数据</td></tr>
+            </tbody>
+          </table>
+        </template>
+      </template>
     </section>
 
     <!-- 新建用户弹窗 -->
@@ -245,6 +319,7 @@ import {
   listAdminRooms,
   getRoomMembers,
   deleteRoom,
+  getServerVersion,
   type AdminUser,
   type AdminRoom,
 } from '@/matrix/client'
@@ -255,8 +330,8 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 
 const { success, warn } = useToast()
 
-// 当前管理模块：用户管理 / 频道管理
-const tab = ref<'users' | 'rooms'>('users')
+// 当前管理模块：用户管理 / 频道管理 / 数据概览
+const tab = ref<'users' | 'rooms' | 'overview'>('users')
 
 // 页面状态机：checking 校验中 / denied 无权限 / ok 已是管理员
 const state = ref<'checking' | 'denied' | 'ok'>('checking')
@@ -432,6 +507,47 @@ async function doDeleteRoom(r: AdminRoom) {
   }
 }
 
+/* —— 数据概览 —— */
+const ovLoading = ref(false)
+const ovLoaded = ref(false)
+const ov = reactive({
+  version: '',
+  userTotal: 0, adminCount: 0, deactivated: 0,
+  roomTotal: 0, publicRooms: 0, encryptedRooms: 0,
+  memberSum: 0, avgMembers: 0, activeRooms: 0,
+  topRooms: [] as AdminRoom[],
+})
+
+function switchToOverview() {
+  tab.value = 'overview'
+  if (!ovLoaded.value) loadOverview()
+}
+
+/** 聚合统计：复用 listUsers + listAdminRooms + getServerVersion，前端算汇总 */
+async function loadOverview() {
+  ovLoading.value = true
+  try {
+    const [us, rs, ver] = await Promise.all([listUsers(), listAdminRooms(), getServerVersion()])
+    ov.version = ver
+    ov.userTotal = us.length
+    ov.adminCount = us.filter((u) => u.admin).length
+    ov.deactivated = us.filter((u) => u.deactivated).length
+    ov.roomTotal = rs.length
+    ov.publicRooms = rs.filter((r) => r.isPublic).length
+    ov.encryptedRooms = rs.filter((r) => r.encrypted).length
+    ov.memberSum = rs.reduce((sum, r) => sum + r.members, 0)
+    ov.avgMembers = rs.length ? Math.round((ov.memberSum / rs.length) * 10) / 10 : 0
+    ov.activeRooms = rs.filter((r) => r.members >= 2).length
+    // 客户端按成员数降序取前 8（不依赖接口排序——实测 Admin API 的 dir=b 在本版未降序）
+    ov.topRooms = [...rs].sort((a, b) => b.members - a.members).slice(0, 8)
+    ovLoaded.value = true
+  } catch (e: any) {
+    warn('统计失败', e?.message || '无法获取概览数据')
+  } finally {
+    ovLoading.value = false
+  }
+}
+
 onMounted(check)
 </script>
 
@@ -597,6 +713,20 @@ onMounted(check)
 .adm-dim { color: var(--text-3); font-size: var(--fs-75); }
 .adm-empty { text-align: center; color: var(--text-3); padding: 24px 0; }
 .adm-tag.bot { margin-left: 6px; }
+
+/* 数据概览 KPI 卡片 */
+.adm-kpis {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px; margin-bottom: 24px;
+}
+.adm-kpi {
+  border: 1px solid var(--border); border-radius: 12px;
+  background: var(--bg-panel); padding: 16px 18px;
+}
+.adm-kpi-v { font-size: 30px; font-weight: var(--fw-bold); color: var(--accent); line-height: 1.1; }
+.adm-kpi-l { font-size: var(--fs-100); color: var(--text); margin-top: 4px; }
+.adm-kpi-s { font-size: var(--fs-75); color: var(--text-3); margin-top: 2px; }
+.adm-h2 { font-size: var(--fs-200); font-weight: var(--fw-bold); margin: 4px 0 12px; }
 
 /* 成员弹窗列表 */
 .adm-mlist { max-height: 320px; overflow-y: auto; margin-bottom: 12px; }

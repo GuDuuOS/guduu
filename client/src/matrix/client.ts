@@ -661,6 +661,16 @@ export async function listAdminRooms(): Promise<AdminRoom[]> {
   return out
 }
 
+/** 查 Synapse 服务端版本（数据概览页展示用）。失败返回空串、不阻断页面。 */
+export async function getServerVersion(): Promise<string> {
+  try {
+    const data = await adminFetch('/_synapse/admin/v1/server_version')
+    return data.server_version || ''
+  } catch {
+    return ''
+  }
+}
+
 /** 查某房间的已加入成员 id 列表（Admin API）。 */
 export async function getRoomMembers(roomId: string): Promise<string[]> {
   const data = await adminFetch(
