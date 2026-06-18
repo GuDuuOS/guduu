@@ -62,6 +62,12 @@ class CosmacConfig:
     # 读不到（房间不存在/未加入/网络错）一律回退到上面的启动配置，零回归。
     control_room_alias: str = ""
 
+    # —— CosMac Star 自己的数据库（模块2 起：Skill/Agent/知识库/记忆等）——
+    # 见 CLAUDE.md §3「数据存储分层」。Synapse 已存的（聊天记录/成员/房间状态）不在这里重存。
+    # 留空 = 由 cosmac.db 用默认：生产读环境变量 GUDUU_DATABASE_URL（指向独立 Postgres），
+    # 本地开发回退 SQLite 文件 run/cosmac.db（零基建即可跑）。
+    database_url: str = ""
+
     @staticmethod
     def from_env() -> "CosmacConfig":
         """从环境变量读取配置，未设置的项用上面的开发默认值。
@@ -93,6 +99,8 @@ class CosmacConfig:
                 # 默认按 server_name 推：#cosmac-ctrl:<server_name>
                 f"#cosmac-ctrl:{os.environ.get('GUDUU_SERVER_NAME', defaults.server_name)}",
             ),
+            # 留空交给 cosmac.db 决定默认（生产 env / 本地 SQLite）
+            database_url=os.environ.get("GUDUU_DATABASE_URL", defaults.database_url),
         )
 
     def require_tokens(self) -> None:
@@ -146,3 +154,8 @@ def _load_registration_tokens() -> dict:
 
 # 管理后台写、bot 读的"AI 配置"state event 类型（cosmac.* 命名空间，不与协议 m.* 冲突）
 AI_CONFIG_EVENT_TYPE = "cosmac.ai.config"
+
+# 管理后台写「期望的服务器管理员集」、主 AI(bot)据此对齐控制室成员的 state event 类型。
+# 浏览器只提交期望（管理员 power=50 够写 state）；真正的"降权/踢出非管理员"由拥有
+# power=100 的 bot 执行——因为 Matrix 里同级(50)用户互相无法降权/踢出。
+CONTROL_ADMINS_EVENT_TYPE = "cosmac.ctrl.admins"

@@ -7,6 +7,16 @@
 
 ---
 
+## 2026-06-19 — 控制室成员对齐改由主 AI(power 100)执行（撤销管理员真正失权）
+- **问题(P1)**：普通管理员都是 power 50，A(50) 撤销 B(50) 时 Matrix 不允许同级降权/踢出，前端 `removeFromControlRoom` 两个操作都静默失败，UI 却报成功——B 撤销后仍能写 AI 配置。只有唯一的 100 所有者撤权才真生效。
+- **修法（按 reviewer 方向：让 power 100 的 bot 执行成员同步，浏览器只提交期望）**：
+  - 新增 state event `cosmac.ctrl.admins`（前端写「期望服务器管理员集」，管理员 50 够写）。`setUserAdmin` 改成 `syncControlRoomAdmins()`：ensureControlRoom 尽力即时邀请/提权 + 写期望集。删掉做不可靠的 `removeFromControlRoom`。
+  - **bot 端 `_reconcile_control_members`**：收到控制室的 `cosmac.ctrl.admins` 事件即对齐——把 power<100、不在期望集里的成员降权(从 power_levels.users 删)+ 踢出。bot=100 能踢同级 50，绕过前端做不到的约束。
+  - **安全护栏**：① 只在 room_id == 别名解析出的控制室才动手（防有人塞事件借 bot 踢人）；② 绝不动 owner(100) 和 bot 自己；③ 任何异常只记日志不抛。`matrix_client` 加 `set_power_levels`/`kick`。
+  - UI 文案改诚实：撤管理员提示「控制室写权限将由主 AI 同步移除」，不再静默报全成。
+- 验证：新增 `test_control_members.py`（撤销者被移除 / owner·bot 永不被动 / 非控制室不动手 / 无需移除则不写）；cosmac 37 单测全过、ruff 通过、client build 通过。
+- 部署：改了 `cosmac/` → 要 `restart guduu-bot`；改了前端 → 发 dist。
+
 ## 2026-06-19 — 主 AI：右侧中枢 AI 面板加「放大」按钮 → Cowork 式全屏弹窗
 - **需求**：右侧主 AI 顶栏加放大按钮，点开后是一个和 Claude Cowork 一致的弹窗。
 - **关键定位**：真正渲染的右侧主 AI 是**写死在 `LiveView.vue` 里的内联 `aside.ai-panel`**（`aiOpen` 控制），不是 `components/layout/AiChatPanel.vue`（那套连同 App.vue 是未挂载的演示稿，main.ts 只挂 LiveView）。一开始误改了 AiChatPanel，已回滚，改在 LiveView 内联面板上做。

@@ -446,7 +446,12 @@ async function toggleAdmin(u: AdminUser) {
   try {
     await setUserAdmin(u.id, next)
     u.admin = next
-    success('已更新', `${u.name} 现在是${next ? '管理员' : '普通成员'}`)
+    success(
+      '已更新',
+      next
+        ? `${u.name} 现在是管理员`
+        : `${u.name} 已撤为普通成员；其控制室写权限将由主 AI 同步移除`,
+    )
   } catch (e: any) {
     warn('操作失败', e?.message || '权限修改失败')
   } finally {

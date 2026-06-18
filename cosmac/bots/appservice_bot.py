@@ -27,7 +27,11 @@ from cosmac.ai.agent import Agent
 from cosmac.ai.base import LLMProvider
 from cosmac.ai.tools import Toolbox, ToolContext
 from cosmac.bots.matrix_client import MatrixClient
-from cosmac.config import AI_CONFIG_EVENT_TYPE, CosmacConfig
+from cosmac.config import (
+    AI_CONFIG_EVENT_TYPE,
+    CONTROL_ADMINS_EVENT_TYPE,
+    CosmacConfig,
+)
 
 logger = logging.getLogger("cosmac.appservice_bot")
 
@@ -102,6 +106,13 @@ class CosmacBot:
                 self.client.join_room(room_id)
             return
 
+        # 1b) 控制室「期望管理员集」变化 → 主 AI(power 100)对齐控制室成员：
+        #     把不再是服务器管理员、却仍有写权限的成员降权 + 踢出。这是浏览器(管理员
+        #     power 只有 50)做不到的——同级互相无法降权/踢出，所以交给 100 的 bot 执行。
+        if event_type == CONTROL_ADMINS_EVENT_TYPE and event.get("state_key") is not None:
+            self._reconcile_control_members(room_id, event.get("content", {}))
+            return
+
         # 2) 群里的文本消息
         if event_type == "m.room.message":
             content = event.get("content", {})
@@ -136,6 +147,59 @@ class CosmacBot:
                 ToolContext(room_id=room_id, sender=sender),
             )
             self.client.send_text(room_id, reply)
+
+    # —— 控制室成员对齐：把已撤销的管理员降权 + 踢出（浏览器做不到，bot 用 100 权限做）——
+
+    def _reconcile_control_members(
+        self, room_id: str, content: Dict[str, Any]
+    ) -> None:
+        """按「期望管理员集」对齐控制室成员：移除不再是管理员、却仍有写权限的人。
+
+        安全约束（务必守住，否则可能误踢）：
+          - **只在确实是控制室时动手**：room_id 必须等于别名解析出的控制室，否则有人
+            往任意房间塞这个事件就能借 bot 之手踢人。解析不到/对不上 → 直接不动。
+          - **绝不动所有者和 bot 自己**：只处理 power < 100 的成员（owner/bot=100 跳过）。
+          - 只“降权 + 踢出”不在期望集里的成员；其余一律不碰。任何异常都不抛、只记日志。
+        """
+        desired = set(content.get("admins") or [])
+        try:
+            # 控制室校验：必须是别名解析出的那个房间
+            ctrl = self.client.resolve_alias(self.config.control_room_alias)
+        except Exception:
+            logger.exception("对齐控制室成员：解析控制室别名失败，跳过")
+            return
+        if not ctrl or ctrl != room_id:
+            logger.debug("对齐控制室成员：%s 非控制室，忽略", room_id)
+            return
+
+        try:
+            pl = self.client.get_state_event(room_id, "m.room.power_levels", "") or {}
+        except Exception:
+            logger.exception("对齐控制室成员：读 power_levels 失败，跳过")
+            return
+
+        bot = self.config.bot_user_id
+        users: Dict[str, Any] = dict(pl.get("users") or {})
+        # 待移除：有显式权限(<100，即非 owner/bot) 且不在期望管理员集里的成员
+        to_remove = [
+            uid
+            for uid, lvl in users.items()
+            if uid != bot
+            and isinstance(lvl, int)
+            and lvl < 100
+            and uid not in desired
+        ]
+        if not to_remove:
+            return
+
+        # ① 降权：从 users 里删掉这些人（回落 users_default=0），保留 power_levels 其它字段
+        new_users = {u: lv for u, lv in users.items() if u not in to_remove}
+        new_pl = {**pl, "users": new_users}
+        self.client.set_power_levels(room_id, new_pl)
+        # ② 踢出控制室
+        for uid in to_remove:
+            self.client.kick(room_id, uid, "已撤销服务器管理员，移出控制室")
+            logger.info("控制室对齐：已降权并移除非管理员 %s", uid)
 
     # —— 运行时 AI 配置：管理后台写控制室 state event，bot 读并应用 ——
 

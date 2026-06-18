@@ -125,6 +125,37 @@ class MatrixClient:
                 "邀请 %s 进 %s 失败: %s %s", user_id, room_id, resp.status_code, resp.text
             )
 
+    def set_power_levels(self, room_id: str, content: Dict[str, Any]) -> bool:
+        """整体覆盖某房间的 m.room.power_levels 状态事件（调用方负责传完整内容）。
+
+        用于控制室成员对齐——把非管理员从 users 里删掉（回落 users_default=0）。
+        需要 bot 在该房有改 power_levels 的权限（控制室里 bot=100，够）。成功返回 True。
+        """
+        url = self._url(
+            f"/_matrix/client/v3/rooms/{quote(room_id)}/state/m.room.power_levels/"
+        )
+        resp = self._session.put(url, json=content, timeout=10)
+        if resp.status_code == 200:
+            return True
+        logger.warning("设置 power_levels@%s 失败: %s %s", room_id, resp.status_code, resp.text)
+        return False
+
+    def kick(self, room_id: str, user_id: str, reason: str = "") -> bool:
+        """把某用户踢出房间（控制室对齐时移除已撤销的管理员）。成功返回 True。
+
+        需要 bot 的 power 高于对方且 ≥ kick 等级（控制室里 bot=100，够）。
+        """
+        url = self._url(f"/_matrix/client/v3/rooms/{quote(room_id)}/kick")
+        body: Dict[str, Any] = {"user_id": user_id}
+        if reason:
+            body["reason"] = reason
+        resp = self._session.post(url, json=body, timeout=10)
+        if resp.status_code == 200:
+            logger.info("已把 %s 踢出 %s", user_id, room_id)
+            return True
+        logger.warning("踢出 %s@%s 失败: %s %s", user_id, room_id, resp.status_code, resp.text)
+        return False
+
     def send_card(self, room_id: str, body: str, card: Dict[str, Any]) -> Optional[str]:
         """往房间发一条"富卡"消息。
 

@@ -619,55 +619,34 @@ export async function setUserAdmin(userId: string, admin: boolean): Promise<void
     method: 'PUT',
     body: JSON.stringify({ admin }),
   })
-  // 控制室成员/权限随服务器管理员身份联动（尽力而为，失败不回滚已成功的提/撤权）：
-  if (admin) {
-    // 提权：趁**当前操作者**（已在控制室、有 power）在线，把新管理员拉进控制室并提到 50。
-    // 否则新管理员自己既不在房、又没权限，无法自助修复，只能干等所有者某天登录保存。
-    try {
-      await ensureControlRoom()
-    } catch {
-      /* 对账失败（如操作者也不在房/无权限）：忽略 */
-    }
-  } else {
-    // 撤权：把该用户在控制室**降权 + 踢出**，否则他仍是房间成员、仍能写 AI 配置。
-    try {
-      await removeFromControlRoom(userId)
-    } catch {
-      /* 操作者在控制室没有足够 power（非所有者）：忽略，需所有者再处理 */
-    }
+  // 控制室成员随服务器管理员身份联动。关键：**真正的移除交给 power=100 的主 AI**，
+  // 浏览器只“提交期望”——因为同级(50)管理员之间互相无法降权/踢出，前端做不到可靠移除。
+  try {
+    await syncControlRoomAdmins()
+  } catch {
+    /* 尽力而为：同步失败不回滚已成功的服务器管理员变更 */
   }
 }
 
 /**
- * 把某用户从控制室降权并踢出（撤销服务器管理员时调用）。
- * ① 删掉他在 power_levels.users 里的条目（回落 users_default=0）；② kick 出房。
- * 二者都需要**当前操作者的 power 高于对方**（通常是所有者 100 对 50），否则会失败——
- * 静默忽略，留给所有者后续处理。绝不动其它字段、不碰所有者自己。
+ * 把「当前服务器管理员集」写进控制室的 cosmac.ctrl.admins 状态事件，并尽力即时对齐。
+ *
+ * 设计（守住「撤权后真的失去配置写权限」这条线）：
+ *  - 浏览器只**声明期望**（管理员 power=50 足够写这个 state event）；
+ *  - 拥有 power=100 的**主 AI(bot)** 读到后强制对齐控制室成员：降权 + 踢出不在期望集里的人。
+ *    这绕过了「50 无法移除 50」的 Matrix 约束，撤权后约 1 个事件往返内即生效。
+ *  - 同时做一次**前端尽力**：ensureControlRoom 邀请/提权在场管理员（即时可见），但不依赖它。
  */
-async function removeFromControlRoom(userId: string): Promise<void> {
-  if (!mx || !userId) return
-  const rid = await resolveControlRoom()
-  if (!rid) return
-  const room = mx.getRoom(rid)
-  // ① 降权：只有真正读到 power_levels 才动它（同 reconcile，避免空对象覆盖）
-  const pl: any = (room as any)?.currentState
-    ?.getStateEvents?.('m.room.power_levels', '')
-    ?.getContent?.()
-  if (pl && typeof pl === 'object' && pl.users && userId in pl.users) {
-    const users: Record<string, number> = { ...pl.users }
-    delete users[userId] // 删掉 = 回落到 users_default（0），不再能写配置
-    try {
-      await (mx as any).sendStateEvent(rid, 'm.room.power_levels', { ...pl, users }, '')
-    } catch {
-      /* 无权改 power_levels：忽略 */
-    }
-  }
-  // ② 踢出控制室（kick 默认需 power≥50 且高于对方）
-  try {
-    await (mx as any).kick(rid, userId, '已撤销服务器管理员')
-  } catch {
-    /* 已不在房/无权限：忽略 */
-  }
+async function syncControlRoomAdmins(): Promise<void> {
+  if (!mx) return
+  // 当前服务器管理员集（未停用的）
+  const desired = (await listUsers())
+    .filter((u) => u.admin && !u.deactivated)
+    .map((u) => u.id)
+  // 建房（首次）+ 邀请/提权在场管理员（尽力即时生效，bot 随后也会兜底对齐）
+  const rid = await ensureControlRoom()
+  // 写「期望管理员集」——主 AI 据此踢出被撤销者（前端无权踢同级，这步才是可靠保证）
+  await (mx as any).sendStateEvent(rid, CONTROL_ADMINS_EVENT_TYPE, { admins: desired }, '')
 }
 
 /* =====================================================================
@@ -759,6 +738,9 @@ export async function deleteRoom(roomId: string, block = false): Promise<void> {
 
 /** 控制室里 AI 配置 state event 的类型（与 bot 端 AI_CONFIG_EVENT_TYPE 一致）。 */
 const AI_CONFIG_EVENT_TYPE = 'cosmac.ai.config'
+/** 控制室里「期望服务器管理员集」state event 的类型（与 bot 端 CONTROL_ADMINS_EVENT_TYPE 一致）。
+ *  浏览器写期望（管理员 power=50 够写 state），主 AI(power=100) 读到后对齐成员、踢出被撤销者。 */
+const CONTROL_ADMINS_EVENT_TYPE = 'cosmac.ctrl.admins'
 /** 控制室别名 localpart（#cosmac-ctrl:<server>）。 */
 const CONTROL_ROOM_LOCALPART = 'cosmac-ctrl'
 
