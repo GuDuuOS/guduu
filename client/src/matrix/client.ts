@@ -315,6 +315,18 @@ export function normalizeUserId(input: string): string {
   return `@${s.replace(/^@/, '')}:${serverName()}`
 }
 
+/** 这个房间是否被收藏（Matrix 标准 m.favourite 标签）。 */
+export function isFavourite(roomId: string): boolean {
+  return !!mx?.getRoom(roomId)?.tags?.['m.favourite']
+}
+
+/** 设置/取消收藏（写 m.favourite 标签，per-room、跨设备同步）。 */
+export async function setFavourite(roomId: string, on: boolean): Promise<void> {
+  if (!mx) throw new Error('未登录')
+  if (on) await (mx as any).setRoomTag(roomId, 'm.favourite', {})
+  else await (mx as any).deleteRoomTag(roomId, 'm.favourite')
+}
+
 /** 读某个房间的真实成员（已加入的）。返回 {id, name, isBot}。 */
 export function listRoomMembers(roomId: string): { id: string; name: string; isBot: boolean }[] {
   const room = mx?.getRoom(roomId)

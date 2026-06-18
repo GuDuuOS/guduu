@@ -34,6 +34,8 @@ import {
   mxcToHttp,
   inviteToRoom,
   listRoomMembers,
+  isFavourite,
+  setFavourite,
   normalizeUserId,
   BOT_ID,
   type LiveRoom,
@@ -50,16 +52,10 @@ import PluginStoreModal from '@/components/layout/PluginStoreModal.vue'
 import CustomAssetsModal from '@/components/layout/CustomAssetsModal.vue'
 import UserSettingsModal from '@/components/layout/UserSettingsModal.vue'
 import ProfileHome from '@/components/layout/ProfileHome.vue'
-import DepartmentCreateModal from '@/components/layout/DepartmentCreateModal.vue'
 import CliConsole from '@/components/layout/CliConsole.vue'
-import ChannelAdminModal from '@/components/channel/ChannelAdminModal.vue'
-// ChannelAdminModal / SystemAiModal 用 .cam-* 全局样式（前缀唯一，不和 LiveView 撞）
-import '@/styles/admin-modal.css'
 import { useMarketplace } from '@/composables/useMarketplace'
 import { useCli } from '@/composables/useCli'
 import { useProfileHome } from '@/composables/useProfileHome'
-import { useDepartmentCreate } from '@/composables/useDepartmentCreate'
-import { useChannelAdmin } from '@/composables/useChannelAdmin'
 import { usePluginStore } from '@/composables/usePluginStore'
 import { useCustomAssets } from '@/composables/useCustomAssets'
 import { useUserProfile, type UserSettingsTab } from '@/composables/useUserProfile'
@@ -67,8 +63,6 @@ import { useUserProfile, type UserSettingsTab } from '@/composables/useUserProfi
 const { open: openMarket } = useMarketplace()
 const { open: openCli } = useCli()
 const { open: openProfileHome } = useProfileHome()
-const { open: openCreateDept } = useDepartmentCreate()
-const { open: openAdmin, setCurrent } = useChannelAdmin()
 const { open: openPluginStore } = usePluginStore()
 const { open: openAssets } = useCustomAssets()
 const { openSettings } = useUserProfile()
@@ -118,6 +112,7 @@ const msgs = ref<LiveMsg[]>([])
 const draft = ref('')
 const taRef = ref<HTMLTextAreaElement>()
 const filterText = ref('')
+const filterInput = ref<HTMLInputElement>()
 
 // ── 右侧"中枢 AI"面板（= 与主 AI 的私聊）────────────────
 const aiRoom = ref('')
@@ -500,6 +495,15 @@ function openRoom(id: string) {
   currentRoom.value = id
   msgs.value = listMessages(id)
   channelMembers.value = listRoomMembers(id)
+  fav.value = isFavourite(id)
+}
+// 收藏当前频道（真实 Matrix m.favourite 标签，按频道独立、跨设备同步）
+async function toggleFav() {
+  const id = currentRoom.value
+  if (!id) return
+  const next = !fav.value
+  fav.value = next
+  try { await setFavourite(id, next) } catch (e: any) { fav.value = !next; toast('收藏失败', e?.message || String(e)) }
 }
 
 async function send() {
@@ -603,11 +607,10 @@ function onSettings(tab?: UserSettingsTab) { openSettings(tab); userMenuOpen.val
 function onMarket() { openMarket(); appMenuOpen.value = false }
 function onCli() { openCli(); appMenuOpen.value = false }
 function onProfile() { openProfileHome(); appMenuOpen.value = false; userMenuOpen.value = false }
-function onAddWorkspace() { openCreateDept() }
 function onPluginStore() { openPluginStore() }
 function onCustomAssets() { openAssets() }
 // ↓↓↓ 这些 DEMO 本身也只是 toast 提示（无独立弹窗），保持一致 ↓↓↓
-function onFilter() { toast('筛选频道', '按未读 / 私密过滤（演示，可直接在右侧输入框查找）') }
+function onFilter() { filterInput.value?.focus() }
 function onAttach() { toast('📎 附件', '支持图片 / 视频 / 文档（演示）') }
 function onEmoji() { toast('😊 表情') }
 
@@ -759,7 +762,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
           <button class="cs-filter-funnel" title="筛选" @click="onFilter">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18l-7 9v6l-4-2v-4z" /></svg>
           </button>
-          <input class="cs-filter-input" v-model="filterText" placeholder="查找频道" />
+          <input ref="filterInput" class="cs-filter-input" v-model="filterText" placeholder="查找频道" />
         </div>
 
         <div class="cs-list">
@@ -895,7 +898,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
         <!-- ===== 频道 ===== -->
         <template v-else>
         <div v-if="currentRoom" class="ch-header">
-          <button class="ch-fav" :class="{ active: fav }" :title="fav ? '取消收藏' : '收藏'" @click="fav = !fav">
+          <button class="ch-fav" :class="{ active: fav }" :title="fav ? '取消收藏' : '收藏'" @click="toggleFav">
             <svg width="16" height="16" viewBox="0 0 24 24" :fill="fav ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
           </button>
           <span class="ch-av" :style="{ background: colorOf(currentName) }">{{ iconChar(currentName) }}</span>
@@ -1038,9 +1041,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
     <CustomAssetsModal />
     <UserSettingsModal />
     <ProfileHome />
-    <DepartmentCreateModal />
     <CliConsole />
-    <ChannelAdminModal />
 
     <!-- 新建工作区（完整表单 · 真建 Matrix Space + 默认频道）-->
     <div v-if="newWsOpen" class="nw-overlay" @click.self="newWsOpen = false">
