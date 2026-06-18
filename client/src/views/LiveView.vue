@@ -1063,8 +1063,11 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
               <span v-else class="gutter-time">{{ fmtTime(m.ts) }}</span>
             </div>
             <div class="msg-body">
-              <!-- 回复预览 -->
-              <div v-if="m.replyToId" class="msg-reply">↳ <b>{{ m.replyToName }}</b><span class="msg-reply-body">{{ m.replyToBody }}</span></div>
+              <!-- 回复预览（Discord 风弯角连接线 + 名字上色 + 正文淡色）-->
+              <div v-if="m.replyToId" class="msg-reply">
+                <span class="reply-name" :style="{ color: nameColor(m.replyToName || '') }">@{{ (m.replyToName || '').replace(/^@/, '') }}</span>
+                <span class="reply-body">{{ m.replyToBody }}</span>
+              </div>
               <div v-if="m.showHeader" class="head">
                 <span class="name" :style="{ color: nameColor(m.senderName) }">{{ m.senderName }}</span>
                 <span v-if="isBot(m.sender)" class="app-tag">APP</span>
@@ -1621,10 +1624,12 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 .edited { font-size: 11px; color: var(--text-dim); margin-left: 6px; }
 /* @提及高亮 */
 .text :deep(.mention), .ai-bubble :deep(.mention) { background: var(--accent-soft); color: var(--warn); border-radius: 4px; padding: 0 3px; font-weight: 600; }
-/* 回复预览 */
-.msg-reply { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-3); margin-bottom: 2px; }
-.msg-reply b { color: var(--text-2); font-weight: 600; }
-.msg-reply-body { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 400px; }
+/* 回复预览（弯角连接线 + 名字上色 + 正文淡色）*/
+.msg-reply { position: relative; display: flex; align-items: center; gap: 6px; font-size: 13px; line-height: 1.3; margin-bottom: 3px; min-width: 0; }
+.msg-reply::before { content: ""; position: absolute; left: -32px; top: 9px; bottom: -2px; width: 30px; border-left: 2px solid var(--border); border-top: 2px solid var(--border); border-top-left-radius: 8px; }
+.reply-name { font-weight: 600; flex-shrink: 0; }
+.reply-name:hover { text-decoration: underline; cursor: pointer; }
+.reply-body { color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 /* 反应条 */
 .reactions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
 .rxn { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-panel); cursor: pointer; font-size: 13px; color: var(--text-2); }
