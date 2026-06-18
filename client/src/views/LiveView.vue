@@ -1586,9 +1586,9 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 .cs-src-btn { background: transparent; border: none; padding: 0; cursor: pointer; }
 .cs-src-btn:hover { color: var(--text); }
 .cs-src-btn.on { color: var(--accent); }
-.cs-src-edit { width: 22px; height: 22px; flex-shrink: 0; background: transparent; border: none; border-radius: 5px; color: var(--text-3); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; opacity: 0; transition: opacity .12s, background .12s; }
+.cs-src-edit { width: 22px; height: 22px; flex-shrink: 0; background: transparent; border: none; border-radius: 5px; color: var(--text-3); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; opacity: .65; transition: opacity .12s, background .12s, color .12s; }
 .cs-item:hover .cs-src-edit { opacity: 1; }
-.cs-src-edit:hover { background: var(--bg-panel); color: var(--text); }
+.cs-src-edit:hover { background: var(--bg-panel); color: var(--accent); opacity: 1; }
 .cs-src-list { margin: 0 0 4px 30px; display: flex; flex-direction: column; gap: 2px; padding: 2px 0; }
 .cs-src-empty { font-size: 12px; color: var(--text-3); padding: 2px 6px; }
 .cs-src-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); padding: 3px 6px; border-radius: 5px; }
