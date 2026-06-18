@@ -7,6 +7,12 @@
 
 ---
 
+## 2026-06-18 — 管理后台②：频道/群管理 + admin 接口 CORS 打通
+- 管理后台第二块**频道管理**：AdminView 加 tab 切换（用户管理/频道管理）；频道面板列出**全服所有房间**（不同于侧栏只列"我加入的"）：名/别名、成员数(总/本服)、类型(公开/私有 + 加密锁)、操作(查看成员弹窗 / 删除)。删除带二次确认 + 是否封禁(block，禁止重建)。
+- client.ts 补 admin 房间接口：`listAdminRooms`(v1 /rooms 自动翻页,按成员数倒序) / `getRoomMembers` / `deleteRoom(block,purge)`。沿用 `adminFetch` 那套。
+- 本地 preview 直连生产验证：拉到 36 个真实房间(GuDuu测试群/《银河谣》制作专班/明星·粉丝…)、查看成员弹窗正常(GuDuu测试群→@guduu)。删除是破坏性操作,未拿真房间测(逻辑已接)。小修:标题栏右边距避让关闭✕。
+- **关键卡点(服务器侧,无需改代码)**：admin 接口浏览器调用一直 `Failed to fetch`。根因有三层——① hs 的 nginx 转发正则 `^(/_matrix|/_synapse/client)` **漏了 `/_synapse/admin`**,请求落到兜底 200 文本;② 自己加 CORS 头与 Synapse 自带的 `ACAO:*` **重复**(浏览器拒绝双 ACAO);③ OPTIONS 预检 Synapse 对 admin 接不住。**最终方案**:nginx 只拦 `/_synapse/admin` 的 OPTIONS 预检(回 204),其余转发给 Synapse、用它单个 ACAO,不再自加头。（详见 DEPLOY.md 待补的踩坑条）
+
 ## 2026-06-18 — 管理后台①：用户管理（MVP，覆盖层集成进 LiveView）
 - 新模块：平台管理后台。按"一次只推一个"先做**用户管理**：列表 / 新建 / 停用 / 恢复 / 重置密码 / 设撤管理员。
 - 关键架构发现：真实 app 的根组件是 `views/LiveView.vue`（`main.ts` 挂它），**不是** App.vue —— `<router-view>` 不渲染，所以加 `/admin` 路由没用。改成把 `AdminView.vue` 作为**全屏覆盖层**集成进 LiveView：用户菜单加「管理后台」入口（仅管理员 `isServerAdmin()` 探测为真才显示），点开覆盖层、× 关闭。（已存 memory: client-root-is-liveview）

@@ -12,11 +12,11 @@
         </div>
       </div>
       <nav class="adm-menu">
-        <button class="adm-mi active">
+        <button class="adm-mi" :class="{ active: tab === 'users' }" @click="tab = 'users'">
           <span class="adm-mi-ic">👤</span> 用户管理
         </button>
-        <button class="adm-mi" disabled>
-          <span class="adm-mi-ic">＃</span> 频道管理 <span class="adm-soon">敬请期待</span>
+        <button class="adm-mi" :class="{ active: tab === 'rooms' }" @click="switchToRooms">
+          <span class="adm-mi-ic">＃</span> 频道管理
         </button>
         <button class="adm-mi" disabled>
           <span class="adm-mi-ic">🤖</span> AI 配置 <span class="adm-soon">敬请期待</span>
@@ -46,8 +46,8 @@
         <button class="adm-btn" @click="check">重新校验</button>
       </div>
 
-      <!-- 3) 用户管理面板 -->
-      <template v-else>
+      <!-- 3) 已是管理员：按 tab 显示用户管理 / 频道管理 -->
+      <template v-else-if="tab === 'users'">
         <header class="adm-head">
           <div>
             <h1 class="adm-h1">用户管理</h1>
@@ -121,6 +121,67 @@
           </tbody>
         </table>
       </template>
+
+      <!-- 频道管理面板 -->
+      <template v-else-if="tab === 'rooms'">
+        <header class="adm-head">
+          <div>
+            <h1 class="adm-h1">频道管理</h1>
+            <p class="adm-hint">
+              全服共 {{ rooms.length }} 个频道 ·
+              公开 {{ rooms.filter(r => r.isPublic).length }} ·
+              加密 {{ rooms.filter(r => r.encrypted).length }}
+            </p>
+          </div>
+          <div class="adm-actions">
+            <button class="adm-btn ghost" :disabled="roomsLoading" @click="loadRooms">
+              {{ roomsLoading ? '刷新中…' : '刷新' }}
+            </button>
+          </div>
+        </header>
+
+        <div v-if="roomsLoading" class="adm-center"><div class="adm-spin" /> 加载频道列表…</div>
+
+        <table v-else class="adm-table">
+          <thead>
+            <tr>
+              <th>频道</th>
+              <th>成员</th>
+              <th>类型</th>
+              <th class="adm-ops-h">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="r in rooms" :key="r.id">
+              <td>
+                <div class="adm-user">
+                  <span class="adm-ava">{{ (r.name || '#').charAt(0).toUpperCase() }}</span>
+                  <div class="adm-u-id">
+                    <div class="adm-u-name">{{ r.name }}</div>
+                    <div class="adm-u-handle">{{ r.alias || r.id }}</div>
+                  </div>
+                </div>
+              </td>
+              <td>{{ r.members }}<span class="adm-dim"> / 本服 {{ r.localMembers }}</span></td>
+              <td>
+                <span class="adm-tag" :class="r.isPublic ? 'admin' : 'member'">
+                  {{ r.isPublic ? '公开' : '私有' }}
+                </span>
+                <span v-if="r.encrypted" class="adm-tag bot" title="端到端加密">🔒 加密</span>
+              </td>
+              <td class="adm-ops">
+                <button class="adm-op" :disabled="roomBusy === r.id" @click="viewMembers(r)">
+                  查看成员
+                </button>
+                <button class="adm-op danger" :disabled="roomBusy === r.id" @click="doDeleteRoom(r)">
+                  删除
+                </button>
+              </td>
+            </tr>
+            <tr v-if="!rooms.length"><td colspan="4" class="adm-empty">暂无频道</td></tr>
+          </tbody>
+        </table>
+      </template>
     </section>
 
     <!-- 新建用户弹窗 -->
@@ -147,6 +208,26 @@
         </div>
       </div>
     </div>
+
+    <!-- 频道成员弹窗 -->
+    <div v-if="membersOf" class="adm-mask" @click.self="membersOf = null">
+      <div class="adm-modal">
+        <div class="adm-modal-h">{{ membersOf.name }} · 成员</div>
+        <div class="adm-mlist">
+          <div v-if="membersLoading" class="adm-center"><div class="adm-spin" /> 加载中…</div>
+          <template v-else>
+            <div v-for="m in memberList" :key="m" class="adm-mrow">
+              <span class="adm-ava sm">{{ m.replace(/^@/, '').charAt(0).toUpperCase() }}</span>
+              <span class="adm-mid">{{ m }}</span>
+            </div>
+            <div v-if="!memberList.length" class="adm-empty">没有成员</div>
+          </template>
+        </div>
+        <div class="adm-modal-f">
+          <button class="adm-btn ghost" @click="membersOf = null">关闭</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -161,7 +242,11 @@ import {
   resetPassword,
   setUserAdmin,
   serverName,
+  listAdminRooms,
+  getRoomMembers,
+  deleteRoom,
   type AdminUser,
+  type AdminRoom,
 } from '@/matrix/client'
 import { useToast } from '@/composables/useToast'
 
@@ -169,6 +254,9 @@ import { useToast } from '@/composables/useToast'
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 const { success, warn } = useToast()
+
+// 当前管理模块：用户管理 / 频道管理
+const tab = ref<'users' | 'rooms'>('users')
 
 // 页面状态机：checking 校验中 / denied 无权限 / ok 已是管理员
 const state = ref<'checking' | 'denied' | 'ok'>('checking')
@@ -287,6 +375,63 @@ async function doCreate() {
   }
 }
 
+/* —— 频道管理 —— */
+const rooms = ref<AdminRoom[]>([])
+const roomsLoading = ref(false)
+const roomsLoaded = ref(false)        // 懒加载：首次切到频道 tab 才拉
+const roomBusy = ref<string | null>(null)
+// 成员弹窗：membersOf 为当前查看的房间，null 表示关闭
+const membersOf = ref<AdminRoom | null>(null)
+const memberList = ref<string[]>([])
+const membersLoading = ref(false)
+
+/** 切到频道 tab；首次进入时懒加载列表 */
+function switchToRooms() {
+  tab.value = 'rooms'
+  if (!roomsLoaded.value) loadRooms()
+}
+
+async function loadRooms() {
+  roomsLoading.value = true
+  try {
+    rooms.value = await listAdminRooms()
+    roomsLoaded.value = true
+  } catch (e: any) {
+    warn('加载失败', e?.message || '无法获取频道列表')
+  } finally {
+    roomsLoading.value = false
+  }
+}
+
+async function viewMembers(r: AdminRoom) {
+  membersOf.value = r
+  membersLoading.value = true
+  memberList.value = []
+  try {
+    memberList.value = await getRoomMembers(r.id)
+  } catch (e: any) {
+    warn('加载失败', e?.message || '无法获取成员')
+  } finally {
+    membersLoading.value = false
+  }
+}
+
+async function doDeleteRoom(r: AdminRoom) {
+  // 删除不可逆，二次确认；并询问是否一并封禁（禁止重建/重新加入）
+  if (!confirm(`确认删除频道「${r.name}」？\n将踢出所有成员并清除历史，不可恢复。`)) return
+  const block = confirm('是否同时【封禁】此频道？\n确定 = 封禁（禁止任何人再加入/重建，用于违规群）\n取消 = 仅删除')
+  roomBusy.value = r.id
+  try {
+    await deleteRoom(r.id, block)
+    rooms.value = rooms.value.filter(x => x.id !== r.id)
+    success('已删除', `频道「${r.name}」已${block ? '删除并封禁' : '删除'}`)
+  } catch (e: any) {
+    warn('删除失败', e?.message || '无法删除频道')
+  } finally {
+    roomBusy.value = null
+  }
+}
+
 onMounted(check)
 </script>
 
@@ -356,7 +501,7 @@ onMounted(check)
 
 /* —— 右侧内容 —— */
 .adm-main { flex: 1; min-width: 0; overflow-y: auto; padding: 22px 26px; }
-.adm-head { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 18px; }
+.adm-head { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 18px; padding-right: 44px; }
 .adm-h1 { font-size: 20px; font-weight: var(--fw-bold); }
 .adm-hint { font-size: var(--fs-75); color: var(--text-3); margin-top: 4px; }
 .adm-actions { display: flex; gap: 8px; }
@@ -447,4 +592,15 @@ onMounted(check)
 }
 .adm-field input:focus { outline: none; border-color: var(--accent); }
 .adm-modal-f { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+
+/* 频道管理补充 */
+.adm-dim { color: var(--text-3); font-size: var(--fs-75); }
+.adm-empty { text-align: center; color: var(--text-3); padding: 24px 0; }
+.adm-tag.bot { margin-left: 6px; }
+
+/* 成员弹窗列表 */
+.adm-mlist { max-height: 320px; overflow-y: auto; margin-bottom: 12px; }
+.adm-mrow { display: flex; align-items: center; gap: 9px; padding: 6px 2px; }
+.adm-ava.sm { width: 26px; height: 26px; font-size: 12px; border-radius: 7px; }
+.adm-mid { font-family: var(--mono); font-size: var(--fs-75); color: var(--text-2); }
 </style>

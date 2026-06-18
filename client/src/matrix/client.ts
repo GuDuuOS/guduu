@@ -611,6 +611,76 @@ export async function setUserAdmin(userId: string, admin: boolean): Promise<void
   })
 }
 
+/* =====================================================================
+ *  管理后台 · 频道/群管理（Synapse Admin Rooms API）
+ *  和用户管理一样走 /_synapse/admin/...，需服务器管理员 token。
+ *  注意：这里列的是「整台服务器上的所有房间」，不同于侧栏只列「我加入的」。
+ * ===================================================================== */
+
+/** 管理后台用的精简房间结构 */
+export interface AdminRoom {
+  id: string                 // room_id，如 !abc:cosmac.cc
+  name: string               // 房间名（没设名就退回别名或 room_id）
+  alias: string | null       // 规范别名 #xxx:host（可能没有）
+  members: number            // 已加入成员数
+  localMembers: number       // 本服成员数
+  isPublic: boolean          // 是否公开可加入（join_rules=public）
+  encrypted: boolean         // 是否端到端加密
+  creator: string | null     // 创建者 user_id
+}
+
+/**
+ * 拉全服房间列表（Admin API v1 /rooms，自动翻页取完）。
+ * 默认按成员数倒序，人多的群排前面。
+ */
+export async function listAdminRooms(): Promise<AdminRoom[]> {
+  const out: AdminRoom[] = []
+  let from = 0
+  const limit = 100
+  for (let guard = 0; guard < 100; guard++) {
+    const data = await adminFetch(
+      `/_synapse/admin/v1/rooms?from=${from}&limit=${limit}&order_by=joined_members&dir=b`,
+    )
+    for (const r of data.rooms || []) {
+      out.push({
+        id: r.room_id,
+        name: r.name || r.canonical_alias || r.room_id,
+        alias: r.canonical_alias || null,
+        members: r.joined_members ?? 0,
+        localMembers: r.joined_local_members ?? 0,
+        // join_rules 为 "public" 即公开；其余（invite/knock…）按私有处理
+        isPublic: r.join_rules === 'public',
+        encrypted: !!r.encryption,
+        creator: r.creator || null,
+      })
+    }
+    // Admin rooms API 用 next_batch 翻页；没有就取完了
+    if (data.next_batch === undefined || data.next_batch === null) break
+    from = Number(data.next_batch)
+  }
+  return out
+}
+
+/** 查某房间的已加入成员 id 列表（Admin API）。 */
+export async function getRoomMembers(roomId: string): Promise<string[]> {
+  const data = await adminFetch(
+    `/_synapse/admin/v1/rooms/${encodeURIComponent(roomId)}/members`,
+  )
+  return (data.members || []) as string[]
+}
+
+/**
+ * 删除（并清除）一个房间。
+ * @param block true=封禁该房间，禁止任何人重新加入/重建（用于违规群）；false=仅删除。
+ * Synapse 会把所有本服成员踢出、purge 历史。该操作不可逆，调用前务必确认。
+ */
+export async function deleteRoom(roomId: string, block = false): Promise<void> {
+  await adminFetch(`/_synapse/admin/v1/rooms/${encodeURIComponent(roomId)}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ block, purge: true }),
+  })
+}
+
 /** 读某个频道当前时间线的消息（含发送者昵称与 cosmac.card 富卡）。 */
 export function listMessages(roomId: string): LiveMsg[] {
   const room = mx?.getRoom(roomId)
