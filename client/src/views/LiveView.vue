@@ -103,8 +103,19 @@ const tasks = ref(false)
 function openBoard() { board.value = true; tasks.value = false; currentRoom.value = '' }
 function openTasks() { tasks.value = true; board.value = false; currentRoom.value = '' }
 
-// 任务看板：所有任务按状态分到 3 列（待办/进行中/已完成）
-const taskItems = computed<TodoItem[]>(() => getTodos(activeId.value).groups.flatMap((g) => g.items))
+// 任务看板：剧集 Tab（每部剧一个），点击后只看那部剧的任务
+const productionTabs = [
+  { key: 'ep-night', name: '夜航星', avatar: '夜', color: '#7a5cad' },
+  { key: 'ep-galaxy', name: '银河谣', avatar: '银', color: '#5a8a6a' },
+  { key: 'mobai', name: '墨白', avatar: '墨', color: '#b5793a' },
+]
+const activeShow = ref(productionTabs[0].key)   // 当前选中的剧集
+// 当前工作区所有任务
+const allTaskItems = computed<TodoItem[]>(() => getTodos(activeId.value).groups.flatMap((g) => g.items))
+// 某剧集的任务数（Tab 上的角标）
+function showCount(key: string) { return allTaskItems.value.filter((t) => t.show === key).length }
+// 当前剧集的任务（看板正文）
+const taskItems = computed<TodoItem[]>(() => allTaskItems.value.filter((t) => t.show === activeShow.value))
 const taskCols = computed(() => [
   { key: 'pending', title: '待办', items: taskItems.value.filter((t) => t.status === 'pending') },
   { key: 'in_progress', title: '进行中', items: taskItems.value.filter((t) => t.status === 'in_progress') },
@@ -1020,8 +1031,22 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
         <template v-else-if="tasks">
           <div class="ch-header">
             <div class="title">📋 任务看板</div>
+            <!-- 剧集 Tab：点哪个看哪部剧的任务 -->
+            <div class="prod-tabs">
+              <button
+                v-for="pt in productionTabs"
+                :key="pt.key"
+                class="prod-tab"
+                :class="{ active: activeShow === pt.key }"
+                @click="activeShow = pt.key"
+              >
+                <span class="prod-tab-av" :style="{ background: pt.color }">{{ pt.avatar }}</span>
+                <span>{{ pt.name }}</span>
+                <span class="prod-tab-n">{{ showCount(pt.key) }}</span>
+              </button>
+            </div>
             <div class="ch-actions">
-              <span class="board-sub">{{ taskItems.length }} 项任务 · AI 制作中</span>
+              <span class="board-sub">{{ taskItems.length }} 项 · AI 制作中</span>
               <!-- 数据源：点开右侧「数据源」面板（展示 + 增删）-->
               <button class="ch-ic-btn bs-srcbtn" :class="{ active: boardPanelOpen }" :title="`数据源（${sources.tasks.length}）`" @click="toggleSourcePanel('tasks')">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3" /></svg>
@@ -1593,6 +1618,14 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 .board-sub { font-size: 13px; color: var(--text-3); font-family: var(--mono); }
 
 /* ── 任务看板（kanban 三列）── */
+/* 任务看板顶部剧集 Tab */
+.prod-tabs { display: flex; gap: 6px; margin-left: 14px; flex-wrap: wrap; }
+.prod-tab { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px 4px 5px; border: 1px solid var(--border); border-radius: 20px; background: transparent; color: var(--text-2); font-size: 12px; cursor: pointer; transition: background .12s, border-color .12s; }
+.prod-tab:hover { background: var(--bg-hover); color: var(--text); }
+.prod-tab.active { background: var(--bg-panel); color: var(--text); border-color: var(--accent); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+.prod-tab-av { width: 18px; height: 18px; border-radius: 5px; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; flex-shrink: 0; }
+.prod-tab-n { font-size: 10px; color: var(--text-3); background: var(--bg-hover); border-radius: 8px; padding: 0 5px; min-width: 14px; text-align: center; }
+.prod-tab.active .prod-tab-n { background: var(--accent); color: #fff; }
 .kanban { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; padding: 16px var(--content-pad-x); overflow: hidden; }
 .kb-col { display: flex; flex-direction: column; min-height: 0; background: var(--bg-soft); border-radius: 12px; overflow: hidden; }
 .kb-col-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px; flex-shrink: 0; }

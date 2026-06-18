@@ -10,6 +10,8 @@ export interface TodoItem {
   /** 来源场景，跟左侧频道 id 对应，方便联跳 */
   source?: string
   sourceLabel?: string
+  /** 所属剧集 / 项目（任务看板按剧集 Tab 过滤用）：ep-night / ep-galaxy / mobai */
+  show?: string
   status: TodoStatus
   priority: TodoPriority
   assignee?: string
@@ -47,27 +49,27 @@ export const todoMap: Record<string, WorkspaceTodos> = reactive({
       {
         id: 'today', title: '今日截止', meta: '2 项',
         items: [
-          { id: 'hq-1', title: '审核《银河谣》第 12 集成片并定档', source: 'ep-galaxy', sourceLabel: '《银河谣》制作专班', status: 'pending', priority: 'high', assignee: '林导', due: '今日 14:00', refNo: '#EP-12' },
-          { id: 'hq-2', title: '确认墨白新 MV 发布排期', source: 'pub', sourceLabel: '发布-排期日历', status: 'pending', priority: 'mid', assignee: '苏运营', due: '今日 18:00', refNo: '#MV-03' }
+          { id: 'hq-1', title: '审核《银河谣》第 12 集成片并定档', source: 'ep-galaxy', sourceLabel: '《银河谣》制作专班', show: 'ep-galaxy', status: 'pending', priority: 'high', assignee: '林导', due: '今日 14:00', refNo: '#EP-12' },
+          { id: 'hq-2', title: '确认墨白新 MV 发布排期', source: 'pub', sourceLabel: '发布-排期日历', show: 'mobai', status: 'pending', priority: 'mid', assignee: '苏运营', due: '今日 18:00', refNo: '#MV-03' }
         ]
       },
       {
         id: 'this-week', title: '本周制作', meta: '5 项',
         items: [
-          { id: 'hq-3', title: '《银河谣》第 12 集分镜生成', source: 'ep-galaxy', sourceLabel: '《银河谣》制作专班', status: 'in_progress', priority: 'high', assignee: '分镜 Agent', due: '本周四', refNo: '#SB-12' },
-          { id: 'hq-4', title: '《夜航星》主角配音 + 配乐', source: 'ep-night', sourceLabel: '《夜航星》制作专班', status: 'in_progress', priority: 'high', assignee: '配音 Agent', due: '本周五', refNo: '#VO-07' },
-          { id: 'hq-5', title: '《夜航星》主视觉海报终稿', source: 'ep-night', sourceLabel: '《夜航星》制作专班', status: 'pending', priority: 'mid', assignee: '安总', due: '本周四', refNo: '#KV-07' },
-          { id: 'hq-6', title: '星野新单曲歌词终审', source: 'star-xingye', sourceLabel: '虚拟明星·星野', status: 'pending', priority: 'high', assignee: '林导', due: '5/26 周二', refNo: '#SG-09' },
-          { id: 'hq-7', title: '墨白后援会话题打卡活动运营', source: 'fans-mobai', sourceLabel: '墨白后援会', status: 'in_progress', priority: 'mid', assignee: '苏运营', due: '本周', refNo: '#OP-21' }
+          { id: 'hq-3', title: '《银河谣》第 12 集分镜生成', source: 'ep-galaxy', sourceLabel: '《银河谣》制作专班', show: 'ep-galaxy', status: 'in_progress', priority: 'high', assignee: '分镜 Agent', due: '本周四', refNo: '#SB-12' },
+          { id: 'hq-4', title: '《夜航星》主角配音 + 配乐', source: 'ep-night', sourceLabel: '《夜航星》制作专班', show: 'ep-night', status: 'in_progress', priority: 'high', assignee: '配音 Agent', due: '本周五', refNo: '#VO-07' },
+          { id: 'hq-5', title: '《夜航星》主视觉海报终稿', source: 'ep-night', sourceLabel: '《夜航星》制作专班', show: 'ep-night', status: 'pending', priority: 'mid', assignee: '安总', due: '本周四', refNo: '#KV-07' },
+          { id: 'hq-6', title: '墨白新单曲歌词终审', source: 'star-mobai', sourceLabel: '虚拟明星·墨白', show: 'mobai', status: 'pending', priority: 'high', assignee: '林导', due: '5/26 周二', refNo: '#SG-09' },
+          { id: 'hq-7', title: '墨白后援会话题打卡活动运营', source: 'fans-mobai', sourceLabel: '墨白后援会', show: 'mobai', status: 'in_progress', priority: 'mid', assignee: '苏运营', due: '本周', refNo: '#OP-21' }
         ]
       },
       {
         id: 'long-term', title: '中长期跟进', meta: '4 项',
         items: [
-          { id: 'hq-8', title: '与平台洽谈《银河谣》独播合作', source: 'biz', sourceLabel: '商单-品牌合作', status: 'in_progress', priority: 'mid', assignee: '周制片', due: '6/15' },
-          { id: 'hq-9', title: '《银河谣》第 11 集已上线', source: 'ep-galaxy', sourceLabel: '《银河谣》制作专班', status: 'done', priority: 'low', assignee: '林导', due: '5/22', refNo: '#EP-11' },
-          { id: 'hq-10', title: '虚拟明星墨白人设档更新', source: 'star-mobai', sourceLabel: '虚拟明星·墨白', status: 'done', priority: 'low', assignee: '编剧 Agent', due: '5/21' },
-          { id: 'hq-11', title: '本周粉丝热评批量回复', source: 'fans', sourceLabel: '数据-涨粉复盘', status: 'done', priority: 'low', assignee: '安其中枢 AI', due: '5/20', refNo: '#FR-18' }
+          { id: 'hq-8', title: '与平台洽谈《银河谣》独播合作', source: 'biz', sourceLabel: '商单-品牌合作', show: 'ep-galaxy', status: 'in_progress', priority: 'mid', assignee: '周制片', due: '6/15' },
+          { id: 'hq-9', title: '《银河谣》第 11 集已上线', source: 'ep-galaxy', sourceLabel: '《银河谣》制作专班', show: 'ep-galaxy', status: 'done', priority: 'low', assignee: '林导', due: '5/22', refNo: '#EP-11' },
+          { id: 'hq-10', title: '虚拟明星墨白人设档更新', source: 'star-mobai', sourceLabel: '虚拟明星·墨白', show: 'mobai', status: 'done', priority: 'low', assignee: '编剧 Agent', due: '5/21' },
+          { id: 'hq-11', title: '《夜航星》粉丝热评批量回复', source: 'fans', sourceLabel: '数据-涨粉复盘', show: 'ep-night', status: 'done', priority: 'low', assignee: '安其中枢 AI', due: '5/20', refNo: '#FR-18' }
         ]
       }
     ]
