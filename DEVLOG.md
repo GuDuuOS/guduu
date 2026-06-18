@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-06-19 — 模块2：技能聊天命令（建/列/删/启停），闭环打通
+- 给 Skill 加「创建/管理入口」——按负责人选择：**先做聊天命令（后端，不碰客户端、不与并行会话撞车）**。
+- 新增 `cosmac/db/skill_cmd.py`（纯逻辑、吃 session、返回回复文本，好测）：`技能 列表/添加/删除/停用/启用`；`添加 <slug> ｜ <名称> ｜ <正文>`（分隔符兼容半/全角，更新时不空串覆盖未传字段）。`looks_like_skill_command` 做不连 DB 的前缀闸（中文直接前缀、英文要词边界）。
+- **作用域**：私聊 bot（≤2 人）建的是**个人技能**(user)，群里建的是**本群技能**(room)——直觉对齐"每账号 / 群级"。
+- `appservice_bot` 接入：`_try_handle_command` 命中技能前缀就执行；`_is_skill_command` 纯字符串判断、`_run_skill_command` 懒导入 cosmac.db + 全程兜异常（服务器没装 SQLAlchemy → 回"功能暂不可用"，不崩不哑）。
+- 验证：新增 `test_skill_cmd.py` 8 例（检测/帮助/增改不覆盖/启停删/DM作用域/缺slug/未知子命令）；cosmac **58 单测全过、ruff 通过**。本地端到端冒烟：`技能 添加` → `effective_skill_prompt` 真注入、别的群隔离为空。
+- 部署（可选，要让线上生效才做）：`git pull` → `pip install -r cosmac/requirements.txt`（装 SQLAlchemy）→ `restart guduu-bot`。默认用 SQLite `run/cosmac.db`；要用 Postgres 则在 systemd 配 `GUDUU_DATABASE_URL`。不部署则零回归（懒导入失败即降级）。
+
 ## 2026-06-19 — 模块2：Skill 接进主 AI（按 房间+发起人 注入技能提示，零回归）
 - 把上一步建好的数据层用起来：主 AI 每处理一条消息，按 (本群, 发起人) 算出**当前生效的启用技能**，作为 system addendum 临时注入这一轮——不污染常驻人设。
 - 新增 `cosmac/db/service.py`（纯函数胶水层）：`effective_skills(room_id,user_id)` 按 **global→room→user** 顺序汇总启用技能；`render_skill_prompt` 渲染成提示文本；`effective_skill_prompt` 便捷组合。

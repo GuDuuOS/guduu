@@ -389,7 +389,8 @@ class CosmacBot:
 
         目前支持（注意不要用 / 开头，否则会被 Element 当成它自己的客户端命令拦截）：
             建专班 <名字> / 专班 <名字>   → 新建专班群、拉发起人进去、发一张派单富卡
-        （也兼容 /专班，万一用户在 Element 里点了"作为消息发送"）
+            技能 列表/添加/删除/停用/启用  → 管理本群（或私聊=个人）的技能
+        （也兼容 /专班、/技能，万一用户在 Element 里点了"作为消息发送"）
         """
         text = text.strip()
         for prefix in ("建专班", "/专班", "专班"):
@@ -397,7 +398,45 @@ class CosmacBot:
                 name = text[len(prefix):].strip(" :：") or "新专班"
                 self._launch_campaign(room_id, sender, name)
                 return True
+        # 技能管理命令：先用不连 DB 的前缀闸判断，命中再执行（DB 不可用则提示未启用）
+        if self._is_skill_command(text):
+            self.client.send_text(room_id, self._run_skill_command(room_id, sender, text))
+            return True
         return False
+
+    def _is_skill_command(self, text: str) -> bool:
+        """是不是「技能」命令——纯字符串判断，不导入 cosmac.db（避免无谓依赖加载）。"""
+        t = text.strip()
+        low = t.lower()
+        return (
+            t.startswith("技能")
+            or t.startswith("/技能")
+            or low == "skill"
+            or low.startswith("skill ")
+            or low.startswith("/skill")
+        )
+
+    def _run_skill_command(self, room_id: str, sender: str, text: str) -> str:
+        """执行技能命令并返回回复文本。作用域：私聊→个人技能，群里→本群技能。
+
+        和 _skill_addendum 一样：cosmac.db 懒导入 + 全程兜异常——服务器没装
+        SQLAlchemy / 没配 DB 时，回一句"未启用"而不是让 bot 崩或不吭声。
+        """
+        try:
+            is_dm = self.client.joined_member_count(room_id) <= 2
+        except Exception:
+            is_dm = False
+        try:
+            from cosmac.db import session_scope
+            from cosmac.db.skill_cmd import handle_skill_command
+
+            with session_scope() as s:
+                return handle_skill_command(
+                    s, is_dm=is_dm, room_id=room_id, user_id=sender, text=text
+                )
+        except Exception as e:
+            logger.warning("技能命令执行失败：%s", e)
+            return "技能功能暂不可用（服务器可能还没配置数据库）。"
 
     def _launch_campaign(self, origin_room: str, requester: str, name: str) -> None:
         """建一个专班群、拉发起人进来，并在群里发一张"派单"富卡。"""
