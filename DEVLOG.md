@@ -7,6 +7,12 @@
 
 ---
 
+## 2026-06-18 — 工作台接入 URL 路由（每个视图有独立地址 + 后退/刷新/深链）
+- 问题：整个 app 是单个 `LiveView` 根组件、用内部状态切视图，点来点去 **URL 从不变**——刷新回默认页、不能分享链接、浏览器后退无效。
+- 方案：**集中式双向 URL 同步**，不动任何点击 handler（导航本就收敛在 `selectSpace/openBoard/openTasks/openRoom + adminOpen`）。状态变→`router.push` 写地址；地址变(后退/前进/手改/深链)→还原状态；首屏按地址恢复一次(深链到频道要等房间加载)。用 hash history(已有)，无需改 nginx。
+- 地址方案：`/admin`、`/s/:space/board`、`/s/:space/tasks`、`/s/:space/c/:roomId`。`router/index.ts` 补这些路由(指向空 `Blank` 组件——LiveView 不走 `<router-view>`，路由仅为让 hash 合法、不被 catch-all 重定向回 /)。
+- preview 直连生产验证全过：登录自动 `/s/x/board`、看板/任务切换、频道 `/c/room`、后退前进、**频道深链刷新直达**、切工作区更新地址、`/admin` 开关。build(vue-tsc) 通过。
+
 ## 2026-06-18 — 管理后台②：频道/群管理 + admin 接口 CORS 打通
 - 管理后台第二块**频道管理**：AdminView 加 tab 切换（用户管理/频道管理）；频道面板列出**全服所有房间**（不同于侧栏只列"我加入的"）：名/别名、成员数(总/本服)、类型(公开/私有 + 加密锁)、操作(查看成员弹窗 / 删除)。删除带二次确认 + 是否封禁(block，禁止重建)。
 - client.ts 补 admin 房间接口：`listAdminRooms`(v1 /rooms 自动翻页,按成员数倒序) / `getRoomMembers` / `deleteRoom(block,purge)`。沿用 `adminFetch` 那套。

@@ -14,6 +14,7 @@
 -->
 <script setup lang="ts">
 import { ref, computed, reactive, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
   login,
   restoreSession,
@@ -614,6 +615,20 @@ function refresh() {
     reactions.value = listReactions(currentRoom.value)
   }
   if (aiRoom.value) aiMsgs.value = listMessages(aiRoom.value)
+
+  // 首屏按浏览器地址还原导航状态（支持刷新留在原页 / 深链直达某频道）。
+  // 深链到频道时需等房间列表加载好再解析；其余地址不必等。只做一次。
+  if (!urlRestored) {
+    const needRoom = /^\/s\/[^/]+\/c\//.test(route.path)
+    if (!needRoom || rooms.value.length) {
+      applyFromRoute()
+      urlRestored = true
+      syncReady = true // 还原完成后才允许"状态→地址"回写，避免覆盖初始深链
+      // 规范化地址（如登录默认页 → /s/<空间>/board）
+      const path = computePath()
+      if (route.path !== path) router.replace(path).catch(() => {})
+    }
+  }
 }
 
 async function afterLogin(uid: string) {
@@ -849,6 +864,75 @@ function onDocClick(e: MouseEvent) {
   if (!(e.target as HTMLElement)?.closest?.('.um-wrap')) userMenuOpen.value = false
   if (!(e.target as HTMLElement)?.closest?.('.emoji-pop, .msg-tools, .rxn.add')) emojiPicker.value = null
 }
+
+/* ===== URL 路由同步 =====================================================
+ * LiveView 是根组件、整页由它渲染，不走 <router-view>。这里把"内部导航状态"
+ * 与浏览器地址(hash)做双向同步，让每个视图有独立地址、支持后退/前进/刷新/深链：
+ *   · 状态变 → 写地址(push，浏览器后退可用)
+ *   · 地址变(后退/前进/手改/深链) → 还原状态
+ * 地址方案：/admin、/s/:space/board、/s/:space/tasks、/s/:space/c/:roomId
+ * 不改任何点击 handler——所有导航本就收敛在 selectSpace/openBoard/openTasks/
+ * openRoom + adminOpen 上，这里统一监听它们。
+ */
+const route = useRoute()
+const router = useRouter()
+let applyingFromRoute = false // 正在"按地址还原状态"，期间不回写地址（防死循环）
+let syncReady = false         // 首屏还原完成后才开始"状态→地址"
+let urlRestored = false       // 首屏只按地址还原一次（见 refresh）
+
+/** 由当前导航状态算出对应地址 */
+function computePath(): string {
+  if (adminOpen.value) return '/admin'
+  const s = activeSpace.value
+  if (!s) return '/'
+  if (currentRoom.value) return `/s/${encodeURIComponent(s)}/c/${encodeURIComponent(currentRoom.value)}`
+  if (tasks.value) return `/s/${encodeURIComponent(s)}/tasks`
+  return `/s/${encodeURIComponent(s)}/board`
+}
+
+/** 按当前地址还原内部导航状态（后退/前进/深链/刷新时调用） */
+function applyFromRoute() {
+  applyingFromRoute = true
+  try {
+    const p = route.path
+    if (p.startsWith('/admin')) { adminOpen.value = true; return }
+    adminOpen.value = false
+    // 匹配 /s/:space、/s/:space/board、/s/:space/tasks、/s/:space/c/:roomId
+    const m = p.match(/^\/s\/([^/]+)(?:\/(board|tasks)|\/c\/(.+))?$/)
+    if (!m) return // 根路径或无法识别 → 保持现状
+    const space = decodeURIComponent(m[1])
+    if (space && spaces.value.some((s) => s.id === space)) {
+      activeSpace.value = space
+      spaceChildIds.value = roomIdsInSpace(space)
+    }
+    const roomId = m[3] ? decodeURIComponent(m[3]) : ''
+    if (roomId) {
+      // 房间还没加载到 / 不存在 → 退回数据看板，避免空白
+      if (rooms.value.some((r) => r.id === roomId)) openRoom(roomId)
+      else { board.value = true; tasks.value = false; currentRoom.value = '' }
+    } else if (m[2] === 'tasks') {
+      tasks.value = true; board.value = false; currentRoom.value = ''
+    } else {
+      board.value = true; tasks.value = false; currentRoom.value = ''
+    }
+  } finally {
+    applyingFromRoute = false
+  }
+}
+
+// 状态 → 地址：用 push 让浏览器后退可用
+watch([activeSpace, board, tasks, currentRoom, adminOpen], () => {
+  if (!syncReady || applyingFromRoute) return
+  const path = computePath()
+  if (route.path !== path) router.push(path).catch(() => {})
+})
+
+// 地址 → 状态：仅当地址与当前状态不一致（真正的后退/前进/手改地址）才还原
+watch(() => route.path, (p) => {
+  if (!syncReady) return
+  if (p === computePath()) return
+  applyFromRoute()
+})
 
 onMounted(async () => {
   document.addEventListener('click', onDocClick)
