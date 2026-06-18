@@ -1,4 +1,4 @@
-import { computed, reactive, ref } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import {
   channelMembers,
   channelSkills,
@@ -14,6 +14,8 @@ import {
   inviteToRoom,
   kickFromRoom,
   normalizeUserId,
+  getChannelConfig,
+  setChannelConfig,
   type ChannelMember
 } from '@/matrix/client'
 
@@ -158,18 +160,65 @@ function refreshLiveMembers() {
   liveMembers.value = currentRoomId.value ? listChannelMembers(currentRoomId.value) : []
 }
 
+/* ===== 配置持久化（真实频道：存进 cosmac.channel_config state event）=====
+ * 加载时把房间里已存的配置 merge 进当前 reactive config；
+ * suppressPersist 在加载期间为 true，避免"加载即触发回写"的回声。
+ * saveState 给 UI 显示：保存中 / 已保存 / 出错（一般是无权限）。
+ */
+let suppressPersist = false
+const saveState = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
+
+/** 从房间 state event 读配置，merge 进内存 config（仅接已落地的标签页：persona）*/
+function loadConfigFromRoom(name: string, roomId: string) {
+  const saved = getChannelConfig(roomId)
+  const cfg = configs[name]
+  suppressPersist = true
+  if (saved.persona) Object.assign(cfg.persona, saved.persona)
+  // 后续标签页逐个接：model / memory / skills / knowledge / rules / dataScopes
+  nextTick(() => { suppressPersist = false })
+}
+
 function ensure(name: string) {
   if (!configs[name]) configs[name] = seedConfig(name)
 }
-/** 切换当前群（频道视图挂载、或打开弹窗时调用）。roomId 可选：传了就启用真实成员。*/
+/** 切换当前群（频道视图挂载、或打开弹窗时调用）。roomId 可选：传了就启用真实成员+配置持久化。*/
 function setCurrent(name?: string, roomId?: string) {
   const k = name?.trim()
   if (!k) return
   ensure(k)
   currentKey.value = k
   currentRoomId.value = roomId || ''
+  saveState.value = 'idle'
+  if (roomId) loadConfigFromRoom(k, roomId)
   refreshLiveMembers()
 }
+
+/** 防抖把某 patch 写回当前频道的 state event */
+let saveTimer: ReturnType<typeof setTimeout> | null = null
+function persist(patch: Record<string, any>) {
+  const rid = currentRoomId.value
+  if (!rid) return
+  if (saveTimer) clearTimeout(saveTimer)
+  saveState.value = 'saving'
+  saveTimer = setTimeout(async () => {
+    try {
+      await setChannelConfig(rid, patch)
+      saveState.value = 'saved'
+    } catch {
+      saveState.value = 'error'  // 多半是当前用户在本群没有改配置的权限
+    }
+  }, 700)
+}
+
+// 人设变更 → 自动持久化（深度监听；加载期 suppress；demo 无 roomId 不写）
+watch(
+  () => current.value.persona,
+  (p) => {
+    if (suppressPersist || !currentRoomId.value) return
+    persist({ persona: { ...p } })
+  },
+  { deep: true },
+)
 
 /** 代理到当前群配置，使既有消费方（用 state.xxx）无需改动 */
 const state = {
@@ -198,8 +247,9 @@ export function useChannelAdmin() {
     },
     close: () => { visible.value = false },
 
-    /* ===== 真实成员 API（「人员」标签用）===== */
-    isLive,            // true = 当前频道有真后端，「人员」标签走真实成员
+    /* ===== 真实成员 / 配置持久化 API ===== */
+    isLive,            // true = 当前频道有真后端，「人员」标签走真实成员、配置写进房间
+    saveState,         // 配置保存状态：idle/saving/saved/error（UI 提示用）
     liveMembers,       // 真实成员快照
     refreshLiveMembers,
     /** 真邀请已有用户进当前频道 */

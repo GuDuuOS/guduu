@@ -295,6 +295,27 @@ export async function updateRoom(
   }
 }
 
+/* ===== 频道级 CosMac 配置（频道管理面板：人设/模型/规则等）=====
+ * 存成每频道一条自定义 state event `cosmac.channel_config`（与 cosmac.workspace 同套命名）。
+ * 选 state event 而非 account data：群级共享（所有成员/多端一致）、留在房间里、不改 Synapse 核心。
+ * 写需要发状态事件的权限（房间 state_default，一般管理员），普通成员写会被服务器拒（M_FORBIDDEN）。
+ */
+const CHANNEL_CONFIG_EVENT = 'cosmac.channel_config'
+
+/** 读某频道的 CosMac 配置内容；无则返回空对象 {}。 */
+export function getChannelConfig(roomId: string): Record<string, any> {
+  const room = mx?.getRoom(roomId)
+  const ev = room?.currentState?.getStateEvents?.(CHANNEL_CONFIG_EVENT, '')
+  return ev?.getContent?.() || {}
+}
+
+/** 写某频道配置：读旧内容 merge 进 patch 再整体写回（保留其它键，便于逐标签页增量接入）。 */
+export async function setChannelConfig(roomId: string, patch: Record<string, any>): Promise<void> {
+  if (!mx) throw new Error('未登录')
+  const next = { ...getChannelConfig(roomId), ...patch }
+  await (mx as any).sendStateEvent(roomId, CHANNEL_CONFIG_EVENT, next, '')
+}
+
 /** 在某工作区(Space)下真建一个频道：建房间 + 邀请主 AI + 挂到 Space 下。返回 room_id。 */
 export async function createChannelInSpace(
   spaceId: string,

@@ -36,6 +36,8 @@
             <textarea v-model="state.persona.prompt" class="cam-textarea" rows="5" placeholder="定义该群 AI 的身份、职责与边界…" />
             <div class="cam-help">这段提示词决定本群 AI 的行为与口吻，是行为隔离的核心。</div>
           </div>
+          <!-- 真实频道：人设已存进房间，多端同步；显示保存状态 -->
+          <div v-if="isLive" class="cam-help" :style="saveHintStyle">{{ saveHint }}</div>
         </template>
 
         <!-- 人员（真实 Matrix 成员：有真后端时走这支）-->
@@ -228,7 +230,7 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 // 弹窗样式（.cam-*）来自全局 admin-modal.css。真实客户端（main.ts）只加载 tokens/reset、
 // 不加载整包 styles/index.css，所以组件自带这份样式，保证在任何宿主里（DEMO / 真实端）都成型。
 import '@/styles/admin-modal.css'
@@ -244,9 +246,18 @@ type CountKey = 'members' | 'skills' | 'knowledge' | 'rules' | 'dataScopes'
 
 const {
   visible, state, groupName, close, addMember, removeMember, addItem, removeItem, addScope, removeScope,
-  // 真实成员（有真后端时「人员」标签走这套）
-  isLive, liveMembers, refreshLiveMembers, inviteLiveMember, removeLiveMember
+  // 真实成员 + 配置持久化（有真后端时走这套）
+  isLive, saveState, liveMembers, refreshLiveMembers, inviteLiveMember, removeLiveMember
 } = useChannelAdmin()
+
+// 人设保存状态提示（存进房间 state event，多端同步）
+const saveHint = computed(() => ({
+  idle: '已存入本频道 · 编辑后自动保存、多端同步',
+  saving: '保存中…',
+  saved: '✓ 已保存到本频道 · 多端同步',
+  error: '保存失败：你可能没有本群修改配置的权限（需管理员）',
+}[saveState.value]))
+const saveHintStyle = computed(() => saveState.value === 'error' ? 'color:#b94a4a' : '')
 
 const tabs: { key: TabKey; label: string; countKey?: CountKey }[] = [
   { key: 'persona', label: '角色' },

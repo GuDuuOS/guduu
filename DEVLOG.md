@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-06-18 — 频道管理「角色(人设)」标签 → 真实持久化（配置存进房间 state event）
+- 建好配置持久化地基并接通**角色标签**：人设（AI 名称/语气/System Prompt）改一下就自动存进频道。
+- `matrix/client.ts`：新增 `getChannelConfig`/`setChannelConfig`，存成每频道一条自定义 state event `cosmac.channel_config`（与 cosmac.workspace 同命名）。选 state event 而非 account data：群级共享、多端一致、留在房间、不改 Synapse 核心。写需房间发状态事件权限（一般管理员）。
+- `useChannelAdmin`：`setCurrent(name, roomId)` 时从房间读已存配置 merge 进内存；深度 watch 人设 → 防抖 700ms 自动 `setChannelConfig`；`saveState`(idle/saving/saved/error) 给 UI 提示；加载期 suppress 防回声；demo 无 roomId 不写。
+- `ChannelAdminModal` 角色页加保存状态提示「✓ 已保存到本频道 · 多端同步 / 保存失败(无权限)」。
+- 本地 preview 验证（dev 客户端连的是**生产** hs.cosmac.cc）：夜航星改 AI 名 → 刷新后仍在（真存进 state event）；银河谣仍是默认「CosMac Star」→ **每频道隔离**成立。测试marker已清回默认，未留生产脏数据。
+- 余下 model/memory/skills/knowledge/rules/dataScopes 标签页沿用同一持久化机制，按用户逐个确认再接。
+
 ## 2026-06-18 — 频道管理「人员」标签 → 真实 Matrix 成员（去 mock 第一步）
 - 开始把「频道管理」面板从 DEMO mock 改成真实数据（路线图 #2 群级智能）。本轮先做**人员标签**。
 - `matrix/client.ts`：新增 `listChannelMembers(roomId)` 返回真实成员（真名/头像 mxc→http/角色按 m.room.power_levels 推 群主≥100·管理员≥50·成员/join+invite 状态）；新增 `kickFromRoom`（真移除）。没设昵称的成员退回显示 id 的 localpart（如 bot 显 "guduu"）。
