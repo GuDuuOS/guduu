@@ -1036,19 +1036,15 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
         <div class="nw-field-label">{{ curWsType.nameLabel }}</div>
         <input v-model="newWsName" class="nw-input" :placeholder="curWsType.namePh" @keyup.enter="createWorkspace" />
 
-        <!-- 简称 + 可见性 -->
-        <div class="nw-row2">
-          <div class="nw-col">
-            <div class="nw-field-label">简称（左栏图标，最多 2 字，留空自动取）</div>
-            <input v-model="newWsLabel" class="nw-input" :placeholder="newWsSpaceName ? wsLabel(newWsSpaceName) : '如 制作'" />
-          </div>
-          <div class="nw-col">
-            <div class="nw-field-label">可见性</div>
-            <div class="nw-vis">
-              <button class="nw-vis-btn" :class="{ on: !newWsPublic }" @click="newWsPublic = false">私密 · 邀请制</button>
-              <button class="nw-vis-btn" :class="{ on: newWsPublic }" @click="newWsPublic = true">公开 · 可加入</button>
-            </div>
-          </div>
+        <!-- 简称（全宽）-->
+        <div class="nw-field-label">简称 <span class="nw-hint">左栏图标 · 最多 2 字 · 可留空</span></div>
+        <input v-model="newWsLabel" class="nw-input" :placeholder="newWsSpaceName ? wsLabel(newWsSpaceName) : '如 制作'" />
+
+        <!-- 可见性（全宽，两个等宽按钮）-->
+        <div class="nw-field-label">可见性</div>
+        <div class="nw-vis">
+          <button class="nw-vis-btn" :class="{ on: !newWsPublic }" @click="newWsPublic = false">私密 · 邀请制</button>
+          <button class="nw-vis-btn" :class="{ on: newWsPublic }" @click="newWsPublic = true">公开 · 可加入</button>
         </div>
 
         <!-- 预览：将创建什么 -->
@@ -1464,6 +1460,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 .nw-title { font-family: var(--font-heading); font-size: 18px; font-weight: 700; color: var(--text); }
 .nw-sub { font-size: 12px; color: var(--text-3); margin: 6px 0 14px; line-height: 1.5; }
 .nw-field-label { font-size: 12px; color: var(--text-3); margin: 12px 0 6px; }
+.nw-hint { font-size: 11px; color: var(--text-dim); margin-left: 4px; }
 .nw-types { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
 .nw-type { height: 34px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); color: var(--text-2); font-size: 13px; cursor: pointer; }
 .nw-type:hover { background: var(--bg-hover); }
