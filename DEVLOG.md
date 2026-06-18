@@ -7,6 +7,11 @@
 
 ---
 
+## 2026-06-18 — 修复数据看板「横向拖移」BUG
+- 现象：数据看板画布在窗口偏窄时可被横向拖动/平移，标题被推出左缘（用户反馈）。
+- 根因：`.board-scroll` 与 `.canvas` 都只写了 `overflow-y: auto`；按 CSS 规范，另一轴若仍是 visible 会被隐式算成 `auto`，于是内容略宽时整块就能横向滚动/拖移。
+- 改法：两处显式补 `overflow-x: hidden`（LiveView.vue 的 .board-scroll + styles/canvas.css 的 .canvas），只保留纵向滚动，彻底禁掉横向拖动。本地 preview 1440/1180 宽验证：ofx=hidden、无横向滚动、看板渲染正常、无报错。
+
 ## 2026-06-18 — 任务行可点开看详情（负责人/进度/做到什么程度/子步骤）
 - 每条任务补字段 progress + detail + steps[]（子步骤 checklist）；任务行加 clickable + 悬停箭头。
 - 新增任务详情弹窗(.td-*)：状态点 + 标题 + 状态/负责人/截止 chips + 进度条% + 当前进展说明 + 子步骤勾选。

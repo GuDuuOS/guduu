@@ -1,6 +1,9 @@
 .canvas {
   padding: 24px var(--content-pad-x);
   overflow-y: auto;
+  /* 同 .board-scroll：overflow-y:auto 会让 overflow-x 隐式变 auto，
+     内容略宽时画布可被横向拖移。显式钉成 hidden，只保留纵向滚动。 */
+  overflow-x: hidden;
   height: 100%;
 }
 .canvas .ctitle {

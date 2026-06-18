@@ -91,7 +91,6 @@ import UnitGrid from '@/components/canvas/UnitGrid.vue'
 import CommandCenter from '@/components/canvas/CommandCenter.vue'
 import BizPanels from '@/components/canvas/BizPanels.vue'
 import { getDashboard } from '@/data/dashboards'
-import { getTodos, type TodoItem } from '@/data/todos'
 import { useActiveWorkspace } from '@/composables/useActiveWorkspace'
 import '@/styles/canvas.css' // 看板样式，命名空间在 .canvas/.panel 下，不与 LiveView 撞
 const { activeId } = useActiveWorkspace()
@@ -1761,7 +1760,11 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 /* main（浮卡）*/
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--bg); border-radius: 12px; margin: 8px; overflow: hidden; }
 /* 数据看板滚动容器 */
-.board-scroll { flex: 1; overflow-y: auto; min-height: 0; }
+/* 看板滚动容器：只允许纵向滚动。
+   关键修复：CSS 规范里只要 overflow-y 设成 auto/scroll、而 overflow-x 仍是 visible，
+   浏览器会把 overflow-x 也强制算成 auto——于是当内容比列略宽时整块就能被横向「拖移/平移」，
+   造成用户看到的拖移 BUG。这里显式把 overflow-x 钉成 hidden，彻底禁掉横向拖动。 */
+.board-scroll { flex: 1; overflow-y: auto; overflow-x: hidden; min-height: 0; }
 .pinned-item { color: var(--text-2); }
 .board-sub { font-size: 13px; color: var(--text-3); font-family: var(--mono); }
 
@@ -1874,31 +1877,6 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 .td-step-box { width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid var(--border); display: inline-flex; align-items: center; justify-content: center; font-size: 11px; color: #fff; flex-shrink: 0; }
 .td-step.done .td-step-box { background: #6b8e4e; border-color: #6b8e4e; }
 .td-step.done .td-step-label { color: var(--text); }
-.kanban { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; padding: 16px var(--content-pad-x); overflow: hidden; }
-.kb-col { display: flex; flex-direction: column; min-height: 0; background: var(--bg-soft); border-radius: 12px; overflow: hidden; }
-.kb-col-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px; flex-shrink: 0; }
-.kb-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
-.kb-dot.pending { background: var(--text-dim); }
-.kb-dot.in_progress { background: var(--accent); }
-.kb-dot.done { background: var(--ok); }
-.kb-col-title { font-weight: 700; font-size: 14px; color: var(--text); }
-.kb-count { margin-left: auto; font-size: 12px; font-family: var(--mono); color: var(--text-3); background: var(--bg-panel); border: 1px solid var(--border); border-radius: 9px; padding: 1px 8px; }
-.kb-cards { flex: 1; overflow-y: auto; padding: 0 10px 12px; display: flex; flex-direction: column; gap: 10px; }
-.kb-card { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
-.kb-card.done { opacity: .7; }
-.kb-card.done .kb-card-title { text-decoration: line-through; color: var(--text-3); }
-.kb-card-title { font-size: 14px; font-weight: 600; color: var(--text); line-height: 1.4; }
-.kb-card-meta { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
-.kb-pri { font-family: var(--mono); font-size: 10px; padding: 1px 7px; border-radius: 9px; letter-spacing: .5px; }
-.kb-pri.pri-high { background: #fee2e2; color: var(--danger); }
-.kb-pri.pri-mid { background: #fef3c7; color: var(--warn); }
-.kb-pri.pri-low { background: var(--bg-code); color: var(--text-3); }
-.kb-ref { font-family: var(--mono); font-size: 11px; color: var(--accent); }
-.kb-src { font-size: 12px; color: var(--text-3); margin-top: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.kb-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; font-size: 12px; }
-.kb-assignee { font-weight: 600; color: var(--text-2); }
-.kb-due { font-family: var(--mono); color: var(--text-3); }
-.kb-empty { font-size: 12px; color: var(--text-dim); padding: 10px; text-align: center; }
 .ch-header { height: 50px; flex-shrink: 0; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; padding: 0 16px; background: var(--bg-panel); }
 .ch-fav { width: 28px; height: 28px; background: transparent; border: none; color: var(--text-3); border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
 .ch-fav:hover { background: var(--bg-hover); color: var(--text); }
