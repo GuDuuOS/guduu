@@ -7,6 +7,15 @@
 
 ---
 
+## 2026-06-18 — 频道管理「人员」标签 → 真实 Matrix 成员（去 mock 第一步）
+- 开始把「频道管理」面板从 DEMO mock 改成真实数据（路线图 #2 群级智能）。本轮先做**人员标签**。
+- `matrix/client.ts`：新增 `listChannelMembers(roomId)` 返回真实成员（真名/头像 mxc→http/角色按 m.room.power_levels 推 群主≥100·管理员≥50·成员/join+invite 状态）；新增 `kickFromRoom`（真移除）。没设昵称的成员退回显示 id 的 localpart（如 bot 显 "guduu"）。
+- `useChannelAdmin`：跟当前频道 roomId（`setCurrent(name, roomId)` / `open(name, roomId)`），暴露 `isLive`/`liveMembers`/真 `inviteLiveMember`/`removeLiveMember`；有 roomId 走真后端，无则回退 demo mock。
+- `ChannelAdminModal` 人员标签：`isLive` 时渲染真实成员（头像/角色标签/APP 标/待接受标）+ 真邀请框 + 真移除；标签数字 `人员 N` 用真实人数；打开弹窗 watch 刷新防 sync 漂移。
+- LiveView 传 `currentRoom`(真实 room id) 给面板。本地 preview 验证：夜航星频道显示真实 2 人（@admin 群主、@guduu 中枢AI APP·成员），与频道头 "A 智 2" 一致。
+- **待补真实数据（已记 TODO）**：成员「可调取数据」无来源已移除；bot 没设 displayname/头像 → 退回 localpart+首字母；真人头像待用户上传后自动显示。
+- **决策**：配置存哪？定为 **Matrix 自定义 state event**（不改 Synapse 核心、原生、多端同步），下一轮（人设等）落地。
+
 ## 2026-06-18 — 客户端：频道头「成员」按钮接 DEMO 的「频道管理」富面板
 - 真实客户端（LiveView）频道头成员堆叠按钮原本只开简单「邀请成员」弹窗；改为**复刻 DEMO 逻辑**：点了打开 DEMO 同款 `ChannelAdminModal`「频道管理」富面板（角色/人员/技能/知识库/数据权限/规则/模型/记忆审计 多标签页，群级 AI 隔离配置）。
 - 按既有「常驻挂载 + composable.open()」模式接入：导入 `ChannelAdminModal` 常驻挂载、按钮调 `useChannelAdmin().open(currentName)`；并 `watch(currentName)` → `setCurrent`，让面板跟着当前频道切到对应群配置（每群一份、互不影响）。

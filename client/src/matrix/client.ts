@@ -353,10 +353,78 @@ export function listRoomMembers(roomId: string): { id: string; name: string; isB
   }))
 }
 
+/** 频道管理「人员」标签用的成员（含头像/角色/在不在群） */
+export interface ChannelMember {
+  id: string              // 完整 Matrix 用户 id，如 @alice:cosmac.cc
+  name: string            // 显示名（没设昵称就退回用户名段）
+  avatar: string          // http 头像地址；没有则空串（UI 退回首字母圆头像）
+  isBot: boolean          // 是否中枢 AI（按 BOT_ID 判定，UI 标 APP）
+  role: 'owner' | 'admin' | 'member'  // 由 m.room.power_levels 推出：100=owner，≥50=admin，其余 member
+  roleLabel: string       // 角色中文标签：群主 / 管理员 / 成员
+  power: number           // 原始 power level 数值（移除/降权判断用）
+  pending: boolean        // true=已邀请但还没加入（invite 态）
+}
+
+/** power level → 角色（与 Matrix 默认 100/50 阈值一致） */
+function roleOfPower(power: number): { role: ChannelMember['role']; roleLabel: string } {
+  if (power >= 100) return { role: 'owner', roleLabel: '群主' }
+  if (power >= 50) return { role: 'admin', roleLabel: '管理员' }
+  return { role: 'member', roleLabel: '成员' }
+}
+
+/**
+ * 读频道真实成员（频道管理「人员」标签用）。
+ * 已加入(join) + 已邀请待入(invite) 都返回；invite 的标 pending。
+ * 头像取 m.room.member 里的 avatar_url(mxc) 转 http；角色由房间 power_levels 推出。
+ * 排序：群主 > 管理员 > 成员，bot 排在同级末尾，便于 UI 展示。
+ */
+export function listChannelMembers(roomId: string): ChannelMember[] {
+  const room = mx?.getRoom(roomId)
+  if (!room) return []
+  // power_levels 状态事件：users 字典存了每个被显式赋权的用户的 power
+  const plContent = room.currentState?.getStateEvents?.('m.room.power_levels', '')?.getContent?.() || {}
+  const usersPower: Record<string, number> = plContent.users || {}
+  const defaultPower: number = plContent.users_default ?? 0
+  // join + invite 两种状态都算"频道成员"
+  const raw = room.getMembersWithMembership?.('join') || room.getJoinedMembers() || []
+  const invited = room.getMembersWithMembership?.('invite') || []
+  const all = [...raw, ...invited]
+  const out: ChannelMember[] = all.map((m: any) => {
+    const power = usersPower[m.userId] ?? defaultPower
+    const { role, roleLabel } = roleOfPower(power)
+    const mxc = m.getMxcAvatarUrl?.() || m.events?.member?.getContent?.()?.avatar_url || ''
+    // js-sdk 在没设昵称时把 name 填成完整 userId（@guduu:cosmac.cc），显示难看；
+    // 这种情况退回用 id 的 localpart（@后、:前那段），仍是真实信息、只是更干净。
+    const localpart = m.userId.replace(/^@/, '').split(':')[0]
+    const name = (!m.name || m.name === m.userId) ? localpart : m.name
+    return {
+      id: m.userId,
+      name,
+      avatar: mxc ? mxcToHttp(mxc, 64) : '',
+      isBot: m.userId === BOT_ID,
+      role,
+      roleLabel,
+      power,
+      pending: m.membership === 'invite',
+    }
+  })
+  // 排序：power 高在前；同 power 时真人优先于 bot、再按名字
+  return out.sort((a, b) => b.power - a.power || Number(a.isBot) - Number(b.isBot) || a.name.localeCompare(b.name))
+}
+
 /** 邀请一个已有用户进某频道（标准 Matrix 邀请）。 */
 export async function inviteToRoom(roomId: string, userId: string): Promise<void> {
   if (!mx) throw new Error('未登录')
   await mx.invite(roomId, userId)
+}
+
+/**
+ * 把某用户移出频道（标准 Matrix kick）。需当前登录者 power 足够（一般是管理员）。
+ * 注：kick 只是踢出当前房间，不删账号；被踢者可被再次邀请。
+ */
+export async function kickFromRoom(roomId: string, userId: string, reason?: string): Promise<void> {
+  if (!mx) throw new Error('未登录')
+  await (mx as any).kick(roomId, userId, reason)
 }
 
 /**

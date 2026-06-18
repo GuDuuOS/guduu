@@ -38,7 +38,35 @@
           </div>
         </template>
 
-        <!-- 人员 -->
+        <!-- 人员（真实 Matrix 成员：有真后端时走这支）-->
+        <template v-else-if="tab === 'members' && isLive">
+          <div v-if="liveErr" class="cam-help cam-help-top" style="color:#b94a4a">{{ liveErr }}</div>
+          <div v-for="m in liveMembers" :key="m.id" class="cam-member">
+            <div class="cam-row">
+              <div class="cam-ava" :class="{ bot: m.isBot }">
+                <img v-if="m.avatar" :src="m.avatar" alt="" class="cam-ava-img" />
+                <template v-else>{{ m.isBot ? '智' : [...m.name][0] }}</template>
+              </div>
+              <div class="cam-row-main">
+                <div class="cam-row-label">
+                  {{ m.name }}
+                  <span v-if="m.isBot" class="cam-tag">APP</span>
+                  <span v-if="m.pending" class="cam-tag" style="background:#e8dcc4;color:#8a6a3a">待接受</span>
+                </div>
+                <div class="cam-row-desc">{{ m.roleLabel }} · {{ m.id }}</div>
+              </div>
+              <button class="cam-del" title="移出频道" @click="doRemoveLive(m)">×</button>
+            </div>
+          </div>
+          <p v-if="!liveMembers.length" class="cam-row-desc" style="padding:8px 2px">还没有成员（或正在加载…）</p>
+          <div class="cam-add">
+            <input v-model="liveInvite" class="cam-input" placeholder="邀请已有用户：用户名 或 @用户:cosmac.cc" @keyup.enter="doInviteLive" />
+            <button class="cam-add-btn" :disabled="!liveInvite.trim() || liveBusy" @click="doInviteLive">{{ liveBusy ? '邀请中…' : '＋ 邀请成员' }}</button>
+          </div>
+          <div class="cam-help">真实频道成员，来自 Matrix。邀请 = 标准 Matrix 邀请；移出 = kick（需你在本群有管理员权限）。新建账号需走后台。</div>
+        </template>
+
+        <!-- 人员（demo：无真后端时的 mock 展示）-->
         <template v-else-if="tab === 'members'">
           <div v-for="(m, i) in state.members" :key="'m' + i" class="cam-member">
             <div class="cam-row" :class="{ clickable: m.data.length }" @click="m.data.length && toggleExpand(i)">
@@ -200,7 +228,7 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 // 弹窗样式（.cam-*）来自全局 admin-modal.css。真实客户端（main.ts）只加载 tokens/reset、
 // 不加载整包 styles/index.css，所以组件自带这份样式，保证在任何宿主里（DEMO / 真实端）都成型。
 import '@/styles/admin-modal.css'
@@ -214,7 +242,11 @@ import {
 type TabKey = 'persona' | 'members' | 'skills' | 'knowledge' | 'dataScopes' | 'rules' | 'model' | 'memory'
 type CountKey = 'members' | 'skills' | 'knowledge' | 'rules' | 'dataScopes'
 
-const { visible, state, groupName, close, addMember, removeMember, addItem, removeItem, addScope, removeScope } = useChannelAdmin()
+const {
+  visible, state, groupName, close, addMember, removeMember, addItem, removeItem, addScope, removeScope,
+  // 真实成员（有真后端时「人员」标签走这套）
+  isLive, liveMembers, refreshLiveMembers, inviteLiveMember, removeLiveMember
+} = useChannelAdmin()
 
 const tabs: { key: TabKey; label: string; countKey?: CountKey }[] = [
   { key: 'persona', label: '角色' },
@@ -228,7 +260,34 @@ const tabs: { key: TabKey; label: string; countKey?: CountKey }[] = [
 ]
 const tab = ref<TabKey>('members')
 
-function countOf(k?: CountKey) { return k ? state[k].length : 0 }
+// 人员标签的数字：有真后端用真实成员数，否则用 mock
+function countOf(k?: CountKey) {
+  if (k === 'members' && isLive.value) return liveMembers.value.length
+  return k ? state[k].length : 0
+}
+
+/* —— 真实成员：邀请 / 移除 —— */
+const liveInvite = ref('')
+const liveBusy = ref(false)
+const liveErr = ref('')
+async function doInviteLive() {
+  if (!liveInvite.value.trim() || liveBusy.value) return
+  liveBusy.value = true; liveErr.value = ''
+  try {
+    await inviteLiveMember(liveInvite.value)
+    liveInvite.value = ''
+  } catch (e: any) {
+    liveErr.value = `邀请失败：${e?.message || e}`
+  } finally { liveBusy.value = false }
+}
+async function doRemoveLive(m: { id: string; name: string }) {
+  liveErr.value = ''
+  try {
+    await removeLiveMember(m.id)
+  } catch (e: any) {
+    liveErr.value = `移出失败：${e?.message || e}`
+  }
+}
 
 /* 人员：展开后勾选其要在大脑展示的数据 */
 const expanded = reactive<Record<number, boolean>>({})
@@ -252,6 +311,9 @@ function doAddSkill() { addItem('skills', sLabel.value, sDesc.value, sTag.value)
 function doAddKnowledge() { addItem('knowledge', kLabel.value, kDesc.value); kLabel.value = ''; kDesc.value = '' }
 function doAddRule() { addItem('rules', rLabel.value, rDesc.value); rLabel.value = ''; rDesc.value = '' }
 function doAddScope() { addScope(dLabel.value, dLevel.value, dAccess.value); dLabel.value = '' }
+
+// 每次打开弹窗时，从 Matrix 重新拉一遍真实成员（防 sync 期间有进出群没反映）
+watch(visible, (v) => { if (v && isLive.value) refreshLiveMembers() })
 
 function onKey(e: KeyboardEvent) {
   if (e.key === 'Escape' && visible.value) close()

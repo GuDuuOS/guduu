@@ -145,7 +145,8 @@ const currentTopic = computed(
   () => rooms.value.find((r) => r.id === currentRoom.value)?.topic || '',
 )
 // 当前频道即「当前群」：切频道时让「频道管理」面板跟着切到对应群的配置（每个群一份、互不影响）
-watch(currentName, (n) => { if (n) setAdminChannel(n) }, { immediate: true })
+// 传 currentRoom（真实 room id）→「人员」标签走真实 Matrix 成员
+watch([currentName, currentRoom], ([n, id]) => { if (n) setAdminChannel(n, id) }, { immediate: true })
 
 // ── 工作区（Matrix Space）──────────────────────────────
 const spaces = ref<LiveSpace[]>([])
@@ -1041,7 +1042,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
           <button class="title title-btn" :title="'频道设置'" @click="openChannelSettings">{{ currentName }}<svg class="chev" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg></button>
           <div v-if="currentTopic" class="ch-topic">{{ currentTopic }}</div>
           <div class="ch-actions">
-            <button class="ch-members-btn" title="频道管理 · 成员 / 技能 / 知识库 / 规则" @click="openAdmin(currentName)">
+            <button class="ch-members-btn" title="频道管理 · 成员 / 技能 / 知识库 / 规则" @click="openAdmin(currentName, currentRoom)">
               <div class="ava-stack">
                 <div v-for="m in channelMembers.slice(0, 3)" :key="m.id" class="a" :class="{ bot: m.isBot }">{{ m.isBot ? '智' : initials(m.name) }}</div>
               </div>

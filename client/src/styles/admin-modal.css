@@ -109,6 +109,9 @@
   flex-shrink: 0;
 }
 .cam-ava.bot { background: var(--text); }
+/* 真实成员头像图：填满圆角方块（无图时退回首字母） */
+.cam-ava { overflow: hidden; }
+.cam-ava-img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .cam-row-main { flex: 1; min-width: 0; }
 .cam-row-label {
   font-size: var(--fs-100);
