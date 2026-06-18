@@ -59,6 +59,8 @@ import UserSettingsModal from '@/components/layout/UserSettingsModal.vue'
 import ProfileHome from '@/components/layout/ProfileHome.vue'
 import CliConsole from '@/components/layout/CliConsole.vue'
 import ChannelAdminModal from '@/components/channel/ChannelAdminModal.vue'
+import RightPanel from '@/components/layout/RightPanel.vue'
+import { useRightPanel } from '@/composables/useRightPanel'
 import { useMarketplace } from '@/composables/useMarketplace'
 import { useCli } from '@/composables/useCli'
 import { useProfileHome } from '@/composables/useProfileHome'
@@ -70,6 +72,8 @@ import { useChannelAdmin } from '@/composables/useChannelAdmin'
 const { open: openMarket } = useMarketplace()
 // 频道头「成员/管理」按钮：复刻 DEMO，点了打开「频道管理」富面板（人设/人员/技能/知识库/规则/数据隔离/模型/记忆）
 const { open: openAdmin, setCurrent: setAdminChannel } = useChannelAdmin()
+// 频道头 ℹ 按钮：复刻 DEMO，点了开/关右侧「关于此频道」面板（真实成员 + 真实技能/知识库/规则总览）
+const { visible: rightPanelVisible, toggle: toggleRightPanel, hide: hideRightPanel } = useRightPanel()
 const { open: openCli } = useCli()
 const { open: openProfileHome } = useProfileHome()
 const { open: openPluginStore } = usePluginStore()
@@ -759,6 +763,7 @@ function onDocClick(e: MouseEvent) {
 
 onMounted(async () => {
   document.addEventListener('click', onDocClick)
+  hideRightPanel()  // 「关于此频道」面板在真实客户端默认收起，由频道头 ℹ 按钮开关
   loading.value = true
   try {
     const uid = await restoreSession()
@@ -1052,7 +1057,8 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
               <svg v-if="focused" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V3h4M21 7V3h-4M3 17v4h4M21 17v4h-4" /></svg>
               <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" /><path d="M12 3v18M3 12h18" /></svg>
             </button>
-            <button class="ch-ic-btn" :class="{ active: aiOpen }" :title="aiOpen ? '关闭中枢 AI' : '打开中枢 AI'" @click="aiOpen = !aiOpen">
+            <!-- ℹ「关于此频道」：复刻 DEMO，开/关右侧频道信息面板（真实成员+技能/知识库/规则总览）-->
+            <button class="ch-ic-btn" :class="{ active: rightPanelVisible }" :title="rightPanelVisible ? '关闭关于此频道' : '关于此频道'" @click="toggleRightPanel">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" /></svg>
             </button>
           </div>
@@ -1174,6 +1180,9 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
         </div>
         </template>
       </main>
+
+      <!-- 右：关于此频道（复刻 DEMO，ℹ 按钮开关；真实成员 + 技能/知识库/规则总览）-->
+      <RightPanel v-if="rightPanelVisible && currentRoom && !focused" />
 
       <!-- 右：中枢 AI 面板（浮卡）-->
       <aside class="ai-panel" v-if="aiOpen && !focused">

@@ -7,6 +7,13 @@
 
 ---
 
+## 2026-06-18 — 频道头 ℹ 按钮 → 复刻 DEMO「关于此频道」右面板（真实数据）
+- 频道头 ℹ(info) 按钮原本是「开关中枢 AI」；改为**复刻 DEMO**：开/关右侧「关于此频道」信息面板（RightPanel）。中枢 AI 仍可从顶栏/插件竖栏/输入条 AI 键开。
+- RightPanel 做成**真实**：人员用真实 Matrix 成员(liveMembers，映射成面板形状，群主/管理员/成员/待接受)；技能/知识库/规则沿用已真实持久化的频道配置(空就空)；PINNED 块真实频道改为中性总览文案(去掉抖音/小红书等假平台claim)。
+- RightPanel 自带 `import '@/styles/right.css'`(同 admin-modal：main.ts 不加载整包 index.css，组件自包含样式)。
+- LiveView：导入 RightPanel + useRightPanel；onMounted hideRightPanel 默认收起；`<RightPanel v-if="rightPanelVisible && currentRoom && !focused">` 作为中枢 AI 面板左侧的信息列。
+- 本地 preview 验证：夜航星点 ℹ → 弹出「关于此频道」(300px 列)，人员显示真实 2 人(admin 群主/guduu 成员)，与「频道管理」同源数据；无 console 报错。
+
 ## 2026-06-18 — 频道管理「技能/知识库/规则/数据权限」4 个列表标签 → 真实持久化（配置全标签页完成）
 - 把最后 4 个列表型标签接通持久化，至此**频道管理 8 个标签全部去 mock**（人员真实成员 + 7 个配置标签真持久化）。
 - 策略：**手动维护 + 自动保存**。真实频道**从空开始**（loadConfigFromRoom 把列表一律以"已存为准、没存就空"，清掉 seedConfig 的 demo mock）；用户在面板加/删/改，深度 watch 防抖整列表写回 cosmac.channel_config。

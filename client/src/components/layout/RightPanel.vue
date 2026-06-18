@@ -6,8 +6,11 @@
     </div>
     <div class="right-body">
       <div class="pinned">
-        <div class="ph">📌 PINNED</div>
-        <div class="pc">
+        <div class="ph">📌 关于</div>
+        <div v-if="isLive" class="pc">
+          <b>{{ groupName }}</b> · 频道成员、技能、知识库与规则的总览。配置在「频道管理」里维护，本面板实时同步。
+        </div>
+        <div v-else class="pc">
           本频道由 <b>CosMac Star</b> 7×24 实时维护。所有数据、账号状态、Agent 消息均来自接入的
           抖音 / 小红书 / 视频号 / 公众号 等平台。
         </div>
@@ -71,10 +74,26 @@
 import { computed } from 'vue'
 import { useRightPanel } from '@/composables/useRightPanel'
 import { useChannelAdmin } from '@/composables/useChannelAdmin'
+// .right 面板样式来自全局 right.css；真实客户端(main.ts)只加载 tokens/reset，故组件自带样式
+import '@/styles/right.css'
 
 // 与「频道管理」弹窗共享同一份数据，增删会同步反映
-const { state } = useChannelAdmin()
-const members = computed(() => state.members)
+const { state, isLive, liveMembers, groupName } = useChannelAdmin()
+// 成员：真实频道用真实 Matrix 成员（映射成本面板的展示形状），demo 回退 mock
+const members = computed(() => {
+  if (isLive.value) {
+    return liveMembers.value.map((m) => ({
+      name: m.name,
+      role: m.pending ? `${m.roleLabel} · 待接受` : m.roleLabel,
+      avatar: m.isBot ? '智' : [...m.name][0] || '?',
+      bot: m.isBot,
+      color: undefined as string | undefined,
+      online: !m.pending,
+    }))
+  }
+  return state.members
+})
+// 技能/知识库/规则：真实频道下已是真实持久化数据（loadConfigFromRoom 填充）
 const skills = computed(() => state.skills)
 const knowledge = computed(() => state.knowledge)
 const rules = computed(() => state.rules)
