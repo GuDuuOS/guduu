@@ -38,17 +38,24 @@ class Agent:
         self.system_prompt = system_prompt
         self.max_steps = max_steps
 
-    def run(self, user_text: str, ctx: ToolContext) -> str:
+    def run(self, user_text: str, ctx: ToolContext, extra_system: str = "") -> str:
         """处理一句用户输入，返回要发回群里的最终文本回复。
 
         参数:
-            user_text: 用户说的话（已去掉 @ 前缀）。
-            ctx:       工具执行上下文（当前房间 / 发起人）。
+            user_text:    用户说的话（已去掉 @ 前缀）。
+            ctx:          工具执行上下文（当前房间 / 发起人）。
+            extra_system: 临时追加到系统提示里的内容（如本群/本人当前生效的技能说明）。
+                          按 (房间, 发起人) 每条消息动态算出来，不污染 Agent 的常驻人设。
         """
         # 初始历史：系统提示 + 用户这句话
+        # 把常驻人设和本轮技能 addendum **合并成单条 system 消息**——有的 provider
+        # （如 Claude）只认一个 system，分两条会被丢掉，合并最稳。
         messages: List[Message] = []
-        if self.system_prompt:
-            messages.append(Message(role="system", content=self.system_prompt))
+        sys_text = self.system_prompt
+        if extra_system:
+            sys_text = f"{sys_text}\n\n{extra_system}" if sys_text else extra_system
+        if sys_text:
+            messages.append(Message(role="system", content=sys_text))
         messages.append(Message(role="user", content=user_text))
 
         tools = self.toolbox.specs()

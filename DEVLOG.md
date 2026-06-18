@@ -7,6 +7,15 @@
 
 ---
 
+## 2026-06-19 — 模块2：Skill 接进主 AI（按 房间+发起人 注入技能提示，零回归）
+- 把上一步建好的数据层用起来：主 AI 每处理一条消息，按 (本群, 发起人) 算出**当前生效的启用技能**，作为 system addendum 临时注入这一轮——不污染常驻人设。
+- 新增 `cosmac/db/service.py`（纯函数胶水层）：`effective_skills(room_id,user_id)` 按 **global→room→user** 顺序汇总启用技能；`render_skill_prompt` 渲染成提示文本；`effective_skill_prompt` 便捷组合。
+- `Agent.run` 加 `extra_system` 参数：与常驻人设**合并成单条 system 消息**（兼容 Claude 等只认一个 system 的 provider）。
+- `appservice_bot._skill_addendum`：取技能拼 addendum。**全程 try/except + cosmac.db 懒导入**——生产服务器还没装 SQLAlchemy 时 import 失败也只是退化成「无技能」，bot 照常回话，零回归。没技能时 addendum 为空、行为与现状完全一致。
+- 验证：新增 `test_skill_service.py`(4 例：作用域顺序/过滤/渲染/空) + `test_agent_tools` 加 1 例(extra_system 合并进单条 system)；cosmac 48 单测全过、ruff 通过。
+- 部署：**暂不需要**——纯后端、且当前无任何技能数据→零可见变化。等下一步加了「建技能」的入口（后台 UI 或命令）并在服务器 `pip install -r cosmac/requirements.txt` 后，再 `restart guduu-bot` 才会真正生效。
+- 待续：还**没有创建技能的入口**（UI/命令/seed），端到端闭环留作下一步。
+
 ## 2026-06-19 — 模块2 开工：cosmac 数据层骨架（Skill/Agent，PG/本地 SQLite 双跑）
 - **背景**：讨论"每账号配置/Skill/Agent/知识库/聊天记录要不要数据库"。结论先写进 CLAUDE.md 新增「数据存储分层」：**Synapse 已存的（聊天记录/成员/房间状态）绝不重存**；AI 层自己的结构化/派生数据（Skill/Agent/知识库/记忆/工作流…）才进 cosmac 自己的 DB。全局 AI 配置仍走控制室 state event，每账号轻量配置优先用 Matrix account data。
 - **基建决策**：复用生产现成 PostgreSQL，给 cosmac 单开 database/schema，知识库按需装 pgvector。走 §2 第 3 条路径，不碰 Synapse 核心。

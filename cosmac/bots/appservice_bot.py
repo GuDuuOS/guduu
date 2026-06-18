@@ -142,11 +142,33 @@ class CosmacBot:
             #     最后把结论发回群。（echo 后端不支持工具，会自动退化为纯文本回复。）
             # 回复前先按管理后台下发的运行时配置（人设/模型/工具开关）对齐一次。
             self._apply_runtime_config()
+            # 按 (本群, 发起人) 算出当前生效的技能说明，作为本轮 system addendum 注入。
+            # 任何失败（DB 没装/没数据/出错）都返回空串、绝不阻断回复（见 _skill_addendum）。
+            extra_system = self._skill_addendum(room_id, sender)
             reply = self.agent.run(
                 text or user_text,
                 ToolContext(room_id=room_id, sender=sender),
+                extra_system=extra_system,
             )
             self.client.send_text(room_id, reply)
+
+    def _skill_addendum(self, room_id: str, sender: str) -> str:
+        """取「本群 + 发起人」当前生效的技能说明，拼成 system addendum。
+
+        **绝不能因为它出问题就让主 AI 不回话**，所以全程包在 try/except 里、
+        且 ``cosmac.db`` 懒导入——生产服务器还没装 SQLAlchemy 时，import 失败也只是
+        退化成「无技能」，bot 照常回复，零回归。等真正配好 DB（GUDUU_DATABASE_URL）
+        并通过后台/接口建了技能，这里就会自动开始注入。
+        """
+        try:
+            from cosmac.db import session_scope
+            from cosmac.db.service import effective_skill_prompt
+
+            with session_scope() as s:
+                return effective_skill_prompt(s, room_id=room_id, user_id=sender)
+        except Exception as e:  # 缺依赖 / 连不上 / 表不存在 / 任何异常
+            logger.debug("加载技能失败（忽略，按无技能继续）：%s", e)
+            return ""
 
     # —— 控制室成员对齐：把已撤销的管理员降权 + 踢出（浏览器做不到，bot 用 100 权限做）——
 
@@ -158,8 +180,10 @@ class CosmacBot:
         安全约束（务必守住，否则可能误踢）：
           - **只在确实是控制室时动手**：room_id 必须等于别名解析出的控制室，否则有人
             往任意房间塞这个事件就能借 bot 之手踢人。解析不到/对不上 → 直接不动。
-          - **绝不动所有者和 bot 自己**：只处理 power < 100 的成员（owner/bot=100 跳过）。
+          - **绝不动所有者和 bot 自己**：只移除 power < 100 的成员（owner/bot=100 跳过）。
           - 只“降权 + 踢出”不在期望集里的成员；其余一律不碰。任何异常都不抛、只记日志。
+          - 降权/踢出**检查结果**：失败的明确报 error（被撤销者仍有写权限是安全问题），
+            绝不无条件报成功；power≥100 的遗留成员 bot 无权移除，单独 warning。
         """
         desired = set(content.get("admins") or [])
         try:
@@ -180,7 +204,26 @@ class CosmacBot:
 
         bot = self.config.bot_user_id
         users: Dict[str, Any] = dict(pl.get("users") or {})
-        # 待移除：有显式权限(<100，即非 owner/bot) 且不在期望管理员集里的成员
+
+        # #1 防御：power≥100 且不在期望集的成员——bot(=100) 在 Matrix 里**无法**降权/踢出
+        # 同级或更高的人（历史遗留 bug 曾把管理员设成 100 才会出现）。无法自动修，明确告警，
+        # 提示需要重建控制室；绝不把他们当 owner 静默跳过。
+        stuck = [
+            uid
+            for uid, lvl in users.items()
+            if uid != bot
+            and isinstance(lvl, int)
+            and lvl >= 100
+            and uid not in desired
+        ]
+        if stuck:
+            logger.warning(
+                "控制室对齐：成员 %s 权限≥100 且已非管理员，bot 无权移除——"
+                "该控制室需重建（早期 bug 把管理员设成了 100）。",
+                stuck,
+            )
+
+        # 待移除：有显式写权限(50≤power<100) 且不在期望管理员集里的成员
         to_remove = [
             uid
             for uid, lvl in users.items()
@@ -192,14 +235,28 @@ class CosmacBot:
         if not to_remove:
             return
 
-        # ① 降权：从 users 里删掉这些人（回落 users_default=0），保留 power_levels 其它字段
+        # ① 降权：从 users 里删掉这些人（回落 users_default=0），保留 power_levels 其它字段。
+        #    #2：检查写入结果——失败说明被撤销者**仍有写权限**，是安全问题，必须报错。
         new_users = {u: lv for u, lv in users.items() if u not in to_remove}
         new_pl = {**pl, "users": new_users}
-        self.client.set_power_levels(room_id, new_pl)
-        # ② 踢出控制室
+        if not self.client.set_power_levels(room_id, new_pl):
+            logger.error(
+                "控制室对齐：降权写入失败，被撤销者可能仍能写 AI 配置：%s", to_remove
+            )
+        # ② 踢出控制室——逐个检查结果，**只对真正踢成功的报成功**，失败的明确报错
+        removed, failed = [], []
         for uid in to_remove:
-            self.client.kick(room_id, uid, "已撤销服务器管理员，移出控制室")
-            logger.info("控制室对齐：已降权并移除非管理员 %s", uid)
+            if self.client.kick(room_id, uid, "已撤销服务器管理员，移出控制室"):
+                removed.append(uid)
+            else:
+                failed.append(uid)
+        if removed:
+            logger.info("控制室对齐：已降权并移除非管理员 %s", removed)
+        if failed:
+            logger.error(
+                "控制室对齐：移除失败（权限不足或对方≥bot 权限），仍是控制室成员：%s",
+                failed,
+            )
 
     # —— 运行时 AI 配置：管理后台写控制室 state event，bot 读并应用 ——
 

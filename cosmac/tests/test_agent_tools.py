@@ -49,12 +49,14 @@ class FakeLLM(LLMProvider):
         self._script = script
         self._i = 0
         self.seen_tools: List[str] = []  # 记录每轮拿到的工具名，验证确实把工具喂进去了
+        self.seen_messages: List[Message] = []  # 记录最近一轮的消息，验证 system 注入
 
     def complete(self, messages: List[Message]) -> str:  # 接口要求，测试用不到
         return "（不该走到这里）"
 
     def complete_with_tools(self, messages, tools: List[ToolSpec]) -> TurnResult:
         self.seen_tools = [t.name for t in tools]
+        self.seen_messages = list(messages)
         result = self._script[self._i]
         self._i += 1
         return result
@@ -108,6 +110,15 @@ class TestAgentTools(unittest.TestCase):
         agent, _ = self._agent([TurnResult(text="你好呀")])
         reply = agent.run("在吗", ToolContext("!c:test", "@a:test"))
         self.assertEqual(reply, "你好呀")
+
+    def test_extra_system_merged_into_single_system_message(self) -> None:
+        # 技能 addendum 应与常驻人设合并成「单条」system 消息（兼容只认一个 system 的 provider）
+        agent, llm = self._agent([TurnResult(text="好的")])
+        agent.run("在吗", ToolContext("!c:test", "@a:test"), extra_system="技能说明X")
+        systems = [m for m in llm.seen_messages if m.role == "system"]
+        self.assertEqual(len(systems), 1)
+        self.assertIn("测试人设", systems[0].content)  # 常驻人设
+        self.assertIn("技能说明X", systems[0].content)  # 注入的技能
 
     def test_max_steps_guard(self) -> None:
         # 模型一直要求调工具（不收敛），Agent 应在 max_steps 后兜底退出，不死循环
