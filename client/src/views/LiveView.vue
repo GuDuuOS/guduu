@@ -106,9 +106,9 @@ function openTasks() { tasks.value = true; board.value = false; currentRoom.valu
 // 任务看板：剧集 Tab（每部剧一个），点击后看那部剧的制作流水线 + 任务
 // 每部剧带：当前在制项目 + 流水线阶段(current) + 进度% + 负责人 + 排期（demo 数据，后续接真实）
 const productionTabs = [
-  { key: 'ep-night', name: '夜航星', avatar: '夜', color: '#7a5cad', project: '《夜航星》第 6 集', percent: 72, current: 2, assignee: '配音 Agent', aAvatar: '音', aColor: '#d9a066', dateRange: '6/18 → 6/22', daysLeft: '还剩 2 天' },
-  { key: 'ep-galaxy', name: '银河谣', avatar: '银', color: '#5a8a6a', project: '《银河谣》第 12 集', percent: 35, current: 1, assignee: '分镜 Agent', aAvatar: '镜', aColor: '#9bbf7a', dateRange: '6/20 → 6/27', daysLeft: '还剩 7 天' },
-  { key: 'mobai', name: '墨白', avatar: '墨', color: '#b5793a', project: '墨白 · 新单曲 MV', percent: 55, current: 3, assignee: '剪辑 Agent', aAvatar: '剪', aColor: '#c98a5a', dateRange: '6/16 → 6/24', daysLeft: '还剩 4 天' },
+  { key: 'ep-night', name: '夜航星', avatar: '夜', color: '#7a5cad', project: '《夜航星》第 6 集', percent: 72, current: 2, assignee: '配音 Agent', aAvatar: '音', aColor: '#d9a066', dateRange: '6/18 → 6/22', daysLeft: '还剩 2 天', series: { done: 5, total: 12, unit: '集', pct: 48 } },
+  { key: 'ep-galaxy', name: '银河谣', avatar: '银', color: '#5a8a6a', project: '《银河谣》第 12 集', percent: 35, current: 1, assignee: '分镜 Agent', aAvatar: '镜', aColor: '#9bbf7a', dateRange: '6/20 → 6/27', daysLeft: '还剩 7 天', series: { done: 11, total: 12, unit: '集', pct: 95 } },
+  { key: 'mobai', name: '墨白', avatar: '墨', color: '#b5793a', project: '墨白 · 新单曲 MV', percent: 55, current: 3, assignee: '剪辑 Agent', aAvatar: '剪', aColor: '#c98a5a', dateRange: '6/16 → 6/24', daysLeft: '还剩 4 天', series: { done: 4, total: 8, unit: '首单曲', pct: 58 } },
 ]
 const activeShow = ref(productionTabs[0].key)   // 当前选中的剧集
 // 制作流水线阶段；由 current 下标生成 done/current/todo
@@ -1077,8 +1077,22 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
               </button>
             </div>
           </div>
-          <!-- 制作流水线卡 + 时间线（跟选中的剧集走）-->
+          <!-- 整部剧进度 + 本集制作流水线卡 + 时间线（跟选中的剧集走）-->
           <div class="show-band">
+            <div class="series-bar">
+              <div class="series-head">
+                <span class="series-title"><span class="series-av" :style="{ background: activeProd.color }">{{ activeProd.avatar }}</span>{{ activeProd.name }} · 整部进度</span>
+                <span class="series-meta">已完成 {{ activeProd.series.done }} / {{ activeProd.series.total }} {{ activeProd.series.unit }} · {{ activeProd.series.pct }}%</span>
+              </div>
+              <div class="series-segs">
+                <span
+                  v-for="n in activeProd.series.total"
+                  :key="n"
+                  class="series-seg"
+                  :class="{ done: n <= activeProd.series.done, current: n === activeProd.series.done + 1 }"
+                />
+              </div>
+            </div>
             <div class="prod-card">
               <div class="prod-head">
                 <span class="prod-av" :style="{ background: activeProd.color }">{{ activeProd.avatar }}</span>
@@ -1683,6 +1697,16 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 .prod-tab.active .prod-tab-n { background: var(--accent); color: #fff; }
 /* 剧集制作流水线卡 + 时间线 */
 .show-band { flex-shrink: 0; padding: 12px var(--content-pad-x) 6px; }
+/* 整部剧进度（分段条：每段一集，已完成绿 / 当前集橙 / 未做灰）*/
+.series-bar { margin-bottom: 12px; }
+.series-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.series-title { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: var(--text); }
+.series-av { width: 20px; height: 20px; border-radius: 6px; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600; }
+.series-meta { font-size: 12px; color: var(--text-2); }
+.series-segs { display: flex; gap: 3px; }
+.series-seg { flex: 1; height: 8px; border-radius: 3px; background: var(--bg-hover); transition: background .3s; }
+.series-seg.done { background: #6b8e4e; }
+.series-seg.current { background: var(--accent); box-shadow: 0 0 0 2px rgba(217,105,47,.18); }
 .prod-card { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 14px; padding: 14px 18px; box-shadow: 0 4px 14px rgba(0,0,0,.05); margin-bottom: 12px; }
 .prod-head { display: flex; align-items: center; gap: 9px; margin-bottom: 14px; }
 .prod-av { width: 28px; height: 28px; border-radius: 8px; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; flex-shrink: 0; }
