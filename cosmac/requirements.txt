@@ -3,3 +3,9 @@
 requests>=2.31
 anthropic>=0.69
 openai>=1.50
+# 数据层（模块2 起）：SQLAlchemy 同步 ORM。生产连 PostgreSQL，本地默认回退 SQLite。
+SQLAlchemy>=2.0
+# 生产连 Postgres 用（本地走 SQLite 时不需要）。装不上不影响本地开发/测试。
+psycopg[binary]>=3.1; platform_system != "Windows"
+# 知识库向量检索（pgvector）后续接入时再启用：
+# pgvector>=0.2

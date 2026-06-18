@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-06-19 — 模块2 开工：cosmac 数据层骨架（Skill/Agent，PG/本地 SQLite 双跑）
+- **背景**：讨论"每账号配置/Skill/Agent/知识库/聊天记录要不要数据库"。结论先写进 CLAUDE.md 新增「数据存储分层」：**Synapse 已存的（聊天记录/成员/房间状态）绝不重存**；AI 层自己的结构化/派生数据（Skill/Agent/知识库/记忆/工作流…）才进 cosmac 自己的 DB。全局 AI 配置仍走控制室 state event，每账号轻量配置优先用 Matrix account data。
+- **基建决策**：复用生产现成 PostgreSQL，给 cosmac 单开 database/schema，知识库按需装 pgvector。走 §2 第 3 条路径，不碰 Synapse 核心。
+- **本次实现**（`cosmac/db/`，纯新增、未接进 bot 运行路径，零行为变化）：SQLAlchemy **同步**（bot 是同步的）。`engine.py` 连接由 `GUDUU_DATABASE_URL` 决定，生产指向 Postgres、本地默认回退 SQLite `run/cosmac.db`（含内存库 StaticPool 处理）；`models.py` 两张表 **Skill / Agent**，带 **scope/scope_id/slug** 作用域三元组（user/room/global，同时覆盖"每账号"和"群级"），Agent 用 JSON 存 skill_slugs 暂不建多对多；`repo.py` upsert(部分更新+字段白名单)/get/list(作用域+启用过滤)/delete。
+- **决策**：第一批只做 Skill/Agent（纯关系型、立刻有用）；知识库(pgvector·RAG)、群级记忆、Rule 是后续切片；建表暂用 create_all，以后上 alembic 迁移。
+- 验证：新增 `test_db.py` 6 例（内存 SQLite，建/改/查/删/作用域隔离/字段护栏）全过；cosmac 43 单测全过、ruff 通过。`SQLAlchemy>=2.0` 进 requirements（生产另需 `psycopg`）。
+- 部署：**本次无需部署**——纯后端新增、bot 还没用它。等接进 bot 时再 `pip install -r cosmac/requirements.txt` + `restart guduu-bot`。
+
 ## 2026-06-19 — 控制室成员对齐改由主 AI(power 100)执行（撤销管理员真正失权）
 - **问题(P1)**：普通管理员都是 power 50，A(50) 撤销 B(50) 时 Matrix 不允许同级降权/踢出，前端 `removeFromControlRoom` 两个操作都静默失败，UI 却报成功——B 撤销后仍能写 AI 配置。只有唯一的 100 所有者撤权才真生效。
 - **修法（按 reviewer 方向：让 power 100 的 bot 执行成员同步，浏览器只提交期望）**：
