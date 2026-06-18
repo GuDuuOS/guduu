@@ -107,7 +107,7 @@
 | # | 模块 | 状态 | 说明 |
 |---|------|------|------|
 | 0 | 项目规范 (本文件) | ✅ 进行中 | — |
-| 1 | **主 AI 控制层** | 🟡 进行中 | ①骨架：appservice bot 看到每条消息+自动进群+回消息（`cosmac/bots/`）②多模型已接入：echo/claude/openai 可配置（`cosmac/ai/`，无 key 自动降级 echo）。待扩展：让 AI 调用创建群/查记录等全部 IM 能力（工具调用） |
+| 1 | **主 AI 控制层** | ✅ 完成 | 地基齐活：appservice bot 看到每条消息+自动进群+回消息（`cosmac/bots/`）；多模型可配置（echo/claude/openai/deepseek/gemini，无 key 自动降级 echo，`cosmac/ai/`）；AI 工具调用（建群/发消息/查成员/读记录）；后台 AI 配置经控制室热下发 + 服务器管理员↔控制室成员联动。后续增量工具按需补，不再算"开工中"。 |
 | 2 | 群级 记忆/知识库/Rule/Skill | 🟡 进行中 | 数据存储分层已定（见 §3「数据存储分层」）。①已开工：`cosmac/db/` 数据层骨架（SQLAlchemy 同步，PG/本地 SQLite 双跑）+ Skill/Agent 表与仓库。待做：知识库(pgvector·RAG)、群级记忆、Rule，再接进主 AI 工具调用 |
 | 3 | Bot / 插件 / 工作流引擎 | ⬜ | 可配置的 AI 工作流 + 扩展插件 |
 | 4 | 交易系统 | ⬜ | — |
