@@ -1,0 +1,161 @@
+"""「知识」聊天命令：往本群/个人知识库加文档、列出、删除、试搜。
+
+与 skill_cmd 同套路：纯逻辑、吃一个 Session、返回要回的文本；bot 负责前缀识别、
+作用域判断（群=本群知识库 / 私聊=个人）、写权限闸、兜异常。
+
+命令（不强制 / 开头，避免被 Element 当客户端命令拦截；也兼容 /知识）：
+    知识 / 知识 帮助
+    知识 列表
+    知识 添加 <标题> ｜ <正文>
+    知识 删除 <编号>
+    知识 搜 <关键词>           —— 试检索，看本群知识库会命中什么
+"""
+
+from __future__ import annotations
+
+import re
+
+from sqlalchemy.orm import Session
+
+from cosmac.db import kb
+from cosmac.db.models import SCOPE_ROOM, SCOPE_USER, KnowledgeDoc
+
+PREFIXES = ("知识", "/知识", "kb", "/kb")
+
+# 容量护栏（与技能命令同理，防滥用撑爆 DB / 上下文）
+MAX_DOC_CHARS = 20000          # 单篇正文上限
+MAX_DOCS_PER_SCOPE = 200       # 每个作用域文档数上限
+
+
+def looks_like_kb_command(text: str) -> bool:
+    """快速判断（不连 DB）：这条是不是知识命令。"""
+    t = text.strip()
+    if t.startswith("知识") or t.startswith("/知识"):
+        return True
+    low = t.lower()
+    return any(low == p or low.startswith(p + " ") for p in ("kb", "/kb"))
+
+
+def handle_kb_command(
+    session: Session,
+    *,
+    is_dm: bool,
+    room_id: str,
+    user_id: str,
+    text: str,
+    can_write: bool = True,
+) -> str:
+    """执行一条知识命令，返回要发回聊天的文本。
+
+    作用域：私聊→个人知识库(user)；群里→本群知识库(room)。
+    写操作（添加/删除）在群里需要管理员（can_write）；私聊改自己的不受限。
+    """
+    scope = SCOPE_USER if is_dm else SCOPE_ROOM
+    scope_id = user_id if is_dm else room_id
+    where = "你的个人知识库" if is_dm else "本群知识库"
+    need_admin = (not is_dm) and (not can_write)
+
+    rest = _strip_prefix(text).strip()
+    if not rest or rest in ("帮助", "help", "?", "？"):
+        return _help()
+
+    parts = rest.split(maxsplit=1)
+    sub = parts[0]
+    arg = parts[1].strip() if len(parts) > 1 else ""
+
+    if sub in ("列表", "list", "ls"):
+        return _list(session, scope, scope_id, where)
+    if sub in ("搜", "搜索", "search", "find"):
+        return _search(session, scope, scope_id, arg)
+    if sub in ("添加", "新增", "add"):
+        if need_admin:
+            return "只有群管理员能往本群知识库添加文档。"
+        return _add(session, scope, scope_id, where, arg)
+    if sub in ("删除", "删", "del", "rm", "remove"):
+        if need_admin:
+            return "只有群管理员能删除本群知识库的文档。"
+        return _delete(session, scope, scope_id, arg)
+    return f"没听懂「{sub}」。\n{_help()}"
+
+
+# ───────────────────────── 子命令 ─────────────────────────
+
+def _list(session: Session, scope: str, scope_id: str, where: str) -> str:
+    docs = kb.list_docs(session, scope=scope, scope_id=scope_id)
+    if not docs:
+        return f"{where}还没有文档。用「知识 添加 <标题> ｜ <正文>」加一篇。"
+    lines = [f"📚 {where}（共 {len(docs)} 篇）："]
+    for d in docs:
+        n = len(d.chunks)
+        lines.append(f"  #{d.id} {d.title or '(无标题)'}（{n} 段）")
+    return "\n".join(lines)
+
+
+def _add(session: Session, scope: str, scope_id: str, where: str, arg: str) -> str:
+    if not arg:
+        return "用法：知识 添加 <标题> ｜ <正文>"
+    segs = [s.strip() for s in re.split(r"[|｜]", arg, maxsplit=1)]
+    title = segs[0]
+    body = segs[1] if len(segs) > 1 else ""
+    if not body:
+        return "缺正文。用法：知识 添加 <标题> ｜ <正文>"
+    if len(body) > MAX_DOC_CHARS:
+        return f"正文太长（{len(body)} 字），上限 {MAX_DOC_CHARS} 字。请拆成多篇。"
+    if len(kb.list_docs(session, scope=scope, scope_id=scope_id)) >= MAX_DOCS_PER_SCOPE:
+        return f"{where}已达数量上限（{MAX_DOCS_PER_SCOPE} 篇），先删一些再加。"
+    doc = kb.ingest_document(
+        session, scope=scope, scope_id=scope_id, title=title, source="chat", text=body
+    )
+    n = len(doc.chunks)
+    return f"✅ 已把「{title or '(无标题)'}」收进{where}（切成 {n} 段，编号 #{doc.id}）。主 AI 在此可据它作答。"
+
+
+def _delete(session: Session, scope: str, scope_id: str, arg: str) -> str:
+    m = re.search(r"\d+", arg)
+    if not m:
+        return "用法：知识 删除 <编号>（编号见「知识 列表」）"
+    doc_id = int(m.group())
+    # 只能删本作用域的文档（防跨群删别人的）
+    doc = session.get(KnowledgeDoc, doc_id)
+    if doc is None or doc.scope != scope or doc.scope_id != scope_id:
+        return f"没找到编号 #{doc_id} 的文档。"
+    kb.delete_doc(session, doc_id)
+    return f"🗑 已删除 #{doc_id}「{doc.title or '(无标题)'}」。"
+
+
+def _search(session: Session, scope: str, scope_id: str, query: str) -> str:
+    if not query.strip():
+        return "用法：知识 搜 <关键词>"
+    hits = kb.search(session, query=query, scope=scope, scope_id=scope_id, k=3, min_score=0.01)
+    if not hits:
+        return "没检索到相关内容。"
+    lines = ["🔎 命中（按相关度）："]
+    for ch, score in hits:
+        snippet = ch.text[:60].replace("\n", " ")
+        lines.append(f"  · 《{ch.doc.title or '(无标题)'}》 {score:.2f}：{snippet}…")
+    return "\n".join(lines)
+
+
+# ───────────────────────── 工具 ─────────────────────────
+
+def _help() -> str:
+    return (
+        "📚 知识库命令：\n"
+        "  知识 列表\n"
+        "  知识 添加 <标题> ｜ <正文>\n"
+        "  知识 删除 <编号>\n"
+        "  知识 搜 <关键词>\n"
+        "（群里建的是本群知识库，私聊我建的是你的个人知识库。主 AI 回话时会自动检索并参考。）"
+    )
+
+
+def _strip_prefix(text: str) -> str:
+    t = text.strip()
+    low = t.lower()
+    for p in PREFIXES:
+        if low.startswith(p):
+            return t[len(p):]
+    return t
+
+
+__all__ = ["handle_kb_command", "looks_like_kb_command"]

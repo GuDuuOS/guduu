@@ -146,9 +146,9 @@ class CosmacBot:
             #     最后把结论发回群。（echo 后端不支持工具，会自动退化为纯文本回复。）
             # 回复前先按管理后台下发的运行时配置（人设/模型/工具开关）对齐一次。
             self._apply_runtime_config()
-            # 按 (本群, 发起人) 算出当前生效的技能说明，作为本轮 system addendum 注入。
+            # 按 (本群, 发起人) 算出本轮 system addendum：人设 + 技能 + 知识库检索片段(RAG)。
             # 任何失败（DB 没装/没数据/出错）都返回空串、绝不阻断回复（见 _skill_addendum）。
-            extra_system = self._skill_addendum(room_id, sender)
+            extra_system = self._skill_addendum(room_id, sender, query=text or user_text)
             reply = self.agent.run(
                 text or user_text,
                 ToolContext(room_id=room_id, sender=sender),
@@ -156,13 +156,12 @@ class CosmacBot:
             )
             self.client.send_text(room_id, reply)
 
-    def _skill_addendum(self, room_id: str, sender: str) -> str:
-        """拼出本轮注入主 AI 的技能说明 = 全局技能 + 本群/个人技能，合并渲染一次。
+    def _skill_addendum(self, room_id: str, sender: str, query: str = "") -> str:
+        """拼出本轮注入主 AI 的 system addendum = 人设 + 技能 + 知识库检索片段(RAG)。
 
-        两个来源、各自兜异常、互不拖累：
-          - **全局技能**：控制室的 state event（管理后台写、bot 读），纯 Matrix、不需要 DB。
-          - **群级/个人技能**：cosmac DB（聊天命令写），``cosmac.db`` 懒导入；服务器没装
-            SQLAlchemy / 读失败时这部分降级为空，全局技能仍照常注入。
+        多来源、各自兜异常、互不拖累：
+          - **人设/技能**：控制室 state event(全局) + cosmac DB(群/个人) + 绑定的智能体。
+          - **知识库(RAG)**：按 query 检索本群/个人知识库 top-K 片段(cosmac DB)。
         **绝不能因为它出问题就让主 AI 不回话**——任一来源异常都只是少注入、不抛出。
         """
         try:
@@ -183,11 +182,41 @@ class CosmacBot:
                 seen.add(slug)
                 deduped.append(it)
             skills_text = render_skills(deduped)
-            # 人设在前、技能在后，合成本轮 addendum
-            return "\n\n".join(p for p in (persona, skills_text) if p)
+            kb_text = self._kb_context(room_id, sender, query)
+            # 人设 → 技能 → 知识库，依次拼成本轮 addendum
+            return "\n\n".join(p for p in (persona, skills_text, kb_text) if p)
         except Exception as e:
             # 兜住**最终组装**：脏数据绝不能让这条消息收不到回复（docstring 的承诺）
-            logger.debug("组装技能/人设失败（忽略，按无附加继续）：%s", e)
+            logger.debug("组装 addendum 失败（忽略，按无附加继续）：%s", e)
+            return ""
+
+    def _kb_context(self, room_id: str, sender: str, query: str) -> str:
+        """RAG：按 query 检索本群+个人知识库 top-K 片段，渲染成「参考资料」块。
+
+        cosmac.db 懒导入 + 全程兜异常：没装 SQLAlchemy / 无文档 / 出错都返回空串。
+        min_score 过滤掉太不相关的（哈希兜底嵌入下尤其重要，避免硬塞无关内容）。
+        """
+        q = (query or "").strip()
+        if not q:
+            return ""
+        try:
+            from cosmac.db import session_scope
+            from cosmac.db.kb import search
+            from cosmac.db.models import SCOPE_ROOM, SCOPE_USER
+
+            with session_scope() as s:
+                hits = search(s, query=q, scope=SCOPE_ROOM, scope_id=room_id, k=3, min_score=0.05)
+                hits += search(s, query=q, scope=SCOPE_USER, scope_id=sender, k=2, min_score=0.05)
+                if not hits:
+                    return ""
+                hits.sort(key=lambda t: t[1], reverse=True)
+                lines = ["参考以下「知识库」资料作答（与问题相关，未必完整）："]
+                for i, (ch, _score) in enumerate(hits[:4], 1):
+                    title = (ch.doc.title or "").strip()
+                    lines.append(f"[{i}] 《{title}》 {ch.text}")
+            return "\n".join(lines)
+        except Exception as e:
+            logger.debug("知识库检索失败（忽略，无 RAG 继续）：%s", e)
             return ""
 
     def _group_persona(self, room_id: str) -> Tuple[str, List[str]]:
@@ -515,7 +544,47 @@ class CosmacBot:
         if self._is_skill_command(text):
             self.client.send_text(room_id, self._run_skill_command(room_id, sender, text))
             return True
+        # 知识库管理命令（同套路）
+        if self._is_kb_command(text):
+            self.client.send_text(room_id, self._run_kb_command(room_id, sender, text))
+            return True
         return False
+
+    def _is_kb_command(self, text: str) -> bool:
+        """是不是「知识」命令——纯字符串判断，不导入 cosmac.db。"""
+        t = text.strip()
+        low = t.lower()
+        return (
+            t.startswith("知识")
+            or t.startswith("/知识")
+            or low == "kb"
+            or low.startswith("kb ")
+            or low.startswith("/kb")
+        )
+
+    def _run_kb_command(self, room_id: str, sender: str, text: str) -> str:
+        """执行知识库命令并返回回复文本（私聊→个人库，群→本群库；写操作群里需管理员）。"""
+        try:
+            is_dm = self.client.joined_member_count(room_id) <= 2
+        except Exception:
+            is_dm = False
+        can_write = True if is_dm else self._is_room_admin(room_id, sender)
+        try:
+            from cosmac.db import session_scope
+            from cosmac.db.kb_cmd import handle_kb_command
+
+            with session_scope() as s:
+                return handle_kb_command(
+                    s,
+                    is_dm=is_dm,
+                    room_id=room_id,
+                    user_id=sender,
+                    text=text,
+                    can_write=can_write,
+                )
+        except Exception as e:
+            logger.warning("知识库命令执行失败：%s", e)
+            return "知识库功能暂不可用（服务器可能还没配置数据库）。"
 
     def _is_skill_command(self, text: str) -> bool:
         """是不是「技能」命令——纯字符串判断，不导入 cosmac.db（避免无谓依赖加载）。"""

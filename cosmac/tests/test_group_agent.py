@@ -8,8 +8,10 @@
 
 from __future__ import annotations
 
+import os
 import unittest
 from typing import Any, Dict, Optional
+from unittest import mock
 
 from cosmac.bots.appservice_bot import CosmacBot
 from cosmac.config import (
@@ -51,6 +53,12 @@ def _bot(channel_cfg=None, agents=None, skills=None) -> CosmacBot:
 
 class TestGroupAgent(unittest.TestCase):
     def setUp(self) -> None:
+        # 清掉 embedding key → RAG 用哈希词袋、不发真实网络请求（测试隔离）
+        p = mock.patch.dict(os.environ, {}, clear=False)
+        p.start()
+        self.addCleanup(p.stop)
+        for k in ("COSMAC_EMBED_API_KEY", "OPENAI_API_KEY", "ARK_API_KEY"):
+            os.environ.pop(k, None)
         init_engine("sqlite://", create_all=True)  # 隔离的空 DB（群/个人技能为空）
 
     def test_bound_agent_injects_persona_and_skills(self) -> None:
@@ -92,6 +100,18 @@ class TestGroupAgent(unittest.TestCase):
     def test_no_config_empty(self) -> None:
         bot = _bot(channel_cfg=None, agents=None, skills=None)
         self.assertEqual(bot._skill_addendum(ROOM, "@u:host"), "")
+
+    def test_rag_injects_relevant_kb_chunk(self) -> None:
+        # 本群知识库里有文档 → 提问相关问题时，addendum 注入检索到的片段
+        from cosmac.db import session_scope
+        from cosmac.db.kb import ingest_document
+        with session_scope() as s:
+            ingest_document(s, scope="room", scope_id=ROOM, title="报价规则",
+                            text="商单报价：口播报价高于植入，最终报价需筱雨确认。")
+        bot = _bot(channel_cfg=None, agents=None, skills=None)
+        out = bot._skill_addendum(ROOM, "@u:host", query="商单怎么报价")
+        self.assertIn("知识库", out)
+        self.assertIn("报价规则", out)
 
     def test_global_skills_still_inject_without_binding(self) -> None:
         # 没绑智能体，但有全局技能 → 全局技能照常注入（不依赖绑定）

@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-06-19 — 模块2：知识库接活（bot RAG 注入 + 入库聊天命令）
+- 把上一步的知识库引擎接进主 AI，端到端闭环：群里加文档 → 主 AI 据此回答。
+- **入库命令** `cosmac/db/kb_cmd.py`（同 skill_cmd 套路）：`知识 列表/添加/删除/搜`；`添加 <标题> ｜ <正文>`。作用域:群=本群库 / 私聊=个人库;写操作群里需管理员;容量护栏(单篇≤20000字、每作用域≤200篇);删除只能删本作用域、按编号。
+- **bot RAG**：`_skill_addendum` 现按用户这句话检索本群+个人知识库 top-K 片段(余弦、min_score 过滤)，作为「参考资料」块注入(人设→技能→知识库)。bot 加 `_is_kb_command`/`_run_kb_command`(懒导入+兜异常+管理员闸,同技能命令)。
+- 验证：新增 `test_kb_cmd.py`(7 例)+ `test_group_agent` 加 RAG 注入例;cosmac **88 单测全过、ruff 通过**。修了一个测试隔离坑:KB 测试会因机器上真有 OPENAI/ARK key 而走真实网络——setUp 里清掉 embedding key、强制哈希兜底。
+- 部署：发 dist 不需要(无前端改动);**要 `restart guduu-bot`**(bot 改了命令分发+注入)。**前提**:服务器装 SQLAlchemy + 配 cosmac DB,知识库命令/RAG 才真正生效(否则优雅降级);要好的语义检索还需配 embedding key(OPENAI_API_KEY/方舟),否则用哈希词袋(仅词法相似)。
+- 待续:① 后台/上传式入库(大文档);② pgvector 提速;③ 模型按群覆盖;④ Rule。
+
 ## 2026-06-19 — 模块2：知识库引擎(嵌入抽象 + 入库/检索, 本地可验、零基建)
 - 开工知识库(模块2 最重一块)。**关键取舍**:检索 v1 用 **Python 余弦相似度**(在该作用域分块上排序),SQLite/PG 都能跑、本地可验,**绕开 pgvector 依赖**;pgvector 留作规模化优化。嵌入走多模型抽象:有 OpenAI 兼容 key 用真嵌入(默认 text-embedding-3-small),无 key 自动降级**哈希词袋向量**(确定性、给词法相似度)。
 - 新增:`cosmac/ai/embeddings.py`(Embedder 抽象 + HashingEmbedder 兜底 + OpenAICompatEmbedder + get_embedder 按 env 选 + cosine);`cosmac/db/models.py` 加 **KnowledgeDoc / KnowledgeChunk**(embedding 存 JSON 浮点数组、跨后端通用;删文档级联删分块);`cosmac/db/kb.py`(chunk_text 带重叠切块 + ingest_document 切块·嵌入·落库 + search 余弦 top-K + list/delete)。作用域沿用 room/user/global。

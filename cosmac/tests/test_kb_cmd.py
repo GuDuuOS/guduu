@@ -1,0 +1,93 @@
+"""「知识」聊天命令单元测试（内存 SQLite + 哈希嵌入，零 key）。
+
+运行：.venv/bin/python -m unittest cosmac.tests.test_kb_cmd
+"""
+
+from __future__ import annotations
+
+import os
+import unittest
+from unittest import mock
+
+from cosmac.db import init_engine, session_scope
+from cosmac.db import kb
+from cosmac.db.kb_cmd import handle_kb_command, looks_like_kb_command
+from cosmac.db.models import SCOPE_ROOM, SCOPE_USER
+
+ROOM = "!ops:cosmac.cc"
+USER = "@alice:cosmac.cc"
+
+
+def run(text: str, *, is_dm: bool = False, can_write: bool = True) -> str:
+    with session_scope() as s:
+        return handle_kb_command(
+            s, is_dm=is_dm, room_id=ROOM, user_id=USER, text=text, can_write=can_write
+        )
+
+
+class TestKbCommandDetect(unittest.TestCase):
+    def test_looks_like(self) -> None:
+        self.assertTrue(looks_like_kb_command("知识 列表"))
+        self.assertTrue(looks_like_kb_command("知识列表"))
+        self.assertTrue(looks_like_kb_command("kb add x"))
+        self.assertFalse(looks_like_kb_command("知道了"))  # 不以「知识」开头
+        self.assertFalse(looks_like_kb_command("帮我建群"))
+
+
+def _force_hashing_embedder(case: unittest.TestCase) -> None:
+    """清掉环境里的 embedding key，让 get_embedder() 降级哈希词袋——
+    避免测试因机器上真有 OPENAI_API_KEY/ARK_API_KEY 而发起真实网络请求。"""
+    p = mock.patch.dict(os.environ, {}, clear=False)
+    p.start()
+    case.addCleanup(p.stop)
+    for k in ("COSMAC_EMBED_API_KEY", "OPENAI_API_KEY", "ARK_API_KEY"):
+        os.environ.pop(k, None)
+
+
+class TestKbCommand(unittest.TestCase):
+    def setUp(self) -> None:
+        _force_hashing_embedder(self)
+        init_engine("sqlite://", create_all=True)
+
+    def test_help(self) -> None:
+        self.assertIn("知识库命令", run("知识"))
+
+    def test_add_then_list_and_search(self) -> None:
+        out = run("知识 添加 报价规则 ｜ 商单报价按粉丝量和均播定价，对外报价需筱雨确认。")
+        self.assertIn("已把", out)
+        with session_scope() as s:
+            docs = kb.list_docs(s, scope=SCOPE_ROOM, scope_id=ROOM)
+            self.assertEqual(len(docs), 1)
+            self.assertEqual(docs[0].title, "报价规则")
+        self.assertIn("报价规则", run("知识 列表"))
+        # 试搜命中
+        self.assertIn("报价规则", run("知识 搜 商单报价"))
+
+    def test_add_requires_body(self) -> None:
+        self.assertIn("缺正文", run("知识 添加 只有标题"))
+
+    def test_delete_only_own_scope(self) -> None:
+        run("知识 添加 文档A ｜ 正文一二三")
+        with session_scope() as s:
+            did = kb.list_docs(s, scope=SCOPE_ROOM, scope_id=ROOM)[0].id
+        # 删别的编号 → 没找到
+        self.assertIn("没找到", run("知识 删除 999999"))
+        # 删本群的 → 成功
+        self.assertIn("已删除", run(f"知识 删除 {did}"))
+        with session_scope() as s:
+            self.assertEqual(len(kb.list_docs(s, scope=SCOPE_ROOM, scope_id=ROOM)), 0)
+
+    def test_non_admin_cannot_write_room(self) -> None:
+        self.assertIn("只有群管理员", run("知识 添加 x ｜ 正文", can_write=False))
+        self.assertIn("只有群管理员", run("知识 删除 1", can_write=False))
+        self.assertNotIn("只有群管理员", run("知识 列表", can_write=False))  # 查看放行
+
+    def test_dm_scope_is_user(self) -> None:
+        run("知识 添加 我的笔记 ｜ 私聊里的个人知识", is_dm=True, can_write=False)
+        with session_scope() as s:
+            self.assertEqual(len(kb.list_docs(s, scope=SCOPE_USER, scope_id=USER)), 1)
+            self.assertEqual(len(kb.list_docs(s, scope=SCOPE_ROOM, scope_id=ROOM)), 0)
+
+
+if __name__ == "__main__":
+    unittest.main()
