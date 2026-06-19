@@ -7,6 +7,13 @@
 
 ---
 
+## 2026-06-19 — 模块2：知识库引擎(嵌入抽象 + 入库/检索, 本地可验、零基建)
+- 开工知识库(模块2 最重一块)。**关键取舍**:检索 v1 用 **Python 余弦相似度**(在该作用域分块上排序),SQLite/PG 都能跑、本地可验,**绕开 pgvector 依赖**;pgvector 留作规模化优化。嵌入走多模型抽象:有 OpenAI 兼容 key 用真嵌入(默认 text-embedding-3-small),无 key 自动降级**哈希词袋向量**(确定性、给词法相似度)。
+- 新增:`cosmac/ai/embeddings.py`(Embedder 抽象 + HashingEmbedder 兜底 + OpenAICompatEmbedder + get_embedder 按 env 选 + cosine);`cosmac/db/models.py` 加 **KnowledgeDoc / KnowledgeChunk**(embedding 存 JSON 浮点数组、跨后端通用;删文档级联删分块);`cosmac/db/kb.py`(chunk_text 带重叠切块 + ingest_document 切块·嵌入·落库 + search 余弦 top-K + list/delete)。作用域沿用 room/user/global。
+- 验证:新增 `test_kb.py` 8 例(切块/嵌入自相似/入库/检索排序/作用域隔离/删除级联);cosmac **80 单测全过、ruff 通过**。本地 e2e 冒烟(无 key→哈希):"商单怎么报价"→《商单报价》、"什么时候发布最好"→《发布排期》,路由正确。
+- **本次无需部署**:纯后端引擎、bot 还没用它(下一步接 RAG 注入 + 入库入口)。
+- 待续:① bot RAG——回话前检索本群知识库、把 top-K 片段注入上下文;② 入库入口(聊天命令 `知识 添加` / 后台上传);③ 规模化上 pgvector;④ 真嵌入 key(服务器配 OPENAI_API_KEY/方舟)。
+
 ## 2026-06-19 — 模块2：群绑定智能体 + bot 应用（人设+技能；智能体真正"活"起来）
 - 让 Agent 真正生效:某群在「频道管理 → 角色」选一个**本群智能体**,主 AI 在该群就以它的人设回应、并自动启用它绑定的技能。
 - **前端**:`useChannelAdmin` 的 `ChannelPersona` 加 `agentSlug`(随既有 persona 自动存进频道 state event `cosmac.channel_config`,零新机制);`ChannelAdminModal` 角色 tab 加「本群智能体」下拉(选项来自 `getGlobalAgents`)。
