@@ -30,13 +30,14 @@ ROOM = "!grp:host"
 class FakeClient:
     """按 (event_type) 返回不同 state event；其余调用给安全默认。"""
 
-    def __init__(self, channel_cfg=None, agents=None, skills=None, rules=None):
+    def __init__(self, channel_cfg=None, agents=None, skills=None, rules=None, messages=None):
         self._by_type = {
             CHANNEL_CONFIG_EVENT_TYPE: channel_cfg,
             AGENTS_EVENT_TYPE: agents,
             SKILLS_EVENT_TYPE: skills,
             RULES_EVENT_TYPE: rules,
         }
+        self._messages = messages or []
 
     def set_displayname(self, *_a, **_k): pass
     def send_text(self, *_a, **_k): return "$e"
@@ -46,10 +47,13 @@ class FakeClient:
     def get_state_event(self, _room_id: str, event_type: str, _state_key: str = "") -> Any:
         return self._by_type.get(event_type)
 
+    def get_messages(self, _room_id: str, limit: int = 20):
+        return self._messages[-limit:]
 
-def _bot(channel_cfg=None, agents=None, skills=None, rules=None) -> CosmacBot:
+
+def _bot(channel_cfg=None, agents=None, skills=None, rules=None, messages=None) -> CosmacBot:
     bot = CosmacBot(CosmacConfig(llm_provider="echo"))
-    bot.client = FakeClient(channel_cfg, agents, skills, rules)
+    bot.client = FakeClient(channel_cfg, agents, skills, rules, messages)
     return bot
 
 
@@ -102,6 +106,18 @@ class TestGroupAgent(unittest.TestCase):
     def test_no_config_empty(self) -> None:
         bot = _bot(channel_cfg=None, agents=None, skills=None)
         self.assertEqual(bot._skill_addendum(ROOM, "@u:host"), "")
+
+    def test_recent_history_maps_roles_and_drops_current(self) -> None:
+        bot_id = "@guduu:guduu.local"  # 默认 config 的 bot_user_id
+        msgs = [
+            {"sender": "@u:host", "body": "第一句"},
+            {"sender": bot_id, "body": "我的回答"},
+            {"sender": "@u:host", "body": "当前这句"},  # 触发消息，应被排除
+        ]
+        bot = _bot(messages=msgs)
+        hist = bot._recent_history(ROOM, "@u:host", "当前这句")
+        self.assertEqual([(m.role, m.content) for m in hist],
+                         [("user", "第一句"), ("assistant", "我的回答")])
 
     def test_global_rules_injected_and_filtered(self) -> None:
         bot = _bot(rules={"rules": [

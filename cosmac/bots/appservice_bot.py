@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from cosmac.ai import build_provider, get_provider
 from cosmac.ai.agent import Agent
-from cosmac.ai.base import LLMProvider
+from cosmac.ai.base import LLMProvider, Message
 from cosmac.ai.tools import Toolbox, ToolContext
 from cosmac.bots.matrix_client import MatrixClient
 from cosmac.config import (
@@ -150,12 +150,49 @@ class CosmacBot:
             # 按 (本群, 发起人) 算出本轮 system addendum：人设 + 技能 + 知识库检索片段(RAG)。
             # 任何失败（DB 没装/没数据/出错）都返回空串、绝不阻断回复（见 _skill_addendum）。
             extra_system = self._skill_addendum(room_id, sender, query=text or user_text)
+            # 短期记忆：把本房间最近的对话(不含当前这条)喂给模型，主 AI 才"记得"上文。
+            history = self._recent_history(room_id, sender, user_text)
             reply = self.agent.run(
                 text or user_text,
                 ToolContext(room_id=room_id, sender=sender),
                 extra_system=extra_system,
+                history=history,
             )
             self.client.send_text(room_id, reply)
+
+    # 短期记忆窗口：最多带最近这么多条历史；单条正文截断长度（控 token）。
+    _HISTORY_LIMIT = 12
+    _HISTORY_CHARS = 600
+
+    def _recent_history(
+        self, room_id: str, cur_sender: str, cur_body: str
+    ) -> List[Message]:
+        """读本房间最近消息，映射成对话历史(不含当前这条)，给主 AI 短期记忆。
+
+        聊天记录存在 Synapse(见 CLAUDE.md §3，不重存)，这里实时读最近 N 条。
+        bot 自己发的→assistant，其它人→user。任何失败都返回空(不阻断回复)。
+        """
+        try:
+            msgs = self.client.get_messages(room_id, limit=self._HISTORY_LIMIT + 1)
+        except Exception as e:
+            logger.debug("读历史失败（忽略，无短期记忆继续）：%s", e)
+            return []
+        out: List[Message] = []
+        dropped_current = False
+        for m in msgs:
+            body = (m.get("body") or "").strip()
+            s = m.get("sender") or ""
+            if not body:
+                continue
+            # 跳过"当前这条触发消息"(它会作为最后的 user 单独追加，避免重复)
+            if not dropped_current and s == cur_sender and body == (cur_body or "").strip():
+                dropped_current = True
+                continue
+            if len(body) > self._HISTORY_CHARS:
+                body = body[: self._HISTORY_CHARS] + "…"
+            role = "assistant" if s == self.config.bot_user_id else "user"
+            out.append(Message(role=role, content=body))
+        return out[-self._HISTORY_LIMIT:]
 
     def _skill_addendum(self, room_id: str, sender: str, query: str = "") -> str:
         """拼出本轮注入主 AI 的 system addendum = 人设 + 技能 + 知识库检索片段(RAG)。

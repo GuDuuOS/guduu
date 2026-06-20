@@ -15,7 +15,7 @@ ReAct 式循环：
 from __future__ import annotations
 
 import logging
-from typing import List
+from typing import List, Optional
 
 from cosmac.ai.base import LLMProvider, Message
 from cosmac.ai.tools import Toolbox, ToolContext
@@ -38,7 +38,13 @@ class Agent:
         self.system_prompt = system_prompt
         self.max_steps = max_steps
 
-    def run(self, user_text: str, ctx: ToolContext, extra_system: str = "") -> str:
+    def run(
+        self,
+        user_text: str,
+        ctx: ToolContext,
+        extra_system: str = "",
+        history: Optional[List[Message]] = None,
+    ) -> str:
         """处理一句用户输入，返回要发回群里的最终文本回复。
 
         参数:
@@ -46,8 +52,10 @@ class Agent:
             ctx:          工具执行上下文（当前房间 / 发起人）。
             extra_system: 临时追加到系统提示里的内容（如本群/本人当前生效的技能说明）。
                           按 (房间, 发起人) 每条消息动态算出来，不污染 Agent 的常驻人设。
+            history:      最近的对话历史（不含当前这句），给主 AI「短期记忆」。
+                          由 bot 从 Matrix 读最近消息映射而来（聊天记录存在 Synapse，不重存）。
         """
-        # 初始历史：系统提示 + 用户这句话
+        # 初始历史：系统提示 + 最近对话 + 用户这句话
         # 把常驻人设和本轮技能 addendum **合并成单条 system 消息**——有的 provider
         # （如 Claude）只认一个 system，分两条会被丢掉，合并最稳。
         messages: List[Message] = []
@@ -56,6 +64,8 @@ class Agent:
             sys_text = f"{sys_text}\n\n{extra_system}" if sys_text else extra_system
         if sys_text:
             messages.append(Message(role="system", content=sys_text))
+        if history:
+            messages.extend(history)
         messages.append(Message(role="user", content=user_text))
 
         tools = self.toolbox.specs()

@@ -111,6 +111,19 @@ class TestAgentTools(unittest.TestCase):
         reply = agent.run("在吗", ToolContext("!c:test", "@a:test"))
         self.assertEqual(reply, "你好呀")
 
+    def test_history_inserted_between_system_and_current(self) -> None:
+        # 短期记忆：历史消息应排在 system 之后、当前 user 之前，顺序保留
+        agent, llm = self._agent([TurnResult(text="好的")])
+        hist = [
+            Message(role="user", content="上一句问题"),
+            Message(role="assistant", content="上一句回答"),
+        ]
+        agent.run("现在的问题", ToolContext("!c:test", "@a:test"), history=hist)
+        roles = [m.role for m in llm.seen_messages]
+        contents = [m.content for m in llm.seen_messages]
+        self.assertEqual(roles, ["system", "user", "assistant", "user"])
+        self.assertEqual(contents[-3:], ["上一句问题", "上一句回答", "现在的问题"])
+
     def test_extra_system_merged_into_single_system_message(self) -> None:
         # 技能 addendum 应与常驻人设合并成「单条」system 消息（兼容只认一个 system 的 provider）
         agent, llm = self._agent([TurnResult(text="好的")])

@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-06-19 — 模块2：主 AI 短期记忆（带最近对话上文，治"失忆")
+- **修缺口**:此前 `agent.run` 每条消息只喂 `[system, 当前用户话]`,主 AI 记不住同群/私聊里刚说过什么(连 DM 都没上下文)。
+- **做法(贴 §3:聊天记录在 Synapse、不重存)**:bot 回话前用 `client.get_messages` **实时读本房间最近 N 条**,映射成对话历史(bot 自己发的→assistant,其它人→user),喂给模型;**不进 cosmac DB**。
+- `agent.run` 加 `history` 参数:消息序列变 `system → 最近历史 → 当前 user`。bot 加 `_recent_history`(窗口 12 条、单条截断 600 字、排除当前触发消息、全程兜异常)。
+- 长期记忆(超窗口的滚动摘要)留作后续 DB 派生数据。
+- 验证:`test_agent_tools` 加 history 顺序例 + `test_group_agent` 加 _recent_history 角色映射/排除当前例;cosmac **91 单测全过、ruff 通过**。
+- 部署:**仅 `restart guduu-bot`**(纯后端、无前端改动,不必发 dist)。
+
 ## 2026-06-19 — 模块2：Rule 规则引擎（平台级硬约束，全局注入、优先级最高）
 - 模块2「记忆/知识库/Rule/Skill」补上最后一块 **Rule**:平台级硬约束(如"对外报价/发布须经确认""不得编造数据"),无论群里用哪个智能体都注入,且**放 addendum 最前、优先级最高**。
 - 沿用已验证套路(同技能/智能体):全局规则存控制室 state event `cosmac.rules`,浏览器(管理后台)写、bot 读。
