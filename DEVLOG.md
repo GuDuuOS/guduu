@@ -7,6 +7,17 @@
 
 ---
 
+## 2026-06-19 — 模块3 开工：外部工作流连接器(P1 通用 webhook 引擎 + 命令)
+- **定调(负责人拍板)**:模块3 不自建工作流引擎,而是**对接 n8n/Make/Coze/ComfyUI/Dify** 等现成平台;P1 先做**通用 webhook 连接器**(覆盖 n8n/Make/任意自建端点),配置式后台编排,同步执行。
+- **架构**:连接器**定义**走控制室 state event `cosmac.workflows`(浏览器够不到 DB,同 Skill/Agent);**密钥绝不进 Matrix**——定义里只放凭据名 `cred`,真值在服务端 env `COSMAC_WF_<CRED>`(同 LLM key 策略);**运行记录**进 cosmac DB。
+- 本次实现(纯后端):
+  - `cosmac/wf.py`:`run_connector/run_webhook`——同步 POST `{input,source}`、规范化结果(命中常见输出字段)、Bearer 鉴权(env)、全程兜异常不抛;平台分派(目前 webhook,Dify/Coze/ComfyUI 留后)。
+  - `cosmac/db/models.py` 加 `WorkflowRun` + `cosmac/db/wf_repo.py`(record_run/recent_runs)。
+  - `appservice_bot`:`工作流 列表/跑 <slug> <输入>` 命令(读控制室定义→跑→结果发频道→尽力入库),全程懒导入+兜异常。
+- 验证:新增 `test_wf.py`(8 例:输出抽取/Bearer/非2xx/网络错/缺URL/非JSON/未知平台)+ `test_wf_cmd.py`(6 例:检测/列表/跑成功入库/失败记error/未知slug/空)。cosmac **106 单测全过、ruff 通过**。
+- 部署:**仅 `restart guduu-bot`**(纯后端;新表 cosmac_workflow_run 由 create_all 自动建)。要真跑还需在「管理后台→工作流」配连接器(UI 下一轮)+ 服务端配 `COSMAC_WF_<CRED>`(如平台需鉴权)。
+- 待续:① 后台工作流编排 UI;② 注册主 AI 工具 `run_workflow`(自然语言触发);③ Dify/Coze/ComfyUI 适配器 + 异步回调。
+
 ## 2026-06-19 — 模块2：模型按群覆盖（Agent.model 接活，智能体功能补齐）
 - 补上 Agent 最后没接的点:智能体定义里的 `model` 字段(UI 早能填、bot 一直忽略)现在生效——某群绑定的智能体若指定模型,主 AI 在该群就用那个模型回话。
 - **顺手做了读优化**:把"本群人设/绑定技能/模型"收敛成 `_group_context(room_id)` **一次读**(原 `_group_persona` 拆成它),`_handle_event` 读一次、传给 addendum 复用,少几次 Synapse state 读。

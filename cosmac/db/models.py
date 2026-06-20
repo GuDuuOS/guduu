@@ -166,3 +166,26 @@ class KnowledgeChunk(Base):
 
     def __repr__(self) -> str:
         return f"<KnowledgeChunk doc={self.doc_id} #{self.ordinal}>"
+
+
+class WorkflowRun(Base, TimestampMixin):
+    """一次外部工作流连接器的运行记录（模块3）。
+
+    连接器**定义**走控制室 state event（后台编排，浏览器够不到 DB）；这里只存**运行记录**
+    （派生/关系型数据，可追溯）。room_id/sender 记触发来源；status=ok/error。
+    """
+
+    __tablename__ = "cosmac_workflow_run"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    slug: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    platform: Mapped[str] = mapped_column(String(32), nullable=False, default="webhook")
+    room_id: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    sender: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    input: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="ok")
+    output: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    error: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+    def __repr__(self) -> str:
+        return f"<WorkflowRun {self.slug} {self.status} #{self.id}>"

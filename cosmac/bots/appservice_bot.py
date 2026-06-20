@@ -34,6 +34,7 @@ from cosmac.config import (
     CONTROL_ADMINS_EVENT_TYPE,
     RULES_EVENT_TYPE,
     SKILLS_EVENT_TYPE,
+    WORKFLOWS_EVENT_TYPE,
     CosmacConfig,
 )
 from cosmac.skills_text import render_skills  # 纯渲染、不依赖 DB
@@ -656,7 +657,103 @@ class CosmacBot:
         if self._is_kb_command(text):
             self.client.send_text(room_id, self._run_kb_command(room_id, sender, text))
             return True
+        # 工作流连接器命令（列表/跑外部 n8n/Make 等）
+        if self._is_wf_command(text):
+            self.client.send_text(room_id, self._run_wf_command(room_id, sender, text))
+            return True
         return False
+
+    def _is_wf_command(self, text: str) -> bool:
+        """是不是「工作流」命令——纯字符串判断。"""
+        t = text.strip()
+        low = t.lower()
+        return (
+            t.startswith("工作流")
+            or t.startswith("/工作流")
+            or low == "wf"
+            or low.startswith("wf ")
+            or low.startswith("/wf")
+        )
+
+    def _workflow_defs(self) -> List[Dict[str, Any]]:
+        """读控制室「工作流连接器」定义（启用的）。失败返回空。"""
+        try:
+            ctrl = self.client.resolve_alias(self.config.control_room_alias)
+            if not ctrl:
+                return []
+            ev = self.client.get_state_event(ctrl, WORKFLOWS_EVENT_TYPE) or {}
+            return [
+                w for w in (ev.get("workflows") or [])
+                if isinstance(w, dict) and w.get("slug") and w.get("enabled", True)
+            ]
+        except Exception as e:
+            logger.debug("读取工作流连接器失败（忽略）：%s", e)
+            return []
+
+    def _run_wf_command(self, room_id: str, sender: str, text: str) -> str:
+        """执行工作流命令：`工作流 列表` / `工作流 跑 <slug> <输入>`。
+
+        连接器定义读控制室 state event；运行同步调外部 webhook；结果尽力落库(DB 可用时)。
+        全程兜异常，绝不抛。
+        """
+        # 去前缀
+        body = text.strip()
+        for p in ("工作流", "/工作流", "/wf", "wf"):
+            if body.lower().startswith(p.lower()):
+                body = body[len(p):]
+                break
+        body = body.strip()
+        defs = self._workflow_defs()
+
+        if not body or body in ("帮助", "help", "?", "？"):
+            return (
+                "🔗 工作流命令：\n"
+                "  工作流 列表\n"
+                "  工作流 跑 <编号> <输入>\n"
+                "（连接器在「管理后台 → 工作流」配置，对接 n8n/Make 等）"
+            )
+        if body.startswith(("列表", "list", "ls")):
+            if not defs:
+                return "还没有可用的工作流连接器。请在「管理后台 → 工作流」添加。"
+            lines = [f"🔗 可用工作流（{len(defs)} 个）："]
+            for w in defs:
+                hint = f" —— {w.get('input_hint')}" if w.get("input_hint") else ""
+                lines.append(f"  · {w.get('slug')}（{w.get('name') or w.get('slug')}）{hint}")
+            return "\n".join(lines)
+        if body.startswith(("跑", "run", "执行")):
+            rest = body.split(maxsplit=1)
+            arg = rest[1].strip() if len(rest) > 1 else ""
+            parts = arg.split(maxsplit=1)
+            slug = parts[0] if parts else ""
+            user_input = parts[1].strip() if len(parts) > 1 else ""
+            if not slug:
+                return "用法：工作流 跑 <编号> <输入>（编号见「工作流 列表」）"
+            conn = next((w for w in defs if w.get("slug") == slug), None)
+            if conn is None:
+                return f"没找到工作流「{slug}」。用「工作流 列表」看可用的。"
+            from cosmac.wf import run_connector
+
+            result = run_connector(conn, user_input)
+            self._record_wf_run(room_id, sender, conn, user_input, result)
+            if result.get("ok"):
+                out = result.get("output") or "（无返回内容）"
+                return f"✅ 工作流「{conn.get('name') or slug}」已执行：\n{out}"
+            return f"⚠️ 工作流「{conn.get('name') or slug}」执行失败：{result.get('error')}"
+        return f"没听懂「{body}」。发「工作流 帮助」看用法。"
+
+    def _record_wf_run(self, room_id, sender, conn, user_input, result) -> None:
+        """尽力把运行记录落库；DB 不可用就跳过（不影响已拿到的结果）。"""
+        try:
+            from cosmac.db import session_scope
+            from cosmac.db.wf_repo import record_run
+
+            with session_scope() as s:
+                record_run(
+                    s, slug=conn.get("slug", ""), platform=conn.get("platform", "webhook"),
+                    room_id=room_id, sender=sender, user_input=user_input, result=result,
+                )
+        except Exception as e:
+            logger.debug("工作流运行记录入库失败（忽略）：%s", e)
 
     def _is_kb_command(self, text: str) -> bool:
         """是不是「知识」命令——纯字符串判断，不导入 cosmac.db。"""

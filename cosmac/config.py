@@ -194,6 +194,12 @@ AGENTS_EVENT_TYPE = "cosmac.agents"
 # （如：对外报价/发布须经确认、不杜撰数据），无论群里用哪个智能体都注入、优先级最高。
 RULES_EVENT_TYPE = "cosmac.rules"
 
+# 管理后台写、bot 读的「外部工作流连接器」state event 类型（存控制室）。模块3:
+# 不自建工作流引擎，而是对接 n8n/Make/Coze/ComfyUI/Dify 等现成平台。每个连接器形如
+# {"slug","name","platform":"webhook","url","method","cred","input_hint","enabled"}。
+# **密钥绝不进 Matrix**:cred 只是"凭据名"，真值在服务端 env COSMAC_WF_<CRED>（同 LLM key 策略）。
+WORKFLOWS_EVENT_TYPE = "cosmac.workflows"
+
 # 每个频道(群)自己的配置 state event（前端「频道管理」写，存在该房间里）。
 # 这里 bot 只用到 content.persona：persona.agentSlug（本群绑定的全局智能体）
 # 与 persona.prompt（自定义人设）。与 client.ts 的 CHANNEL_CONFIG_EVENT 一致。

@@ -95,7 +95,8 @@
 | **群级 / 个人 Skill**（聊天命令管理） | CosMac Star DB | 群里/私聊用命令建的技能（bot 有 DB 时存这；注入时与上面的全局技能合并）。 |
 | **知识库** | ✅ CosMac Star DB + **pgvector** | 文档分块 + 向量检索(RAG)，state event 存不下也搜不了。**这是上 DB 的最硬理由**。 |
 | **群级 / Agent 记忆**（摘要、长期记忆） | ✅ CosMac Star DB | 派生数据，与原始聊天记录分开存。 |
-| 工作流定义与运行记录（模块3）、交易（模块4）、个人主页（模块5） | ✅ CosMac Star DB | 关系型。 |
+| **工作流连接器定义**（模块3，后台编排） | Matrix state event | 已定：存控制室 `cosmac.workflows`（浏览器够不到 DB，同 Skill/Agent）。外部平台 key 只进服务端 env（`COSMAC_WF_<CRED>`），定义里只放凭据名。 |
+| 工作流运行记录（模块3）、交易（模块4）、个人主页（模块5） | ✅ CosMac Star DB | 关系型。 |
 
 **基建决策**：CosMac Star 的 DB **复用生产现成的 PostgreSQL**（Synapse 已在跑，见 `DEPLOY.md`），给 cosmac 服务**单开一个 database/schema**，按需装 **pgvector**。这走 §2 的第 3 条路径（新增独立服务/数据），与 Synapse 核心解耦、不碰它。
 
@@ -112,8 +113,8 @@
 |---|------|------|------|
 | 0 | 项目规范 (本文件) | ✅ 进行中 | — |
 | 1 | **主 AI 控制层** | ✅ 完成 | 地基齐活：appservice bot 看到每条消息+自动进群+回消息（`cosmac/bots/`）；多模型可配置（echo/claude/openai/deepseek/gemini，无 key 自动降级 echo，`cosmac/ai/`）；AI 工具调用（建群/发消息/查成员/读记录）；后台 AI 配置经控制室热下发 + 服务器管理员↔控制室成员联动。后续增量工具按需补，不再算"开工中"。 |
-| 2 | 群级 记忆/知识库/Rule/Skill | 🟡 进行中 | 数据存储分层已定（见 §3「数据存储分层」）。①已开工：`cosmac/db/` 数据层骨架（SQLAlchemy 同步，PG/本地 SQLite 双跑）+ Skill/Agent 表与仓库。待做：知识库(pgvector·RAG)、群级记忆、Rule，再接进主 AI 工具调用 |
-| 3 | Bot / 插件 / 工作流引擎 | ⬜ | 可配置的 AI 工作流 + 扩展插件 |
+| 2 | 群级 记忆/知识库/Rule/Skill | ✅ 完成 | 全套上线：Skill(数据/注入/命令/后台UI)、Agent(后台UI/群绑定/人设+模型+技能)、知识库(引擎/入库命令/RAG·线上实测)、Rule(平台硬约束)、记忆(短期对话 + 文档KB)。cosmac DB 已接生产 Postgres。增强项(长期记忆摘要/pgvector/知识库上传UI)按需再补 |
+| 3 | Bot / 插件 / 工作流引擎 | 🟡 进行中 | **定调：不自建引擎，对接外部平台**(n8n/Make/Coze/ComfyUI/Dify)。P1 已开工：通用 webhook 连接器引擎(`cosmac/wf.py`)+ 聊天命令 `工作流 列表/跑` + 运行记录入库；定义走控制室 `cosmac.workflows`、密钥走服务端 env。待做：后台编排 UI + 主 AI 工具 `run_workflow`，再 Dify/Coze/ComfyUI 适配器 |
 | 4 | 交易系统 | ⬜ | — |
 | 5 | 个人主页 | ⬜ | 需要客户端 UI 配合 |
 | R | **品牌化 Matrix→CosMac Star** | ⬜ 持续 | 贯穿全程的横切任务，按 §7 三层红线分层改，每碰到呈现层字样就顺手改 |
