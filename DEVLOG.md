@@ -7,6 +7,16 @@
 
 ---
 
+## 2026-06-19 — 工作流安全（深修·收口）：凭据域名绑定 + token 离开 URL + 原子回调 + 全后台 + 响应限流
+- 再一轮复查抓出的 5 个更深残留，一次修到底：
+- **#1【P1 凭据可被导出】**：管理员能把任意 cred 绑到自己控制的公网 URL，SSRF 只挡内网、不挡公网，服务端就把 Bearer 密钥发过去了。新增 `credential_for(cred,url)`：密钥的**允许域名也由服务端 env 固定**(`COSMAC_WF_<CRED>_HOST`)——未绑定或 URL 主机不匹配则**拒绝外发密钥**。webhook/dify/coze/comfyui 四连接器都走它。
+- **#2【P2 token 仍在 URL】**：路径段也进 nginx 日志。改成回调 URL **完全不含 token**；token 放进我们 POST 给平台的 payload(`callback_token`)，平台回传 `X-Cosmac-Token` 头鉴权——token 不进任何 URL。DB 仍只存哈希、单次用完即废。
+- **#3【P2 并发回调重复发】**：两个回调能同时读到 pending 各发一遍。`wf_repo.claim_pending` 用 `UPDATE...WHERE status='pending'` **原子 CAS** 抢占成 processing，只有一个成功，其余幂等返回 200。
+- **#4【P2 同步连接器阻塞事务】**：上次只把 ComfyUI 放后台。改成**所有同步连接器**(webhook/dify/coze≤30s 也算)都进有界后台池，立即返回"已开始"、跑完发回群。
+- **#5【P2 响应无大小限制】**：新增 `_fetch`(`stream=True` + 累计字节封顶 + 看 Content-Length)，普通响应 ≤2MB、ComfyUI 单图 ≤16MB，超限拒绝。四连接器全部响应读取都过它。
+- 验证：`test_wf` 加凭据未绑定/域名不匹配用例、`test_wf_cmd` 加原子抢占/后台结果/token 离开 URL 用例；cosmac **133 单测全过**、ruff、build 通过。
+- 部署：纯后端 → `restart guduu-bot`。⚠️ **破坏性**：带凭据的连接器现在**必须**在服务端配 `COSMAC_WF_<CRED>_HOST=<允许域名>`，否则拒绝外发密钥（安全要求）。
+
 ## 2026-06-19 — 工作流安全（补漏）：复查抓出的 6 个绕过/残留全修
 - 上一轮修复有真实漏洞，逐个补：
 - **#1【P1 DM 绕过越权】**：上次"群里要管理员、DM 放行"——任何人和 bot 开个两人 DM 就能跑全部共享凭据/付费工作流。改成**只许平台管理员**(控制室 power≥50)触发，**不分 DM/群**（新增 `_is_platform_admin`，聊天命令 + AI 工具两路都换）。

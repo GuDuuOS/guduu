@@ -55,6 +55,11 @@ def _bot(workflows=None) -> CosmacBot:
 class TestWfCommand(unittest.TestCase):
     def setUp(self) -> None:
         init_engine("sqlite://", create_all=True)
+        # 同步连接器现在走有界后台池（#4/#5）。测试里让 submit_background **同步**执行，
+        # 便于断言结果（否则线程异步、不确定）。
+        p = mock.patch("cosmac.wf.submit_background", lambda fn: (fn(), True)[1])
+        p.start()
+        self.addCleanup(p.stop)
 
     def test_detect(self) -> None:
         b = _bot()
@@ -84,8 +89,9 @@ class TestWfCommand(unittest.TestCase):
         with mock.patch("cosmac.wf.run_connector",
                         return_value={"ok": True, "output": "封面已生成: http://img"}):
             out = bot._run_wf_command(ROOM, "@u:host", "工作流 跑 cover 科技感蓝色")
-        self.assertIn("已执行", out)
-        self.assertIn("封面已生成", out)
+        self.assertIn("已开始", out)  # 立即返回"已开始"
+        # 结果由后台发回群（setUp 让后台同步执行）
+        self.assertTrue(any("封面已生成" in t for _r, t in bot.client.sent))
         # 运行记录入库
         with session_scope() as s:
             runs = recent_runs(s, slug="cover")
@@ -98,7 +104,9 @@ class TestWfCommand(unittest.TestCase):
         with mock.patch("cosmac.wf.run_connector",
                         return_value={"ok": False, "error": "平台返回 500", "output": ""}):
             out = bot._run_wf_command(ROOM, "@u:host", "工作流 跑 cover x")
-        self.assertIn("执行失败", out)
+        self.assertIn("已开始", out)
+        # 失败由后台发回群
+        self.assertTrue(any("执行失败" in t for _r, t in bot.client.sent))
         with session_scope() as s:
             self.assertEqual(recent_runs(s, slug="cover")[0].status, "error")
 
@@ -127,14 +135,13 @@ class TestWfCommand(unittest.TestCase):
         bot = _bot(workflows=[{**WF, "async": True}])
         with mock.patch("cosmac.wf.run_connector", return_value={"ok": True}) as m:
             bot._run_wf_command(ROOM, "@u:host", "工作流 跑 cover x")
-        # #4：DB 只存 token 哈希；明文 token 现在是回调 URL 的**最后一个路径段**
-        cb = m.call_args[1]["callback_url"]
-        self.assertNotIn("token=", cb)  # 不再用查询参数
-        tok = cb.rstrip("/").rsplit("/", 1)[1]
+        # #2：回调 URL **完全不含 token**；明文 token 在 payload 的 callback_token 里
+        self.assertNotIn("token", m.call_args[1]["callback_url"])
+        tok = m.call_args[1]["callback_token"]
         with session_scope() as s:
             run = recent_runs(s, slug="cover")[0]
             rid = run.id
-            self.assertNotEqual(run.token, tok)  # 存的是哈希、不是明文
+            self.assertNotEqual(run.token, tok)  # DB 存的是哈希、不是明文
         # 正确 token → 200，结果发回原群，状态结清
         code = bot.handle_wf_callback(rid, tok, {"output": "成片已生成: http://v"})
         self.assertEqual(code, 200)
@@ -149,7 +156,7 @@ class TestWfCommand(unittest.TestCase):
         bot = _bot(workflows=[{**WF, "async": True}])
         with mock.patch("cosmac.wf.run_connector", return_value={"ok": True}) as m:
             bot._run_wf_command(ROOM, "@u:host", "工作流 跑 cover x")
-        tok = m.call_args[1]["callback_url"].rstrip("/").rsplit("/", 1)[1]
+        tok = m.call_args[1]["callback_token"]
         with session_scope() as s:
             rid = recent_runs(s, slug="cover")[0].id
         bot.client.send_text = lambda *_a, **_k: None  # 模拟发送失败
@@ -157,6 +164,17 @@ class TestWfCommand(unittest.TestCase):
         self.assertEqual(code, 500)
         with session_scope() as s:
             self.assertEqual(recent_runs(s, slug="cover")[0].status, "pending")  # 仍可重试
+
+    def test_atomic_claim_only_once(self) -> None:
+        # #3：claim_pending 原子 CAS——只有一个并发回调能把 pending 抢成 processing
+        from cosmac.db.wf_repo import claim_pending, create_pending
+        with session_scope() as s:
+            rid = create_pending(s, slug="x", platform="webhook", room_id=ROOM,
+                                 sender="@u:host", user_input="i", token="h").id
+        with session_scope() as s:
+            self.assertTrue(claim_pending(s, rid))   # 抢到
+        with session_scope() as s:
+            self.assertFalse(claim_pending(s, rid))  # 再抢失败（已 processing）
 
     def test_callback_bad_token_403(self) -> None:
         bot = _bot(workflows=[{**WF, "async": True}])

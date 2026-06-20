@@ -15,11 +15,20 @@ from cosmac import wf
 
 
 class FakeResp:
-    def __init__(self, status_code=200, json_data=None, text="", content=b""):
+    def __init__(self, status_code=200, json_data=None, text="", content=b"", headers=None):
         self.status_code = status_code
         self._json = json_data
         self.text = text
         self.content = content
+        self.headers = headers or {}
+
+    # _fetch 走 stream=True：这两个让假响应兼容（iter_content 给内容、close 空操作）
+    def iter_content(self, _n=8192):
+        if self.content:
+            yield self.content
+
+    def close(self):
+        pass
 
     def json(self):
         if self._json is None:
@@ -71,11 +80,33 @@ class TestWfEngine(unittest.TestCase):
 
     def test_webhook_sends_bearer_when_cred_set(self) -> None:
         conn = {"slug": "x", "url": "https://h/wh", "cred": "n8n_main"}
-        with mock.patch.dict(os.environ, {"COSMAC_WF_N8N_MAIN": "tok"}), \
-             mock.patch.object(wf.requests, "request", return_value=FakeResp(200, {"result": "ok"})) as m:
+        with mock.patch.dict(os.environ, {
+            "COSMAC_WF_N8N_MAIN": "tok", "COSMAC_WF_N8N_MAIN_HOST": "h",  # #1 绑定域名
+        }), mock.patch.object(
+            wf.requests, "request", return_value=FakeResp(200, {"result": "ok"})
+        ) as m:
             wf.run_connector(conn, "hi")
         _, kwargs = m.call_args
         self.assertEqual(kwargs["headers"].get("Authorization"), "Bearer tok")
+
+    def test_webhook_refuses_unbound_credential(self) -> None:
+        # #1：凭据有 secret 但没绑定域名 → 拒绝外发密钥（防凭据被导出到任意 URL）
+        conn = {"url": "https://attacker.test/wh", "cred": "n8n_main"}
+        with mock.patch.dict(os.environ, {"COSMAC_WF_N8N_MAIN": "tok"}, clear=False):
+            os.environ.pop("COSMAC_WF_N8N_MAIN_HOST", None)
+            r = wf.run_connector(conn, "hi")
+        self.assertFalse(r["ok"])
+        self.assertIn("未绑定域名", r["error"])
+
+    def test_webhook_refuses_credential_host_mismatch(self) -> None:
+        # #1：URL 主机 != 绑定域名 → 拒绝
+        conn = {"url": "https://attacker.test/wh", "cred": "n8n_main"}
+        with mock.patch.dict(os.environ, {
+            "COSMAC_WF_N8N_MAIN": "tok", "COSMAC_WF_N8N_MAIN_HOST": "n8n.mycorp.com",
+        }):
+            r = wf.run_connector(conn, "hi")
+        self.assertFalse(r["ok"])
+        self.assertIn("只允许发往", r["error"])
 
     def test_webhook_non_2xx_is_error(self) -> None:
         conn = {"url": "https://h/wh"}
@@ -111,8 +142,8 @@ class TestWfEngine(unittest.TestCase):
     # —— Dify ——
     def test_dify_workflow_success(self) -> None:
         conn = {"platform": "dify", "url": "https://api.dify.ai", "cred": "d", "mode": "workflow"}
-        with mock.patch.dict(os.environ, {"COSMAC_WF_D": "k"}), \
-             mock.patch.object(wf.requests, "post",
+        with mock.patch.dict(os.environ, {"COSMAC_WF_D": "k", "COSMAC_WF_D_HOST": "api.dify.ai"}), \
+             mock.patch.object(wf.requests, "request",
                                return_value=FakeResp(200, {"data": {"outputs": {"text": "结果X"}}})) as m:
             r = wf.run_connector(conn, "做封面")
         self.assertTrue(r["ok"])
@@ -123,11 +154,12 @@ class TestWfEngine(unittest.TestCase):
 
     def test_dify_chat_mode(self) -> None:
         conn = {"platform": "dify", "cred": "d", "mode": "chat"}
-        with mock.patch.dict(os.environ, {"COSMAC_WF_D": "k"}), \
-             mock.patch.object(wf.requests, "post", return_value=FakeResp(200, {"answer": "答X"})) as m:
+        with mock.patch.dict(os.environ, {"COSMAC_WF_D": "k", "COSMAC_WF_D_HOST": "api.dify.ai"}), \
+             mock.patch.object(wf.requests, "request", return_value=FakeResp(200, {"answer": "答X"})) as m:
             r = wf.run_connector(conn, "问题")
         self.assertEqual(r["output"], "答X")
-        self.assertTrue(m.call_args[0][0].endswith("/v1/chat-messages"))
+        # _fetch 走 requests.request(method, url, ...)：url 是第 2 个位置参数
+        self.assertTrue(m.call_args[0][1].endswith("/v1/chat-messages"))
 
     def test_dify_no_cred(self) -> None:
         with mock.patch.dict(os.environ, {}, clear=False):
@@ -139,8 +171,8 @@ class TestWfEngine(unittest.TestCase):
     # —— Coze ——
     def test_coze_success(self) -> None:
         conn = {"platform": "coze", "cred": "c", "ref_id": "wf123"}
-        with mock.patch.dict(os.environ, {"COSMAC_WF_C": "tok"}), \
-             mock.patch.object(wf.requests, "post",
+        with mock.patch.dict(os.environ, {"COSMAC_WF_C": "tok", "COSMAC_WF_C_HOST": "api.coze.cn"}), \
+             mock.patch.object(wf.requests, "request",
                                return_value=FakeResp(200, {"code": 0, "data": "结果Y"})) as m:
             r = wf.run_connector(conn, "跑")
         self.assertTrue(r["ok"])
@@ -148,15 +180,15 @@ class TestWfEngine(unittest.TestCase):
         self.assertEqual(m.call_args[1]["json"]["workflow_id"], "wf123")
 
     def test_coze_needs_workflow_id(self) -> None:
-        with mock.patch.dict(os.environ, {"COSMAC_WF_C": "tok"}):
+        with mock.patch.dict(os.environ, {"COSMAC_WF_C": "tok", "COSMAC_WF_C_HOST": "api.coze.cn"}):
             r = wf.run_connector({"platform": "coze", "cred": "c"}, "x")
         self.assertFalse(r["ok"])
         self.assertIn("workflow_id", r["error"])
 
     def test_coze_business_error(self) -> None:
         conn = {"platform": "coze", "cred": "c", "ref_id": "w"}
-        with mock.patch.dict(os.environ, {"COSMAC_WF_C": "tok"}), \
-             mock.patch.object(wf.requests, "post",
+        with mock.patch.dict(os.environ, {"COSMAC_WF_C": "tok", "COSMAC_WF_C_HOST": "api.coze.cn"}), \
+             mock.patch.object(wf.requests, "request",
                                return_value=FakeResp(200, {"code": 700, "msg": "参数错"})):
             r = wf.run_connector(conn, "x")
         self.assertFalse(r["ok"])
@@ -167,15 +199,17 @@ class TestWfEngine(unittest.TestCase):
         conn = {"platform": "comfyui", "url": "http://comfy:8188",
                 "graph": '{"6":{"inputs":{"text":"{{input}}"}}}'}
 
-        def fake_get(url, **kw):
+        def fake_request(method, url, **kw):
+            # _fetch 统一走 requests.request(method, url, ...)：按方法/路径分派假响应
+            if method == "POST":  # 提交
+                return FakeResp(200, {"prompt_id": "p1"})
             if "/history/" in url:
                 return FakeResp(200, {"p1": {"outputs": {"9": {"images": [
                     {"filename": "out.png", "subfolder": "", "type": "output"}]}}}})
             return FakeResp(200, content=b"PNGDATA")  # /view
 
         client = FakeMxClient()
-        with mock.patch.object(wf.requests, "post", return_value=FakeResp(200, {"prompt_id": "p1"})), \
-             mock.patch.object(wf.requests, "get", side_effect=fake_get), \
+        with mock.patch.object(wf.requests, "request", side_effect=fake_request), \
              mock.patch.object(wf.time, "sleep", lambda *_a, **_k: None):
             r = wf.run_connector(conn, "画只猫", client=client, room_id="!r:h")
         self.assertTrue(r["ok"], r.get("error"))

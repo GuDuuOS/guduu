@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from cosmac.db.models import WorkflowRun
@@ -71,15 +71,40 @@ def get_run(session: Session, run_id: int) -> "WorkflowRun | None":
     return session.get(WorkflowRun, run_id)
 
 
+def claim_pending(session: Session, run_id: int) -> bool:
+    """**原子地**把一条 pending 运行抢占成 processing（防并发回调重复处理，#3）。
+
+    UPDATE ... WHERE status='pending' 由 DB 保证只有一个并发回调能成功（rowcount==1）；
+    其余拿到 rowcount==0，应视为"已被别人处理"。抢到返回 True。
+    """
+    res = session.execute(
+        update(WorkflowRun)
+        .where(WorkflowRun.id == run_id, WorkflowRun.status == "pending")
+        .values(status="processing")
+    )
+    session.flush()
+    return (res.rowcount or 0) == 1
+
+
+def revert_to_pending(session: Session, run_id: int) -> None:
+    """processing → pending（回调发消息失败时回滚，留给平台重试，#6）。"""
+    session.execute(
+        update(WorkflowRun)
+        .where(WorkflowRun.id == run_id, WorkflowRun.status == "processing")
+        .values(status="pending")
+    )
+    session.flush()
+
+
 def complete_run(
     session: Session, run_id: int, *, output: str = "", error: str = ""
 ) -> bool:
-    """把 pending 运行标记完成（成功填 output，失败填 error），并清空 token。
+    """把进行中的运行标记完成（成功填 output，失败填 error），并清空 token。
 
-    只对 status==pending 的记录生效（防回调被重放/重复结算）。完成返回 True。
+    对 pending/processing 的记录生效（防回调被重放/重复结算）。完成返回 True。
     """
     run = session.get(WorkflowRun, run_id)
-    if run is None or run.status != "pending":
+    if run is None or run.status not in ("pending", "processing"):
         return False
     run.status = "error" if error else "ok"
     run.output = (output or "")[:_MAX_STORE]

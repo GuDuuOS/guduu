@@ -760,29 +760,19 @@ class CosmacBot:
             # 异步连接器（长任务）：登记 pending + 回调 URL，提交后即返回，等平台回调
             if conn.get("async") and self.config.public_url:
                 return self._dispatch_async(conn, user_input, room_id, sender, name)
-            # #5：ComfyUI 可能轮询到 120s，会卡住 appservice 事务响应（Synapse 超时重试）。
-            # 放后台线程跑、立即返回；ComfyUI 自己把图发回房间。webhook/dify/coze 较快(≤30s)，仍同步。
-            if conn.get("platform") == "comfyui":
-                if self._run_wf_in_background(conn, user_input, room_id, sender, name):
-                    return f"⏳ 工作流「{name}」已开始（生成中），完成后结果会自动发到本群。"
-                return "⚠️ 生成任务太多、系统繁忙，请稍后再试。"
-            from cosmac.wf import run_connector
-
-            result = run_connector(
-                conn, user_input, client=self.client, room_id=room_id
-            )
-            self._record_wf_run(room_id, sender, conn, user_input, result)
-            if result.get("ok"):
-                out = result.get("output") or "（无返回内容）"
-                return f"✅ 工作流「{name}」已执行：\n{out}"
-            return f"⚠️ 工作流「{name}」执行失败：{result.get('error')}"
+            # #4/#5：**所有同步连接器**都放有界后台池跑、立即返回——webhook/dify/coze 也可能
+            # 等到 30s、ComfyUI 更到 120s，同步执行会卡住 appservice 事务响应（Synapse 超时重试）。
+            # 后台跑完把结果发回本群。池满则提示繁忙。
+            if self._run_wf_in_background(conn, user_input, room_id, sender, name):
+                return f"⏳ 工作流「{name}」已开始，完成后结果会自动发到本群。"
+            return "⚠️ 任务太多、系统繁忙，请稍后再试。"
         return f"没听懂「{body}」。发「工作流 帮助」看用法。"
 
     def _run_wf_in_background(self, conn, user_input, room_id, sender, name) -> bool:
-        """把慢同步连接器（如 ComfyUI）放**有界**后台线程池跑，避免阻塞 appservice 事务（#5）。
+        """把同步连接器放**有界**后台线程池跑，避免阻塞 appservice 事务（#4/#5）。
 
-        ComfyUI 成功时已自行把图发回房间；失败/异常补一条文字。运行记录尽力落库。
-        池子满（在跑+排队超上限）时返回 False，由调用方提示"系统繁忙"。
+        ComfyUI 成功时已自行把图发回房间（不再补文字）；其它平台返回文本→后台发回群。
+        失败/异常补一条文字。运行记录尽力落库。池满（在跑+排队超上限）返回 False。
         """
         from cosmac.wf import run_connector, submit_background
 
@@ -796,6 +786,9 @@ class CosmacBot:
                     self.client.send_text(
                         room_id, f"⚠️ 工作流「{name}」执行失败：{result.get('error')}"
                     )
+                elif conn.get("platform") != "comfyui":
+                    out = result.get("output") or "（无返回内容）"
+                    self.client.send_text(room_id, f"✅ 工作流「{name}」已完成：\n{out}")
             except Exception:
                 logger.exception("后台工作流执行出错：%s", name)
 
@@ -804,10 +797,9 @@ class CosmacBot:
     def _dispatch_async(self, conn, user_input, room_id, sender, name) -> str:
         """异步连接器：建 pending 运行(带一次性 token)+ 回调 URL，提交给平台后即返回。
 
-        平台跑完反向 POST 到 {public_url}/cosmac/wf/callback/<run_id>/<token>，
-        由 handle_wf_callback 把结果发回本群。DB 不可用则退回同步说明。
-        token 放**路径段**（不再用 ?token= 查询参数）；能配请求头的平台可改发
-        X-Cosmac-Token 头让 token 完全不进 URL。DB 只存哈希、单次用完即废。
+        平台跑完反向 POST 到 {public_url}/cosmac/wf/callback/<run_id>（URL **不含 token**）。
+        token 放进我们发给平台的 payload(callback_token)，平台回传 X-Cosmac-Token 头来鉴权，
+        token 从此不进任何 URL/日志。DB 只存哈希、单次用完即废。DB 不可用则退回同步说明。
         """
         import secrets
 
@@ -825,9 +817,13 @@ class CosmacBot:
                     token=_token_hash(token),  # #4：DB 只存 token 哈希，不存明文
                 )
                 run_id = run.id
-            # token 放路径段（非查询参数）；token_urlsafe 本身就是 URL/path 安全的
-            cb = f"{self.config.public_url.rstrip('/')}/cosmac/wf/callback/{run_id}/{token}"
-            result = run_connector(conn, user_input, callback_url=cb)
+            # #2：回调 URL **不含 token**（路径也会进 nginx 日志）。token 放进我们 POST 给
+            # 平台的 payload(callback_token)，平台据此回传 X-Cosmac-Token 头来鉴权——token
+            # 从此不进任何 URL/日志。DB 只存哈希、单次用完即废。
+            cb = f"{self.config.public_url.rstrip('/')}/cosmac/wf/callback/{run_id}"
+            result = run_connector(
+                conn, user_input, callback_url=cb, callback_token=token
+            )
             if result.get("ok"):
                 return f"⏳ 工作流「{name}」已提交（#{run_id}），完成后结果会自动发到本群。"
             # 提交就失败 → 结清这条 pending
@@ -845,31 +841,40 @@ class CosmacBot:
         返回 200(成功) / 403(token 不符) / 404(无此 pending 运行) / 500(内部错)。
         """
         try:
+            import hmac
+
             from cosmac.db import session_scope
-            from cosmac.db.wf_repo import complete_run, get_run
+            from cosmac.db.wf_repo import (
+                claim_pending, complete_run, get_run, revert_to_pending,
+            )
 
             with session_scope() as s:
                 run = get_run(s, run_id)
                 if run is None or run.status != "pending":
                     return 404
                 # #4：比对 token 的哈希（DB 存的是哈希），用 compare_digest 防时序侧信道
-                import hmac
                 if not token or not hmac.compare_digest(
                     _token_hash(token), run.token or ""
                 ):
                     return 403
                 room_id = run.room_id
                 slug = run.slug
+                # #3：原子抢占 pending→processing。并发回调里只有一个抢到，其余幂等返回 200，
+                # 绝不重复发消息/重复结算。
+                if not claim_pending(s, run_id):
+                    return 200
             output = str(body.get("output") or "")
             error = str(body.get("error") or "")
-            # #6：**先发消息、确认发出去了再结清**。否则发失败时 run 已完成、token 已清，
-            # 平台重试只会拿到 404，结果永久丢失。发失败就保持 pending、回 500 让平台重试。
+            # #6：**先发消息、确认发出去了再结清**。发失败就回滚到 pending、回 500 让平台重试，
+            # 不会丢结果。
             text = (
                 f"⚠️ 工作流「{slug}」(#{run_id}) 失败：{error}" if error
                 else f"✅ 工作流「{slug}」(#{run_id}) 完成：\n{output or '（无内容）'}"
             )
             if not self.client.send_text(room_id, text):
-                logger.warning("工作流回调发消息失败 run_id=%s，保持 pending 待重试", run_id)
+                logger.warning("工作流回调发消息失败 run_id=%s，回滚 pending 待重试", run_id)
+                with session_scope() as s:
+                    revert_to_pending(s, run_id)
                 return 500
             with session_scope() as s:
                 complete_run(s, run_id, output=output, error=error)
