@@ -7,6 +7,15 @@
 
 ---
 
+## 2026-06-19 — 模块3 P4：工作流异步回调(长任务跑完反向通知回群)
+- 长任务(ComfyUI 出视频、n8n 长流程)同步等不现实——加异步回调:提交后即返回,平台跑完反向 POST 回 bot,再把结果发回原群。
+- **链路**:`WorkflowRun` 加 `token`(一次性)+ status `pending`;`wf_repo` 加 create_pending/get_run/complete_run;config 加 `public_url`。连接器(webhook)勾 `async` → bot `_dispatch_async` 建 pending+token、拼回调 URL `{public_url}/cosmac/wf/callback/<id>?token=` 塞进 webhook payload、提交即回"⏳ 已提交"。
+- **入站端点**:`_Handler.do_POST` 处理 `/cosmac/wf/callback/<id>`(**不**用 hs_token,用每次运行的 token 校验)→ `handle_wf_callback` 验 token+pending → 把 `{output|error}` 发回原群 → complete_run 清 token(防重放,重复回调→404)。
+- 后台:连接器加「异步(长任务)」开关(webhook);WorkflowDef 加 `async`。
+- 验证:`test_wf_cmd` 加 4 例(异步提交建 pending+带回调URL / 回调发结果并结清+重放404 / 错token 403 / 未知run 404);cosmac **120 单测全过、ruff 通过**、client build 通过;preview 确认异步开关渲染、无报错。
+- 部署:发 dist + restart guduu-bot + **配 `COSMAC_PUBLIC_URL`** + **nginx 放行 `/cosmac/` → bot:9000**(见 DEPLOY.md);否则异步连接器不启用、退回提示。
+- 待续:定时触发(cron)、插件市场接真。
+
 ## 2026-06-19 — 模块3 P3：ComfyUI 适配器(图/视频:提交→轮询→回传媒体)
 - 把外部平台连接器最后一档 ComfyUI 接上(影视场景):提交工作流图 → 轮询完成 → 把产出的图回传到触发的群。
 - **matrix_client** 加 `upload_media`(POST /_matrix/media/v3/upload→mxc)+ `send_image`(发 m.image 消息)。

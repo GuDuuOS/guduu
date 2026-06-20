@@ -183,9 +183,12 @@ class WorkflowRun(Base, TimestampMixin):
     room_id: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     sender: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     input: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # status: ok / error / pending（异步:已提交、等平台回调）
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="ok")
     output: Mapped[str] = mapped_column(Text, nullable=False, default="")
     error: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # 异步回调的一次性令牌：平台带它回调，bot 据此校验+定位是哪次运行（非 pending 时为空）
+    token: Mapped[str] = mapped_column(String(64), nullable=False, default="", index=True)
 
     def __repr__(self) -> str:
         return f"<WorkflowRun {self.slug} {self.status} #{self.id}>"

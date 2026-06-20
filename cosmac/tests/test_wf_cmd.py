@@ -23,9 +23,12 @@ WF = {"slug": "cover", "name": "封面生成", "platform": "webhook",
 class FakeClient:
     def __init__(self, workflows):
         self._wf = workflows
+        self.sent = []  # 记录发出的文本(给回调测试看)
 
     def set_displayname(self, *_a, **_k): pass
-    def send_text(self, *_a, **_k): return "$e"
+    def send_text(self, room, text):
+        self.sent.append((room, text))
+        return "$e"
     def resolve_alias(self, _a): return CTRL
     def joined_member_count(self, _r): return 5
     def get_state_event(self, _room, etype, _sk="") -> Any:
@@ -34,7 +37,11 @@ class FakeClient:
 
 def _bot(workflows=None) -> CosmacBot:
     # control_room_alias 非空：run_workflow 工具据此找控制室（FakeClient.resolve_alias 忽略实参）
-    bot = CosmacBot(CosmacConfig(llm_provider="echo", control_room_alias="#cosmac-ctrl:host"))
+    # public_url 非空：异步连接器据此拼回调地址
+    bot = CosmacBot(CosmacConfig(
+        llm_provider="echo", control_room_alias="#cosmac-ctrl:host",
+        public_url="https://hs.cosmac.cc",
+    ))
     bot.client = FakeClient(workflows if workflows is not None else [WF])
     bot.toolbox = bot.toolbox.__class__(bot.client, control_room_alias="#cosmac-ctrl:host")
     return bot
@@ -85,6 +92,46 @@ class TestWfCommand(unittest.TestCase):
     def test_no_connectors(self) -> None:
         out = _bot(workflows=[])._run_wf_command(ROOM, "@u:host", "工作流 列表")
         self.assertIn("还没有", out)
+
+    def test_async_submit_creates_pending(self) -> None:
+        bot = _bot(workflows=[{**WF, "async": True}])
+        with mock.patch("cosmac.wf.run_connector", return_value={"ok": True}) as m:
+            out = bot._run_wf_command(ROOM, "@u:host", "工作流 跑 cover 蓝色")
+        self.assertIn("已提交", out)
+        # 提交时带了回调 URL
+        self.assertIn("/cosmac/wf/callback/", m.call_args[1]["callback_url"])
+        # 落了一条 pending 记录(带 token)
+        with session_scope() as s:
+            runs = recent_runs(s, slug="cover")
+            self.assertEqual(runs[0].status, "pending")
+            self.assertTrue(runs[0].token)
+
+    def test_callback_posts_result_and_completes(self) -> None:
+        bot = _bot(workflows=[{**WF, "async": True}])
+        with mock.patch("cosmac.wf.run_connector", return_value={"ok": True}):
+            bot._run_wf_command(ROOM, "@u:host", "工作流 跑 cover x")
+        with session_scope() as s:
+            run = recent_runs(s, slug="cover")[0]
+            rid, tok = run.id, run.token
+        # 正确 token → 200，结果发回原群，状态结清
+        code = bot.handle_wf_callback(rid, tok, {"output": "成片已生成: http://v"})
+        self.assertEqual(code, 200)
+        self.assertTrue(any("成片已生成" in t for _r, t in bot.client.sent))
+        with session_scope() as s:
+            self.assertEqual(recent_runs(s, slug="cover")[0].status, "ok")
+        # 重放(token 已清)→ 404，不会重复发
+        self.assertEqual(bot.handle_wf_callback(rid, tok, {"output": "再来"}), 404)
+
+    def test_callback_bad_token_403(self) -> None:
+        bot = _bot(workflows=[{**WF, "async": True}])
+        with mock.patch("cosmac.wf.run_connector", return_value={"ok": True}):
+            bot._run_wf_command(ROOM, "@u:host", "工作流 跑 cover x")
+        with session_scope() as s:
+            rid = recent_runs(s, slug="cover")[0].id
+        self.assertEqual(bot.handle_wf_callback(rid, "wrong", {"output": "x"}), 403)
+
+    def test_callback_unknown_run_404(self) -> None:
+        self.assertEqual(_bot().handle_wf_callback(999999, "t", {"output": "x"}), 404)
 
     def test_run_workflow_ai_tool(self) -> None:
         # 主 AI 工具路径：execute(run_workflow) 跑连接器并返回结果

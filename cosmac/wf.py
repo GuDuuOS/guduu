@@ -41,12 +41,14 @@ def resolve_credential(cred: str) -> str:
 
 
 def run_webhook(
-    conn: Dict[str, Any], user_input: str, *, timeout: int = DEFAULT_TIMEOUT
+    conn: Dict[str, Any], user_input: str, *,
+    callback_url: str = "", timeout: int = DEFAULT_TIMEOUT,
 ) -> Dict[str, Any]:
     """同步调用一个 webhook 型连接器，返回规范化结果。
 
     返回 dict：``{"ok": bool, "status": int|None, "output": str, "error": str}``。
     绝不抛异常——网络/超时/非 2xx 都转成 ok=False + error 文案。
+    ``callback_url`` 非空时塞进 payload：用于异步——平台跑完反向 POST 回这个地址。
     """
     url = (conn.get("url") or "").strip()
     if not url:
@@ -58,6 +60,8 @@ def run_webhook(
         headers["Authorization"] = f"Bearer {token}"
     # 统一的输入约定：平台侧从 input 取用户这句话；source 标记来源
     payload = {"input": user_input, "source": "cosmac"}
+    if callback_url:
+        payload["callback_url"] = callback_url
     try:
         resp = requests.request(
             method, url, json=payload, headers=headers, timeout=timeout
@@ -313,15 +317,16 @@ def _comfy_download(
 # 按 platform 分派到各自适配器
 def run_connector(
     conn: Dict[str, Any], user_input: str, *,
-    client: Any = None, room_id: str = "", timeout: int = DEFAULT_TIMEOUT,
+    client: Any = None, room_id: str = "", callback_url: str = "",
+    timeout: int = DEFAULT_TIMEOUT,
 ) -> Dict[str, Any]:
     """按连接器的 platform 分派执行。未知平台返回 ok=False。
 
-    client/room_id 仅 ComfyUI 用（要把生成的图发回群）；其它平台忽略。
+    client/room_id 仅 ComfyUI 用（把生成的图发回群）；callback_url 仅 webhook 异步用。
     """
     platform = (conn.get("platform") or "webhook").lower()
     if platform in ("webhook", "n8n", "make", "custom", ""):
-        return run_webhook(conn, user_input, timeout=timeout)
+        return run_webhook(conn, user_input, callback_url=callback_url, timeout=timeout)
     if platform == "dify":
         return run_dify(conn, user_input, timeout=timeout)
     if platform == "coze":

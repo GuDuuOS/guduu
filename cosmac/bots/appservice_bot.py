@@ -733,6 +733,11 @@ class CosmacBot:
             conn = next((w for w in defs if w.get("slug") == slug), None)
             if conn is None:
                 return f"没找到工作流「{slug}」。用「工作流 列表」看可用的。"
+            name = conn.get("name") or slug
+            # 异步连接器（长任务）：登记 pending + 回调 URL，提交后即返回，等平台回调
+            if conn.get("async") and self.config.public_url:
+                return self._dispatch_async(conn, user_input, room_id, sender, name)
+            # 同步：等结果回来再发
             from cosmac.wf import run_connector
 
             result = run_connector(
@@ -741,9 +746,75 @@ class CosmacBot:
             self._record_wf_run(room_id, sender, conn, user_input, result)
             if result.get("ok"):
                 out = result.get("output") or "（无返回内容）"
-                return f"✅ 工作流「{conn.get('name') or slug}」已执行：\n{out}"
-            return f"⚠️ 工作流「{conn.get('name') or slug}」执行失败：{result.get('error')}"
+                return f"✅ 工作流「{name}」已执行：\n{out}"
+            return f"⚠️ 工作流「{name}」执行失败：{result.get('error')}"
         return f"没听懂「{body}」。发「工作流 帮助」看用法。"
+
+    def _dispatch_async(self, conn, user_input, room_id, sender, name) -> str:
+        """异步连接器：建 pending 运行(带一次性 token)+ 回调 URL，提交给平台后即返回。
+
+        平台跑完反向 POST 到 {public_url}/cosmac/wf/callback/<run_id>?token=...，
+        由 handle_wf_callback 把结果发回本群。DB 不可用则退回同步说明。
+        """
+        import secrets
+
+        from cosmac.wf import run_connector
+
+        try:
+            from cosmac.db import session_scope
+            from cosmac.db.wf_repo import complete_run, create_pending
+
+            token = secrets.token_urlsafe(16)
+            with session_scope() as s:
+                run = create_pending(
+                    s, slug=conn.get("slug", ""), platform=conn.get("platform", "webhook"),
+                    room_id=room_id, sender=sender, user_input=user_input, token=token,
+                )
+                run_id = run.id
+            cb = f"{self.config.public_url.rstrip('/')}/cosmac/wf/callback/{run_id}?token={token}"
+            result = run_connector(conn, user_input, callback_url=cb)
+            if result.get("ok"):
+                return f"⏳ 工作流「{name}」已提交（#{run_id}），完成后结果会自动发到本群。"
+            # 提交就失败 → 结清这条 pending
+            with session_scope() as s:
+                complete_run(s, run_id, error=result.get("error") or "提交失败")
+            return f"⚠️ 工作流「{name}」提交失败：{result.get('error')}"
+        except Exception as e:
+            logger.warning("异步工作流提交失败：%s", e)
+            return f"⚠️ 工作流「{name}」提交失败（异步未就绪）。"
+
+    def handle_wf_callback(self, run_id: int, token: str, body: Dict[str, Any]) -> int:
+        """处理外部平台的异步回调：校验 token→把结果发回原群→结清运行。返回 HTTP 状态码。
+
+        body 约定：{"output": "..."} 成功 / {"error": "..."} 失败。
+        返回 200(成功) / 403(token 不符) / 404(无此 pending 运行) / 500(内部错)。
+        """
+        try:
+            from cosmac.db import session_scope
+            from cosmac.db.wf_repo import complete_run, get_run
+
+            with session_scope() as s:
+                run = get_run(s, run_id)
+                if run is None or run.status != "pending":
+                    return 404
+                if not token or token != run.token:
+                    return 403
+                room_id = run.room_id
+                slug = run.slug
+                output = str(body.get("output") or "")
+                error = str(body.get("error") or "")
+                complete_run(s, run_id, output=output, error=error)
+            # 提交事务后再发消息（拿到 room_id 即可）
+            if error:
+                self.client.send_text(room_id, f"⚠️ 工作流「{slug}」(#{run_id}) 失败：{error}")
+            else:
+                self.client.send_text(
+                    room_id, f"✅ 工作流「{slug}」(#{run_id}) 完成：\n{output or '（无内容）'}"
+                )
+            return 200
+        except Exception:
+            logger.exception("处理工作流回调出错 run_id=%s", run_id)
+            return 500
 
     def _record_wf_run(self, room_id, sender, conn, user_input, result) -> None:
         """尽力把运行记录落库；DB 不可用就跳过（不影响已拿到的结果）。"""
@@ -957,6 +1028,32 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(200, {})
             return
         self._send_json(404, {"errcode": "M_UNRECOGNIZED"})
+
+    def do_POST(self) -> None:  # noqa: N802
+        # 外部工作流平台的异步回调：/cosmac/wf/callback/<run_id>?token=...
+        # **不**用 hs_token 鉴权（这是外部平台调的，不是 Synapse）；用每次运行的一次性 token。
+        if "/cosmac/wf/callback/" not in self.path:
+            self._send_json(404, {"errcode": "M_UNRECOGNIZED"})
+            return
+        try:
+            tail = self.path.split("/cosmac/wf/callback/", 1)[1]
+            run_id = int(tail.split("?", 1)[0].split("/", 1)[0])
+        except (ValueError, IndexError):
+            self._send_json(400, {"error": "bad run id"})
+            return
+        token = ""
+        if "token=" in self.path:
+            token = self.path.split("token=", 1)[1].split("&", 1)[0]
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length) if length else b"{}"
+        try:
+            body = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            body = {}
+        if not isinstance(body, dict):
+            body = {"output": str(body)}
+        code = self.bot.handle_wf_callback(run_id, token, body)
+        self._send_json(code, {} if code == 200 else {"error": code})
 
 
 def run(config: CosmacConfig) -> None:

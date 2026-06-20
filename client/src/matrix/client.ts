@@ -1106,6 +1106,7 @@ export interface WorkflowDef {
   ref_id: string            // coze: workflow_id
   input_key: string         // dify/coze: 输入变量名（默认 input）
   graph: string             // comfyui: API 格式工作流 JSON，用 {{input}} 占位
+  async: boolean            // webhook: 长任务异步——提交后等平台回调，不同步等结果
 }
 
 /** 读工作流连接器列表（控制室 state event）；不存在返回 []。 */
@@ -1129,6 +1130,7 @@ export async function getWorkflows(): Promise<WorkflowDef[]> {
       ref_id: String(w?.ref_id || ''),
       input_key: String(w?.input_key || ''),
       graph: String(w?.graph || ''),
+      async: w?.async === true,
     })).filter((w: WorkflowDef) => w.slug)
   } catch {
     return []

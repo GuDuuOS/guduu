@@ -71,6 +71,12 @@ class CosmacConfig:
     # 本地开发回退 SQLite 文件 run/cosmac.db（零基建即可跑）。
     database_url: str = ""
 
+    # —— 异步工作流回调用的公网基址（模块3）——
+    # 形如 https://hs.cosmac.cc（经 nginx 把 /cosmac/ 路由到本 bot）。外部平台(n8n/ComfyUI)
+    # 长任务跑完反向 POST 到 {public_url}/cosmac/wf/callback/<run_id>?token=...。
+    # 留空 = 不启用异步回调（异步连接器会退回同步或提示未配）。
+    public_url: str = ""
+
     @staticmethod
     def from_env() -> "CosmacConfig":
         """从环境变量读取配置，未设置的项用上面的开发默认值。
@@ -103,6 +109,7 @@ class CosmacConfig:
             ),
             # 留空交给 cosmac.db 决定默认（生产 env / 本地 SQLite）
             database_url=_env("DATABASE_URL", defaults.database_url),
+            public_url=_env("PUBLIC_URL", defaults.public_url),
         )
 
     def require_tokens(self) -> None:

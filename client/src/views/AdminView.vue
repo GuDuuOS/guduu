@@ -531,6 +531,11 @@
               <span>输入提示（给用户看的，可选）</span>
               <input v-model.trim="wfForm.input_hint" placeholder="如 描述要生成的封面" />
             </label>
+            <label v-if="wfForm.platform === 'webhook'" class="adm-tool">
+              <input type="checkbox" v-model="wfForm.async" />
+              <span class="adm-tool-l">异步(长任务)</span>
+              <em class="adm-note">勾上=提交后不等结果,平台跑完反向回调再把结果发回群(需服务端配 COSMAC_PUBLIC_URL + nginx 放行 /cosmac/)。</em>
+            </label>
             <label class="adm-tool">
               <input type="checkbox" v-model="wfForm.enabled" />
               <span class="adm-tool-l">启用</span>
@@ -1224,7 +1229,7 @@ const wfEditing = ref(false)
 const wfForm = reactive<WorkflowDef & { _isEdit: boolean }>({
   slug: '', name: '', platform: 'webhook', url: '', method: 'POST',
   cred: '', input_hint: '', enabled: true,
-  mode: 'workflow', ref_id: '', input_key: '', graph: '', _isEdit: false,
+  mode: 'workflow', ref_id: '', input_key: '', graph: '', async: false, _isEdit: false,
 })
 
 const wfUrlPlaceholder = computed(() => ({
@@ -1255,7 +1260,7 @@ function startAddWorkflow() {
   Object.assign(wfForm, {
     slug: '', name: '', platform: 'webhook', url: '', method: 'POST',
     cred: '', input_hint: '', enabled: true,
-    mode: 'workflow', ref_id: '', input_key: '', graph: '', _isEdit: false,
+    mode: 'workflow', ref_id: '', input_key: '', graph: '', async: false, _isEdit: false,
   })
   wfEditing.value = true
 }
@@ -1287,7 +1292,7 @@ async function saveWorkflow() {
     url: wfForm.url.trim(), method: wfForm.method, cred: wfForm.cred.trim(),
     input_hint: wfForm.input_hint.trim(), enabled: wfForm.enabled,
     mode: wfForm.mode, ref_id: wfForm.ref_id.trim(), input_key: wfForm.input_key.trim(),
-    graph: wfForm.graph,
+    graph: wfForm.graph, async: wfForm.async,
   }
   const next = workflows.value.slice()
   const i = next.findIndex((w) => w.slug === slug)
