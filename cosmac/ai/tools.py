@@ -285,12 +285,17 @@ class Toolbox:
         except Exception:
             return []
 
-    def _sender_can_run_workflow(self, room_id: str, sender: str) -> bool:
-        """跑工作流(外部/付费、用服务端共享凭据)要求群管理员；DM(1:1)放行。读不到权限→拒绝。"""
+    def _is_platform_admin(self, sender: str) -> bool:
+        """是否平台管理员 = 控制室 power≥50。工作流(共享付费凭据)只许平台管理员触发，
+        **不分 DM/群**——否则任何人和 bot 开个两人 DM 就能跑。读不到/非控制室成员→拒。
+        """
+        if not self._control_room_alias:
+            return False
         try:
-            if self.client.joined_member_count(room_id) <= 2:
-                return True  # 私聊
-            pl = self.client.get_state_event(room_id, "m.room.power_levels", "") or {}
+            ctrl = self.client.resolve_alias(self._control_room_alias)
+            if not ctrl:
+                return False
+            pl = self.client.get_state_event(ctrl, "m.room.power_levels", "") or {}
             users = pl.get("users") or {}
             level = users.get(sender, pl.get("users_default", 0))
             return isinstance(level, int) and level >= 50
@@ -298,9 +303,9 @@ class Toolbox:
             return False
 
     def _tool_run_workflow(self, args: Dict[str, Any], ctx: ToolContext) -> str:
-        # #2 越权防护：跟聊天命令一致——群里非管理员不能借主 AI 触发工作流
-        if not self._sender_can_run_workflow(ctx.room_id, ctx.sender):
-            return "只有群管理员能让我跑工作流（它会触发外部/付费操作）。"
+        # #1/#2 越权防护：跟聊天命令一致——只许平台管理员借主 AI 触发工作流（不分 DM/群）
+        if not self._is_platform_admin(ctx.sender):
+            return "只有平台管理员能让我跑工作流（它会触发外部/付费操作、用服务端共享凭据）。"
         defs = self._workflow_defs()
         slug = (args.get("slug") or "").strip()
         if not slug:
@@ -318,10 +323,10 @@ class Toolbox:
         from cosmac.wf import run_connector
 
         user_input = args.get("input") or ""
-        # #5：ComfyUI 可能等到 120s，会卡住 Agent 和 appservice 事务。放后台跑、立即给 Agent
-        # 一个"已开始"结果让它继续；ComfyUI 自己把图发回房间。
+        # #5：ComfyUI 可能等到 120s，会卡住 Agent 和 appservice 事务。放**有界**后台池跑、
+        # 立即给 Agent 一个"已开始"结果让它继续；ComfyUI 自己把图发回房间。池满则拒。
         if conn.get("platform") == "comfyui":
-            import threading
+            from cosmac.wf import submit_background
 
             def _work() -> None:
                 try:
@@ -338,11 +343,12 @@ class Toolbox:
                 except Exception:
                     pass
 
-            threading.Thread(target=_work, daemon=True).start()
-            return (
-                f"工作流「{conn.get('name') or slug}」已开始（生成中），"
-                "完成后我会把结果发到群里。"
-            )
+            if submit_background(_work):
+                return (
+                    f"工作流「{conn.get('name') or slug}」已开始（生成中），"
+                    "完成后我会把结果发到群里。"
+                )
+            return "生成任务太多、系统繁忙，请稍后再让我跑。"
         result = run_connector(
             conn, user_input, client=self.client, room_id=ctx.room_id
         )

@@ -741,15 +741,11 @@ class CosmacBot:
                 lines.append(f"  · {w.get('slug')}（{w.get('name') or w.get('slug')}）{hint}")
             return "\n".join(lines)
         if body.startswith(("跑", "run", "执行")):
-            # #2 越权防护：跑工作流会触发付费生成/外部写操作、且用的是服务端共享凭据，
-            # 群里要求发送者是房间管理员（power≥50）；普通成员只能「工作流 列表」查看。
-            # 私聊(DM)是 1:1、用户对自己负责，放行。
-            try:
-                is_dm = self.client.joined_member_count(room_id) <= 2
-            except Exception:
-                is_dm = False
-            if not is_dm and not self._is_room_admin(room_id, sender):
-                return "只有群管理员能跑工作流（它会触发外部/付费操作）。你可以用「工作流 列表」查看。"
+            # #1/#2 越权防护：跑工作流触发付费生成/外部写、用的是**服务端共享凭据**，
+            # 只许**平台管理员**（控制室 power≥50）触发——不分 DM/群（否则任何人和 bot 开个
+            # 两人 DM 就能跑，绕过群管理员检查）。普通成员只能「工作流 列表」查看。
+            if not self._is_platform_admin(sender):
+                return "只有平台管理员能跑工作流（它会触发外部/付费操作、用服务端共享凭据）。你可以用「工作流 列表」查看。"
             rest = body.split(maxsplit=1)
             arg = rest[1].strip() if len(rest) > 1 else ""
             parts = arg.split(maxsplit=1)
@@ -767,8 +763,9 @@ class CosmacBot:
             # #5：ComfyUI 可能轮询到 120s，会卡住 appservice 事务响应（Synapse 超时重试）。
             # 放后台线程跑、立即返回；ComfyUI 自己把图发回房间。webhook/dify/coze 较快(≤30s)，仍同步。
             if conn.get("platform") == "comfyui":
-                self._run_wf_in_background(conn, user_input, room_id, sender, name)
-                return f"⏳ 工作流「{name}」已开始（生成中），完成后结果会自动发到本群。"
+                if self._run_wf_in_background(conn, user_input, room_id, sender, name):
+                    return f"⏳ 工作流「{name}」已开始（生成中），完成后结果会自动发到本群。"
+                return "⚠️ 生成任务太多、系统繁忙，请稍后再试。"
             from cosmac.wf import run_connector
 
             result = run_connector(
@@ -781,18 +778,16 @@ class CosmacBot:
             return f"⚠️ 工作流「{name}」执行失败：{result.get('error')}"
         return f"没听懂「{body}」。发「工作流 帮助」看用法。"
 
-    def _run_wf_in_background(self, conn, user_input, room_id, sender, name) -> None:
-        """把慢同步连接器（如 ComfyUI）放后台线程跑，避免阻塞 appservice 事务响应（#5）。
+    def _run_wf_in_background(self, conn, user_input, room_id, sender, name) -> bool:
+        """把慢同步连接器（如 ComfyUI）放**有界**后台线程池跑，避免阻塞 appservice 事务（#5）。
 
-        bot 是 ThreadingHTTPServer，起线程安全。ComfyUI 成功时已自行把图发回房间；
-        失败/异常补一条文字。运行记录尽力落库。
+        ComfyUI 成功时已自行把图发回房间；失败/异常补一条文字。运行记录尽力落库。
+        池子满（在跑+排队超上限）时返回 False，由调用方提示"系统繁忙"。
         """
-        import threading
+        from cosmac.wf import run_connector, submit_background
 
         def work() -> None:
             try:
-                from cosmac.wf import run_connector
-
                 result = run_connector(
                     conn, user_input, client=self.client, room_id=room_id
                 )
@@ -804,13 +799,15 @@ class CosmacBot:
             except Exception:
                 logger.exception("后台工作流执行出错：%s", name)
 
-        threading.Thread(target=work, daemon=True, name=f"wf-{name}").start()
+        return submit_background(work)
 
     def _dispatch_async(self, conn, user_input, room_id, sender, name) -> str:
         """异步连接器：建 pending 运行(带一次性 token)+ 回调 URL，提交给平台后即返回。
 
-        平台跑完反向 POST 到 {public_url}/cosmac/wf/callback/<run_id>?token=...，
+        平台跑完反向 POST 到 {public_url}/cosmac/wf/callback/<run_id>/<token>，
         由 handle_wf_callback 把结果发回本群。DB 不可用则退回同步说明。
+        token 放**路径段**（不再用 ?token= 查询参数）；能配请求头的平台可改发
+        X-Cosmac-Token 头让 token 完全不进 URL。DB 只存哈希、单次用完即废。
         """
         import secrets
 
@@ -828,7 +825,8 @@ class CosmacBot:
                     token=_token_hash(token),  # #4：DB 只存 token 哈希，不存明文
                 )
                 run_id = run.id
-            cb = f"{self.config.public_url.rstrip('/')}/cosmac/wf/callback/{run_id}?token={token}"
+            # token 放路径段（非查询参数）；token_urlsafe 本身就是 URL/path 安全的
+            cb = f"{self.config.public_url.rstrip('/')}/cosmac/wf/callback/{run_id}/{token}"
             result = run_connector(conn, user_input, callback_url=cb)
             if result.get("ok"):
                 return f"⏳ 工作流「{name}」已提交（#{run_id}），完成后结果会自动发到本群。"
@@ -862,16 +860,19 @@ class CosmacBot:
                     return 403
                 room_id = run.room_id
                 slug = run.slug
-                output = str(body.get("output") or "")
-                error = str(body.get("error") or "")
+            output = str(body.get("output") or "")
+            error = str(body.get("error") or "")
+            # #6：**先发消息、确认发出去了再结清**。否则发失败时 run 已完成、token 已清，
+            # 平台重试只会拿到 404，结果永久丢失。发失败就保持 pending、回 500 让平台重试。
+            text = (
+                f"⚠️ 工作流「{slug}」(#{run_id}) 失败：{error}" if error
+                else f"✅ 工作流「{slug}」(#{run_id}) 完成：\n{output or '（无内容）'}"
+            )
+            if not self.client.send_text(room_id, text):
+                logger.warning("工作流回调发消息失败 run_id=%s，保持 pending 待重试", run_id)
+                return 500
+            with session_scope() as s:
                 complete_run(s, run_id, output=output, error=error)
-            # 提交事务后再发消息（拿到 room_id 即可）
-            if error:
-                self.client.send_text(room_id, f"⚠️ 工作流「{slug}」(#{run_id}) 失败：{error}")
-            else:
-                self.client.send_text(
-                    room_id, f"✅ 工作流「{slug}」(#{run_id}) 完成：\n{output or '（无内容）'}"
-                )
             return 200
         except Exception:
             logger.exception("处理工作流回调出错 run_id=%s", run_id)
@@ -978,6 +979,22 @@ class CosmacBot:
             users = pl.get("users") or {}
             default = pl.get("users_default", 0)
             level = users.get(user_id, default)
+            return isinstance(level, int) and level >= 50
+        except Exception:
+            return False
+
+    def _is_platform_admin(self, user_id: str) -> bool:
+        """是否**平台管理员** = 在控制室里 power≥50。用于工作流这类"用服务端共享凭据、
+        触发付费/外部操作"的授权——不分 DM/群，堵住"和 bot 开个 DM 就能跑"的绕过。
+        非控制室成员/读不到一律视为否（保守拒绝）。
+        """
+        try:
+            ctrl = self.client.resolve_alias(self.config.control_room_alias)
+            if not ctrl:
+                return False
+            pl = self.client.get_state_event(ctrl, "m.room.power_levels", "") or {}
+            users = pl.get("users") or {}
+            level = users.get(user_id, pl.get("users_default", 0))
             return isinstance(level, int) and level >= 50
         except Exception:
             return False
@@ -1096,21 +1113,30 @@ class _Handler(BaseHTTPRequestHandler):
         if "/cosmac/wf/callback/" not in self.path:
             self._send_json(404, {"errcode": "M_UNRECOGNIZED"})
             return
+        # 路径形如 /cosmac/wf/callback/<run_id>[/<token>][?token=...]
         try:
-            tail = self.path.split("/cosmac/wf/callback/", 1)[1]
-            run_id = int(tail.split("?", 1)[0].split("/", 1)[0])
+            tail = self.path.split("/cosmac/wf/callback/", 1)[1].split("?", 1)[0]
+            parts = tail.split("/")
+            run_id = int(parts[0])
         except (ValueError, IndexError):
             self._send_json(400, {"error": "bad run id"})
             return
-        # #4：token 优先从请求头取（不进 URL/日志）；兼容老路径里的 ?token=（平台改不了头时）
+        # #4：token 优先请求头（不进 URL/日志）；其次 URL 路径段；最后兼容老 ?token=。
         token = (self.headers.get("X-Cosmac-Token") or "").strip()
+        if not token and len(parts) > 1 and parts[1]:
+            token = parts[1]
         if not token and "token=" in self.path:
             token = self.path.split("token=", 1)[1].split("&", 1)[0]
         # #3 防 DoS：验证前就按 Content-Length 限制请求体大小，绝不把超大请求整个读进内存。
-        # 工作流结果文本本就不大（下游还会截断），512KB 足够；超了直接 413、不读 body。
-        length = int(self.headers.get("Content-Length", 0) or 0)
-        if length > _MAX_CALLBACK_BODY:
-            self._send_json(413, {"error": "body too large"})
+        # **负数/非法值要拒**：Content-Length:-1 不会 >上限、read(-1) 会读到 EOF（无界）；
+        # 非整数会让 int() 抛 ValueError。故要求 0 ≤ length ≤ 上限，否则直接拒、不读 body。
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except (TypeError, ValueError):
+            self._send_json(400, {"error": "bad content-length"})
+            return
+        if length < 0 or length > _MAX_CALLBACK_BODY:
+            self._send_json(413, {"error": "bad body length"})
             return
         raw = self.rfile.read(length) if length else b"{}"
         try:

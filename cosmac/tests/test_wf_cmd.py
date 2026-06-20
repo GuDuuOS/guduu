@@ -67,15 +67,15 @@ class TestWfCommand(unittest.TestCase):
         self.assertIn("cover", out)
         self.assertIn("封面生成", out)
 
-    def test_run_requires_admin_in_group(self) -> None:
-        # #2 越权：群里非管理员(power<50)跑工作流被挡；列表仍可看
+    def test_run_requires_admin(self) -> None:
+        # #1/#2 越权：非平台管理员(控制室 power<50)跑工作流被挡（DM 也不放行）；列表仍可看
         bot = _bot()
         bot.client.get_state_event = lambda _r, etype, _sk="": (
             {"workflows": [WF]} if etype == WORKFLOWS_EVENT_TYPE
             else {"users": {"@u:host": 0}, "users_default": 0}  # 非管理员
         )
         out = bot._run_wf_command(ROOM, "@u:host", "工作流 跑 cover 测试")
-        self.assertIn("只有群管理员", out)
+        self.assertIn("只有平台管理员", out)
         # 查看不受限
         self.assertIn("cover", bot._run_wf_command(ROOM, "@u:host", "工作流 列表"))
 
@@ -127,9 +127,10 @@ class TestWfCommand(unittest.TestCase):
         bot = _bot(workflows=[{**WF, "async": True}])
         with mock.patch("cosmac.wf.run_connector", return_value={"ok": True}) as m:
             bot._run_wf_command(ROOM, "@u:host", "工作流 跑 cover x")
-        # #4：DB 只存 token 哈希；明文 token 在交给平台的回调 URL 里
+        # #4：DB 只存 token 哈希；明文 token 现在是回调 URL 的**最后一个路径段**
         cb = m.call_args[1]["callback_url"]
-        tok = cb.split("token=", 1)[1].split("&", 1)[0]
+        self.assertNotIn("token=", cb)  # 不再用查询参数
+        tok = cb.rstrip("/").rsplit("/", 1)[1]
         with session_scope() as s:
             run = recent_runs(s, slug="cover")[0]
             rid = run.id
@@ -142,6 +143,20 @@ class TestWfCommand(unittest.TestCase):
             self.assertEqual(recent_runs(s, slug="cover")[0].status, "ok")
         # 重放(token 已清)→ 404，不会重复发
         self.assertEqual(bot.handle_wf_callback(rid, tok, {"output": "再来"}), 404)
+
+    def test_callback_send_fail_keeps_pending(self) -> None:
+        # #6：回调发消息失败时**不能结清** run（否则 token 清空、平台重试得 404、结果永久丢）
+        bot = _bot(workflows=[{**WF, "async": True}])
+        with mock.patch("cosmac.wf.run_connector", return_value={"ok": True}) as m:
+            bot._run_wf_command(ROOM, "@u:host", "工作流 跑 cover x")
+        tok = m.call_args[1]["callback_url"].rstrip("/").rsplit("/", 1)[1]
+        with session_scope() as s:
+            rid = recent_runs(s, slug="cover")[0].id
+        bot.client.send_text = lambda *_a, **_k: None  # 模拟发送失败
+        code = bot.handle_wf_callback(rid, tok, {"output": "成片"})
+        self.assertEqual(code, 500)
+        with session_scope() as s:
+            self.assertEqual(recent_runs(s, slug="cover")[0].status, "pending")  # 仍可重试
 
     def test_callback_bad_token_403(self) -> None:
         bot = _bot(workflows=[{**WF, "async": True}])

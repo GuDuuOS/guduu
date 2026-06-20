@@ -7,6 +7,16 @@
 
 ---
 
+## 2026-06-19 — 工作流安全（补漏）：复查抓出的 6 个绕过/残留全修
+- 上一轮修复有真实漏洞，逐个补：
+- **#1【P1 DM 绕过越权】**：上次"群里要管理员、DM 放行"——任何人和 bot 开个两人 DM 就能跑全部共享凭据/付费工作流。改成**只许平台管理员**(控制室 power≥50)触发，**不分 DM/群**（新增 `_is_platform_admin`，聊天命令 + AI 工具两路都换）。
+- **#2【P1 ComfyUI 重定向绕 SSRF】**：上次只给 webhook/dify/coze 加了 `allow_redirects=False`，ComfyUI 的提交/轮询/下载三处漏了——补齐。
+- **#3【P1 回调 DoS 负数绕过】**：`Content-Length:-1` 不命中上限、`read(-1)` 读到 EOF（无界），非整数还抛 ValueError。改成 `0≤length≤512KB`、解析异常一律拒。
+- **#4【P2 token 仍进 URL】**：生成的回调地址从 `?token=` 查询参数改成**路径段** `/callback/<id>/<token>`（能配头的平台改发 `X-Cosmac-Token`、token 完全不进 URL）；DB 仍只存哈希。
+- **#5【P2 后台无并发限制】**：每次 ComfyUI 都新建 daemon 线程→可无限堆。改用 `wf.submit_background` 的**有界线程池**(4 并发/12 在途上限)，满了拒绝并提示"系统繁忙"。
+- **#6【P2 回调先结清后发消息】**：发消息失败时 run 已完成、token 已清，平台重试得 404、结果永久丢。改成**先发、确认发出去了再结清**；发失败回 500、保持 pending 等重试。
+- 验证：`test_wf_cmd` 加越权(不分 DM)/token 路径/回调发失败保持 pending 用例；cosmac **130 单测全过**、ruff 通过。纯后端 → `restart guduu-bot`。
+
 ## 2026-06-19 — 工作流安全（下）：越权/DoS/回调token/同步阻塞
 - **#2【P1 越权】普通群成员能跑所有工作流**（触发付费生成/外部写、用服务端共享凭据）：聊天命令 `工作流 跑` 与 AI 工具 `run_workflow` 都加权限闸——群里要求发送者是房间管理员(power≥50)，普通成员只能「列表」；DM(1:1) 放行。
 - **#3【P1 DoS】公开回调端点无认证读全 body**：验证 run_id/token 前就按 `Content-Length` 把请求体读进内存。改成先按上限(512KB)挡，超了直接 413、不读 body。

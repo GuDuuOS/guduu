@@ -16,13 +16,49 @@ import logging
 import os
 import re
 import socket
+import threading
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import requests
 
 logger = logging.getLogger("cosmac.wf")
+
+# —— 有界后台执行（#5）：慢连接器(ComfyUI)放后台跑，但**不能无限建线程/堆付费任务** ——
+_BG_MAX_WORKERS = 4      # 并发上限
+_BG_MAX_INFLIGHT = 12    # 在跑 + 排队 的总上限；超了拒绝（背压）
+_bg_executor = ThreadPoolExecutor(
+    max_workers=_BG_MAX_WORKERS, thread_name_prefix="wf-bg"
+)
+_bg_lock = threading.Lock()
+_bg_inflight = 0
+
+
+def submit_background(fn: Callable[[], None]) -> bool:
+    """把无参任务提交到**有界**后台线程池。在跑+排队达到上限时返回 False（拒绝），否则 True。
+
+    防止"每次 ComfyUI 调用都新建 daemon 线程、连续请求无限堆线程和付费任务"。
+    """
+    global _bg_inflight
+    with _bg_lock:
+        if _bg_inflight >= _BG_MAX_INFLIGHT:
+            return False
+        _bg_inflight += 1
+
+    def _wrap() -> None:
+        global _bg_inflight
+        try:
+            fn()
+        except Exception:
+            logger.exception("后台工作流任务异常")
+        finally:
+            with _bg_lock:
+                _bg_inflight -= 1
+
+    _bg_executor.submit(_wrap)
+    return True
 
 
 def check_outbound_url(url: str) -> str:
@@ -303,7 +339,7 @@ def run_comfyui(
     try:
         resp = requests.post(
             f"{base}/prompt", json={"prompt": graph, "client_id": "cosmac"},
-            headers=headers, timeout=30,
+            headers=headers, timeout=30, allow_redirects=False,  # 防重定向绕过 SSRF
         )
     except requests.RequestException as exc:
         return _err(f"提交失败：{exc}")
@@ -341,7 +377,8 @@ def _comfy_poll(
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
-            r = requests.get(f"{base}/history/{pid}", headers=headers, timeout=15)
+            r = requests.get(f"{base}/history/{pid}", headers=headers, timeout=15,
+                             allow_redirects=False)  # 防重定向绕过 SSRF
             if r.status_code == 200:
                 hist = r.json() or {}
                 entry = hist.get(pid)
@@ -371,7 +408,8 @@ def _comfy_download(
     ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else "png"
     mime = _MIME.get(ext, "application/octet-stream")
     try:
-        r = requests.get(f"{base}/view", params=params, headers=headers, timeout=60)
+        r = requests.get(f"{base}/view", params=params, headers=headers, timeout=60,
+                         allow_redirects=False)  # 防重定向绕过 SSRF
         if r.status_code == 200 and r.content:
             return r.content, mime, fname
     except requests.RequestException:
