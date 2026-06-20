@@ -99,20 +99,31 @@ class TestWfEngine(unittest.TestCase):
         self.assertIn("未绑定域名", r["error"])
 
     def test_webhook_refuses_http_for_credential(self) -> None:
-        # #3：带密钥不能走明文 HTTP（会被网络窃取）；开内网开关才放行
-        conn = {"url": "http://n8n.mycorp.com/wh", "cred": "n8n_main"}
-        env = {"COSMAC_WF_N8N_MAIN": "tok", "COSMAC_WF_N8N_MAIN_HOST": "n8n.mycorp.com"}
+        # #3：带密钥不能走明文 HTTP（会被网络窃取）；公网 HTTP 即使开内网开关也拒。
+        conn = {"url": "http://127.0.0.1:5678/wh", "cred": "n8n_main"}  # 环回，确定内网
+        env = {"COSMAC_WF_N8N_MAIN": "tok", "COSMAC_WF_N8N_MAIN_HOST": "127.0.0.1"}
         with mock.patch.dict(os.environ, env, clear=False):
             os.environ.pop("COSMAC_WF_ALLOW_INTERNAL", None)
             r = wf.run_connector(conn, "hi")
         self.assertFalse(r["ok"])
         self.assertIn("HTTP", r["error"])
-        # 开了内网开关 → 放行
+        # 开了内网开关 + 目标确为环回/私网 → 放行
         with mock.patch.dict(os.environ, {**env, "COSMAC_WF_ALLOW_INTERNAL": "1"}), \
              mock.patch.object(wf.requests, "request",
                                return_value=FakeResp(200, {"output": "ok"})):
             r2 = wf.run_connector(conn, "hi")
         self.assertTrue(r2["ok"])
+
+    def test_credential_http_public_refused_even_with_switch(self) -> None:
+        # #2：开了内网开关，公网明文 HTTP 仍拒（防"开关一开就给公网发明文密钥"）
+        conn = {"url": "http://1.1.1.1/wh", "cred": "n8n_main"}  # 公网 IP
+        with mock.patch.dict(os.environ, {
+            "COSMAC_WF_N8N_MAIN": "tok", "COSMAC_WF_N8N_MAIN_HOST": "1.1.1.1",
+            "COSMAC_WF_ALLOW_INTERNAL": "1",
+        }):
+            r = wf.run_connector(conn, "hi")
+        self.assertFalse(r["ok"])
+        self.assertIn("HTTP", r["error"])
 
     def test_webhook_refuses_credential_host_mismatch(self) -> None:
         # #1：URL 主机 != 绑定域名 → 拒绝

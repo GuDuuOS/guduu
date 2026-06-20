@@ -7,6 +7,15 @@
 
 ---
 
+## 2026-06-19 — 工作流安全（封口）：AI工具异步协议 / 内网开关收紧 / 提交全后台 / 回调幂等txn / 消息截断
+- 又 5 个边界，修完：
+- **#1【P1 AI 工具不支持异步协议】**：工具把所有连接器当普通后台任务，async=true 也不生成 callback——自然语言触发的异步工作流收不到回调。Toolbox 加 `dispatch_async` 钩子（bot 注入 `_dispatch_async`），async 连接器经工具也走"登记 pending+回调地址"。
+- **#2【P1 内网开关放公网明文】**：`COSMAC_WF_ALLOW_INTERNAL=1` 后只校验域名匹配，公网 HTTP 也能带 Bearer。改成：开关放行 HTTP 还要**解析 IP 确属私网/环回**(`_host_is_internal`)，公网即使开开关也强制 HTTPS。
+- **#3【P2 异步提交仍阻塞事务】**：`_dispatch_async` 同步调 webhook 提交(可能 30s)。改成登记 pending 后**提交也进后台池**、立即返回；提交失败后台结清 + 通知群。
+- **#4【P2 崩溃恢复重复发】**：Matrix 消息发出后、complete_run 前崩溃，5 分钟后重发——`send_text` 每次新 txn id、Matrix 去不了重。改成回调消息用**固定 txn id `cosmac-wf-<run_id>`**，Synapse 据此去重。
+- **#5【P2 大结果无限重试】**：回调体 512KB 但消息正文没截断，超 Matrix 事件大小→send 持续失败→无限回 pending。消息正文按 4000 字截断（完整结果在 DB run 记录）。
+- 验证：加 AI工具异步分派 / 公网HTTP拒绝 / 环回放行 等用例；cosmac **137 单测全过**、ruff、build 通过。纯后端 → `restart guduu-bot`。
+
 ## 2026-06-19 — 工作流安全（再收口）：AI工具全后台 / processing不卡死 / 凭据强制HTTPS / 整体deadline / 轮询异常接住
 - 又一轮复查的 5 个异常路径，全修 + 补测试：
 - **#1【P1 AI 工具未全后台】**：`run_workflow` 工具之前只后台化 ComfyUI，webhook/dify/coze 仍同步阻塞 Agent+事务。改成**所有连接器都进有界后台池**、立即返回"已开始"、跑完发回群。

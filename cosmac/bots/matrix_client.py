@@ -55,12 +55,16 @@ class MatrixClient:
         else:
             logger.warning("加入房间 %s 失败: %s %s", room_id, resp.status_code, resp.text)
 
-    def send_text(self, room_id: str, text: str) -> Optional[str]:
+    def send_text(
+        self, room_id: str, text: str, txn_id: Optional[str] = None
+    ) -> Optional[str]:
         """以主 AI 身份往房间发一条纯文本消息。
 
+        ``txn_id``：传**固定**事务 id 时，Synapse 据此去重——同一逻辑消息重发(如崩溃恢复后
+        重试回调)不会在群里出现两条。不传则每次生成新 id（普通消息）。
         返回：成功时返回服务器分配的 event_id，失败返回 None。
         """
-        txn = self._txn_id()
+        txn = txn_id or self._txn_id()
         url = self._url(
             f"/_matrix/client/v3/rooms/{quote(room_id)}/send/m.room.message/{txn}"
         )

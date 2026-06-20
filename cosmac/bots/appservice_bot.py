@@ -44,6 +44,8 @@ logger = logging.getLogger("cosmac.appservice_bot")
 # 公开回调端点（外部工作流平台调）允许的最大请求体（防无认证内存 DoS）。
 # 工作流结果文本不大、下游还会截断，512KB 绰绰有余。
 _MAX_CALLBACK_BODY = 512 * 1024
+# 回调结果发进群的消息正文上限（防超 Matrix 事件大小→send 持续失败→无限重试）。
+_MAX_WF_MSG = 4000
 
 
 def _token_hash(token: str) -> str:
@@ -71,6 +73,10 @@ class CosmacBot:
         self.toolbox = Toolbox(
             self.client, control_room_alias=config.control_room_alias
         )
+        # 让 run_workflow 工具能走异步连接器的回调协议（#1）：注入 bot 的 _dispatch_async。
+        # 没配 public_url 时不注入——_dispatch_async 没有回调地址也没意义。
+        if config.public_url:
+            self.toolbox.dispatch_async = self._dispatch_async
         self.agent = Agent(
             llm=self.llm,
             toolbox=self.toolbox,
@@ -803,7 +809,7 @@ class CosmacBot:
         """
         import secrets
 
-        from cosmac.wf import run_connector
+        from cosmac.wf import run_connector, submit_background
 
         try:
             from cosmac.db import session_scope
@@ -821,15 +827,29 @@ class CosmacBot:
             # 平台的 payload(callback_token)，平台据此回传 X-Cosmac-Token 头来鉴权——token
             # 从此不进任何 URL/日志。DB 只存哈希、单次用完即废。
             cb = f"{self.config.public_url.rstrip('/')}/cosmac/wf/callback/{run_id}"
-            result = run_connector(
-                conn, user_input, callback_url=cb, callback_token=token
-            )
-            if result.get("ok"):
+
+            # #3：**提交也放后台**——webhook 提交本身可能等到 30s，同步会卡住 appservice 事务。
+            # 提交成功就等平台回调；提交失败则结清 pending + 通知群。
+            def _submit() -> None:
+                try:
+                    r = run_connector(
+                        conn, user_input, callback_url=cb, callback_token=token
+                    )
+                    if not r.get("ok"):
+                        with session_scope() as s2:
+                            complete_run(s2, run_id, error=r.get("error") or "提交失败")
+                        self.client.send_text(
+                            room_id, f"⚠️ 工作流「{name}」提交失败：{r.get('error')}"
+                        )
+                except Exception:
+                    logger.exception("异步工作流提交出错：%s", name)
+
+            if submit_background(_submit):
                 return f"⏳ 工作流「{name}」已提交（#{run_id}），完成后结果会自动发到本群。"
-            # 提交就失败 → 结清这条 pending
+            # 池满 → 结清这条 pending，提示繁忙
             with session_scope() as s:
-                complete_run(s, run_id, error=result.get("error") or "提交失败")
-            return f"⚠️ 工作流「{name}」提交失败：{result.get('error')}"
+                complete_run(s, run_id, error="系统繁忙")
+            return "⚠️ 任务太多、系统繁忙，请稍后再试。"
         except Exception as e:
             logger.warning("异步工作流提交失败：%s", e)
             return f"⚠️ 工作流「{name}」提交失败（异步未就绪）。"
@@ -866,16 +886,19 @@ class CosmacBot:
                 # 抢不到 = 别的回调正在处理 → 幂等返回 200，绝不重复发/重复结算。
                 if not claim_pending(s, run_id):
                     return 200
-            output = str(body.get("output") or "")
-            error = str(body.get("error") or "")
+            # #5：消息正文按字节截断——回调体可达 512KB，整条塞进 Matrix 事件会超事件大小上限
+            # 导致 send 持续失败、run 反复回到 pending 无限重试。完整结果在 DB 的 run 记录里。
+            output = str(body.get("output") or "")[:_MAX_WF_MSG]
+            error = str(body.get("error") or "")[:_MAX_WF_MSG]
             # #6：**先发消息、确认发出去了再结清**。发失败（返回假值或抛异常）就回滚到 pending、
             # 回 500 让平台重试，不会丢结果。
+            # #4：用**固定 txn id**(随 run_id)，崩溃恢复后重发同一条会被 Synapse 去重，群里不重复。
             text = (
                 f"⚠️ 工作流「{slug}」(#{run_id}) 失败：{error}" if error
                 else f"✅ 工作流「{slug}」(#{run_id}) 完成：\n{output or '（无内容）'}"
             )
             try:
-                sent = self.client.send_text(room_id, text)
+                sent = self.client.send_text(room_id, text, txn_id=f"cosmac-wf-{run_id}")
             except Exception:
                 logger.exception("工作流回调发消息抛异常 run_id=%s", run_id)
                 sent = None

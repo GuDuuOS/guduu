@@ -26,7 +26,7 @@ class FakeClient:
         self.sent = []  # 记录发出的文本(给回调测试看)
 
     def set_displayname(self, *_a, **_k): pass
-    def send_text(self, room, text):
+    def send_text(self, room, text, txn_id=None):
         self.sent.append((room, text))
         return "$e"
     def resolve_alias(self, _a): return CTRL
@@ -206,6 +206,20 @@ class TestWfCommand(unittest.TestCase):
 
     def test_callback_unknown_run_404(self) -> None:
         self.assertEqual(_bot().handle_wf_callback(999999, "t", {"output": "x"}), 404)
+
+    def test_ai_tool_async_delegates_to_dispatch(self) -> None:
+        # #1：async 连接器经 AI 工具走回调协议(dispatch_async)，不是当普通后台任务跑
+        from cosmac.ai.base import ToolCall
+        from cosmac.ai.tools import ToolContext
+        bot = _bot(workflows=[{**WF, "async": True}])
+        called = []
+        bot.toolbox.dispatch_async = lambda *a: (called.append(a), "⏳ 已提交")[1]
+        out = bot.toolbox.execute(
+            ToolCall(id="t", name="run_workflow",
+                     arguments={"slug": "cover", "input": "x"}),
+            ToolContext(ROOM, "@u:host"))
+        self.assertIn("已提交", out)
+        self.assertEqual(len(called), 1)  # 走了异步分派，没当普通后台任务
 
     def test_run_workflow_ai_tool(self) -> None:
         # 主 AI 工具路径：现在**所有连接器都后台跑**（#1），工具立即返回"已开始"，

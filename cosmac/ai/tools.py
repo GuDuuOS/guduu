@@ -52,6 +52,9 @@ class Toolbox:
         self.client = client
         # 控制室别名：run_workflow 工具据此读「工作流连接器」定义（state event）。
         self._control_room_alias = control_room_alias
+        # 异步连接器(async=true)的提交回调：由 bot 注入 self._dispatch_async；
+        # 签名 (conn, user_input, room_id, sender, name) -> 提交结果文本。None 则回退后台同步跑。
+        self.dispatch_async: Optional[Callable[..., str]] = None
         # 工具名 → (说明书, 执行函数)。执行函数签名: (arguments, ctx) -> 结果文本
         self._tools: Dict[str, Dict[str, Any]] = {}
         # 启用集合：None = 全部启用（默认）；否则只启用集合内的工具。
@@ -326,7 +329,12 @@ class Toolbox:
         name = conn.get("name") or slug
         platform = conn.get("platform", "webhook")
 
-        # #1/#4/#5：**所有连接器**都放有界后台池跑、立即给 Agent 一个"已开始"让它继续——
+        # #1：异步连接器(async=true 且 bot 注入了 dispatch_async) → 走回调协议（登记 pending +
+        # 回调地址），平台跑完反向通知；否则自然语言触发的异步工作流永远收不到最终回调。
+        if conn.get("async") and self.dispatch_async:
+            return self.dispatch_async(conn, user_input, ctx.room_id, ctx.sender, name)
+
+        # #1/#4/#5：**其余所有连接器**都放有界后台池跑、立即给 Agent 一个"已开始"让它继续——
         # webhook/dify/coze(≤30s) 也会卡住 Agent + appservice 事务，ComfyUI 更甚(120s)。
         # 跑完把结果发回群（ComfyUI 自己发图，其它平台发文本）。池满则拒。
         def _work() -> None:

@@ -158,17 +158,39 @@ def credential_for(cred: str, url: str) -> Tuple[str, str]:
     host = (parsed.hostname or "").lower()
     if host != bound:
         return "", f"凭据「{cred}」只允许发往 {bound}，当前目标主机是 {host or '空'}，已拒绝"
-    # #3：带密钥**必须走 HTTPS**，否则 Bearer 会在网络里被明文窃取。内网 HTTP 须显式开关。
+    # #3：带密钥**必须走 HTTPS**，否则 Bearer 会在网络里被明文窃取。
+    # 内网 HTTP 才放行，且要求：① 显式开关 COSMAC_WF_ALLOW_INTERNAL=1，
+    # **且** ② 主机解析到的 IP 确实属私网/环回——否则"开了内网开关"也不能给公网发明文密钥。
     if parsed.scheme != "https":
         allow_internal = os.environ.get("COSMAC_WF_ALLOW_INTERNAL", "").lower() in (
             "1", "true", "yes",
         )
-        if not allow_internal:
+        if not (allow_internal and _host_is_internal(host)):
             return "", (
-                f"凭据「{cred}」不能走明文 HTTP（密钥会被网络窃取）：公网请用 HTTPS，"
-                "内网 HTTP 须设 COSMAC_WF_ALLOW_INTERNAL=1"
+                f"凭据「{cred}」不能走明文 HTTP（密钥会被网络窃取）：公网请用 HTTPS；"
+                "内网 HTTP 须设 COSMAC_WF_ALLOW_INTERNAL=1 且目标确为私网地址"
             )
     return secret, ""
+
+
+def _host_is_internal(host: str) -> bool:
+    """主机解析到的 **所有** IP 都属私网/环回/链路本地才算"内网"。解析失败/含公网→False。"""
+    if not host:
+        return False
+    try:
+        infos = socket.getaddrinfo(host, 0, proto=socket.IPPROTO_TCP)
+    except Exception:
+        return False
+    if not infos:
+        return False
+    for info in infos:
+        try:
+            addr = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            return False
+        if not (addr.is_private or addr.is_loopback or addr.is_link_local):
+            return False
+    return True
 
 
 # —— 响应体大小上限（#5 防恶意/失控平台返回超大内容耗内存）——
