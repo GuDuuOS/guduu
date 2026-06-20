@@ -735,7 +735,9 @@ class CosmacBot:
                 return f"没找到工作流「{slug}」。用「工作流 列表」看可用的。"
             from cosmac.wf import run_connector
 
-            result = run_connector(conn, user_input)
+            result = run_connector(
+                conn, user_input, client=self.client, room_id=room_id
+            )
             self._record_wf_run(room_id, sender, conn, user_input, result)
             if result.get("ok"):
                 out = result.get("output") or "（无返回内容）"

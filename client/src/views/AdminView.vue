@@ -487,8 +487,8 @@
                 <option value="webhook">Webhook（n8n / Make / 自建）</option>
                 <option value="dify">Dify</option>
                 <option value="coze">Coze</option>
+                <option value="comfyui">ComfyUI（图/视频）</option>
               </select>
-              <em class="adm-note">ComfyUI 后续加。</em>
             </label>
             <label class="adm-field">
               <span>{{ wfForm.platform === 'webhook' ? 'Webhook URL' : '服务地址（base url）' }}</span>
@@ -512,9 +512,15 @@
               <span>Coze workflow_id</span>
               <input v-model.trim="wfForm.ref_id" placeholder="如 7401234567890" />
             </label>
-            <label v-if="wfForm.platform !== 'webhook'" class="adm-field">
+            <label v-if="wfForm.platform === 'dify' || wfForm.platform === 'coze'" class="adm-field">
               <span>输入变量名（可选）</span>
               <input v-model.trim="wfForm.input_key" placeholder="默认 input（要与平台里定义的输入变量名一致）" />
+            </label>
+            <label v-if="wfForm.platform === 'comfyui'" class="adm-field">
+              <span>工作流图（API 格式 JSON）</span>
+              <textarea v-model="wfForm.graph" rows="6" class="adm-rule-text"
+                placeholder='把 ComfyUI 导出的"API 格式"工作流 JSON 粘进来，要被用户输入替换的地方写成 {{input}}' />
+              <em class="adm-note">ComfyUI 菜单「Save (API Format)」导出；把提示词节点的文本改成 <code v-pre>{{input}}</code> 占位。生成的图会自动发回触发的群。</em>
             </label>
             <label class="adm-field">
               <span>凭据名（可选）</span>
@@ -1218,13 +1224,14 @@ const wfEditing = ref(false)
 const wfForm = reactive<WorkflowDef & { _isEdit: boolean }>({
   slug: '', name: '', platform: 'webhook', url: '', method: 'POST',
   cred: '', input_hint: '', enabled: true,
-  mode: 'workflow', ref_id: '', input_key: '', _isEdit: false,
+  mode: 'workflow', ref_id: '', input_key: '', graph: '', _isEdit: false,
 })
 
 const wfUrlPlaceholder = computed(() => ({
   webhook: 'https://n8n.example.com/webhook/xxx',
   dify: 'https://api.dify.ai（或自建 Dify 地址）',
   coze: 'https://api.coze.cn（国际版 https://api.coze.com）',
+  comfyui: 'http://你的ComfyUI地址:8188',
 }[wfForm.platform] || ''))
 
 function switchToWorkflows() {
@@ -1248,7 +1255,7 @@ function startAddWorkflow() {
   Object.assign(wfForm, {
     slug: '', name: '', platform: 'webhook', url: '', method: 'POST',
     cred: '', input_hint: '', enabled: true,
-    mode: 'workflow', ref_id: '', input_key: '', _isEdit: false,
+    mode: 'workflow', ref_id: '', input_key: '', graph: '', _isEdit: false,
   })
   wfEditing.value = true
 }
@@ -1280,6 +1287,7 @@ async function saveWorkflow() {
     url: wfForm.url.trim(), method: wfForm.method, cred: wfForm.cred.trim(),
     input_hint: wfForm.input_hint.trim(), enabled: wfForm.enabled,
     mode: wfForm.mode, ref_id: wfForm.ref_id.trim(), input_key: wfForm.input_key.trim(),
+    graph: wfForm.graph,
   }
   const next = workflows.value.slice()
   const i = next.findIndex((w) => w.slug === slug)

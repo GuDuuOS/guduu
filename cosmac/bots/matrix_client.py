@@ -74,6 +74,47 @@ class MatrixClient:
         logger.warning("向房间 %s 发消息失败: %s %s", room_id, resp.status_code, resp.text)
         return None
 
+    def upload_media(
+        self, data: bytes, content_type: str, filename: str = "file"
+    ) -> Optional[str]:
+        """把二进制内容上传到 Matrix 媒体库，返回 mxc:// 地址（失败 None）。
+
+        用于把外部工作流（如 ComfyUI）生成的图片/视频回传到 IM。鉴权走 Session 的
+        Authorization 头；Content-Type 必须是媒体真实类型（不是 json）。
+        """
+        url = self._url(f"/_matrix/media/v3/upload?filename={quote(filename)}")
+        try:
+            resp = self._session.post(
+                url, data=data, headers={"Content-Type": content_type}, timeout=60
+            )
+        except requests.RequestException as exc:
+            logger.warning("上传媒体异常: %s", exc)
+            return None
+        if resp.status_code == 200:
+            return resp.json().get("content_uri")
+        logger.warning("上传媒体失败: %s %s", resp.status_code, resp.text)
+        return None
+
+    def send_image(
+        self, room_id: str, mxc_url: str, filename: str = "image",
+        info: Optional[Dict[str, Any]] = None,
+    ) -> Optional[str]:
+        """往房间发一条图片消息（url 为 upload_media 拿到的 mxc）。成功返回 event_id。"""
+        txn = self._txn_id()
+        url = self._url(
+            f"/_matrix/client/v3/rooms/{quote(room_id)}/send/m.room.message/{txn}"
+        )
+        body: Dict[str, Any] = {
+            "msgtype": "m.image", "body": filename, "url": mxc_url,
+        }
+        if info:
+            body["info"] = info
+        resp = self._session.put(url, json=body, timeout=10)
+        if resp.status_code == 200:
+            return resp.json().get("event_id")
+        logger.warning("发图到 %s 失败: %s %s", room_id, resp.status_code, resp.text)
+        return None
+
     def set_displayname(self, displayname: str) -> None:
         """设置主 AI 在 IM 里的显示名（群里用户看到的就是它，而非用户 id）。
 

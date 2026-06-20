@@ -303,7 +303,9 @@ class Toolbox:
         from cosmac.wf import run_connector
 
         user_input = args.get("input") or ""
-        result = run_connector(conn, user_input)
+        result = run_connector(
+            conn, user_input, client=self.client, room_id=ctx.room_id
+        )
         self._record_workflow_run(
             slug, conn.get("platform", "webhook"), ctx, user_input, result
         )

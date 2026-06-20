@@ -7,6 +7,16 @@
 
 ---
 
+## 2026-06-19 — 模块3 P3：ComfyUI 适配器(图/视频:提交→轮询→回传媒体)
+- 把外部平台连接器最后一档 ComfyUI 接上(影视场景):提交工作流图 → 轮询完成 → 把产出的图回传到触发的群。
+- **matrix_client** 加 `upload_media`(POST /_matrix/media/v3/upload→mxc)+ `send_image`(发 m.image 消息)。
+- **wf.py `run_comfyui`**:连接器存"API 格式工作流图模板",用 `{{input}}` 占位、安全注入用户输入 → `POST /prompt` → `_comfy_poll` 轮询 `/history/{id}`(上限 120s)→ `_comfy_download` 从 `/view` 取图 → upload_media + send_image 发回群。需在群里触发(要 client+room_id)。`run_connector` 加 client/room_id 参数,bot 命令路径与 run_workflow 工具路径都传入。
+- **后台**:平台加 ComfyUI 选项 + 工作流图 textarea(`graph`);WorkflowDef 加 `graph` 字段。
+- 说明:轮询是同步阻塞(MVP),超长生成需异步回调(后续);本机无真 ComfyUI,靠单测覆盖。
+- 验证:`test_wf` 加 3 例(完整流程 mock HTTP+假client、缺房间、坏图 JSON);cosmac **116 单测全过、ruff 通过**、client build 通过(修了模板里 `{{input}}` 嵌套 mustache 解析报错→ `v-pre`);preview 直连生产:ComfyUI 连接器 graph 字段渲染 + round-trip + 清理,无报错。
+- 部署:发 dist + restart guduu-bot。至此工作流连接器支持 **webhook/dify/coze/comfyui** 四档。
+- 待续:异步回调入站端点(长任务)、定时触发、插件市场接真。
+
 ## 2026-06-19 — 模块3 P2：Dify / Coze 专用适配器
 - 在通用 webhook 之上加两个平台适配器(REST+key):
   - **Dify**:`run_dify`——mode=workflow 走 `/v1/workflows/run`(inputs[input_key]=用户输入)、mode=chat 走 `/v1/chat-messages`(query);抽 `data.outputs` 或 `answer`。

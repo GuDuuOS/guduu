@@ -15,15 +15,32 @@ from cosmac import wf
 
 
 class FakeResp:
-    def __init__(self, status_code=200, json_data=None, text=""):
+    def __init__(self, status_code=200, json_data=None, text="", content=b""):
         self.status_code = status_code
         self._json = json_data
         self.text = text
+        self.content = content
 
     def json(self):
         if self._json is None:
             raise ValueError("no json")
         return self._json
+
+
+class FakeMxClient:
+    """假 MatrixClient：记录 upload/send 次数，给 ComfyUI 测试用。"""
+
+    def __init__(self):
+        self.uploads = 0
+        self.sends = 0
+
+    def upload_media(self, data, mime, fname):
+        self.uploads += 1
+        return "mxc://h/" + fname
+
+    def send_image(self, room, mxc, fname, info=None):
+        self.sends += 1
+        return "$e"
 
 
 class TestWfEngine(unittest.TestCase):
@@ -80,7 +97,7 @@ class TestWfEngine(unittest.TestCase):
         self.assertEqual(r["output"], "纯文本结果")
 
     def test_unknown_platform(self) -> None:
-        r = wf.run_connector({"url": "u", "platform": "comfyui"}, "x")
+        r = wf.run_connector({"url": "u", "platform": "zapier"}, "x")
         self.assertFalse(r["ok"])
         self.assertIn("暂不支持", r["error"])
 
@@ -137,6 +154,40 @@ class TestWfEngine(unittest.TestCase):
             r = wf.run_connector(conn, "x")
         self.assertFalse(r["ok"])
         self.assertIn("参数错", r["error"])
+
+    # —— ComfyUI ——
+    def test_comfyui_full_flow(self) -> None:
+        conn = {"platform": "comfyui", "url": "http://comfy:8188",
+                "graph": '{"6":{"inputs":{"text":"{{input}}"}}}'}
+
+        def fake_get(url, **kw):
+            if "/history/" in url:
+                return FakeResp(200, {"p1": {"outputs": {"9": {"images": [
+                    {"filename": "out.png", "subfolder": "", "type": "output"}]}}}})
+            return FakeResp(200, content=b"PNGDATA")  # /view
+
+        client = FakeMxClient()
+        with mock.patch.object(wf.requests, "post", return_value=FakeResp(200, {"prompt_id": "p1"})), \
+             mock.patch.object(wf.requests, "get", side_effect=fake_get), \
+             mock.patch.object(wf.time, "sleep", lambda *_a, **_k: None):
+            r = wf.run_connector(conn, "画只猫", client=client, room_id="!r:h")
+        self.assertTrue(r["ok"], r.get("error"))
+        self.assertEqual(client.uploads, 1)
+        self.assertEqual(client.sends, 1)
+        self.assertIn("已生成", r["output"])
+
+    def test_comfyui_needs_room(self) -> None:
+        r = wf.run_connector({"platform": "comfyui", "url": "u", "graph": "{}"}, "x")
+        self.assertFalse(r["ok"])
+        self.assertIn("群里触发", r["error"])
+
+    def test_comfyui_bad_graph(self) -> None:
+        r = wf.run_connector(
+            {"platform": "comfyui", "url": "http://c", "graph": "{not json"},
+            "x", client=FakeMxClient(), room_id="!r:h",
+        )
+        self.assertFalse(r["ok"])
+        self.assertIn("JSON", r["error"])
 
 
 if __name__ == "__main__":

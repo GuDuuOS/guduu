@@ -14,7 +14,8 @@ import json
 import logging
 import os
 import re
-from typing import Any, Dict
+import time
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
@@ -190,11 +191,134 @@ def _err(msg: str) -> Dict[str, Any]:
     return {"ok": False, "status": None, "output": "", "error": msg}
 
 
+# —— ComfyUI（图/视频生成：提交工作流图 → 轮询 → 回传媒体到 Matrix）——
+COMFY_TIMEOUT = 120   # 轮询等待上限（秒）；超长生成需异步回调(后续)
+COMFY_MAX_IMAGES = 4  # 单次最多回传几张
+
+# 文件后缀 → MIME（ComfyUI /view 不一定给可靠的 Content-Type）
+_MIME = {
+    "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+    "webp": "image/webp", "gif": "image/gif", "mp4": "video/mp4", "webm": "video/webm",
+}
+
+
+def run_comfyui(
+    conn: Dict[str, Any], user_input: str, *,
+    client: Any = None, room_id: str = "", timeout: int = COMFY_TIMEOUT,
+) -> Dict[str, Any]:
+    """提交 ComfyUI 工作流图 → 轮询完成 → 把产出的图片回传到本群。
+
+    连接器字段：url=ComfyUI 地址、cred=可选鉴权、graph=API 格式工作流 JSON 模板
+    （把要被用户输入替换的地方写成占位符 ``{{input}}``）。需在群里触发（要 client+room_id 发图）。
+    """
+    if client is None or not room_id:
+        return _err("ComfyUI 工作流要在群里触发（需要发图的目标房间）")
+    base = (conn.get("url") or "").rstrip("/")
+    if not base:
+        return _err("ComfyUI 连接器未配置 URL")
+    graph_tpl = conn.get("graph") or ""
+    if not graph_tpl:
+        return _err("ComfyUI 连接器未配置工作流图（graph）")
+    # 把 {{input}} 安全注入到图的字符串值里（json.dumps 后去掉外层引号→得到已转义内容）
+    safe = json.dumps(user_input or "", ensure_ascii=False)[1:-1]
+    try:
+        graph = json.loads(graph_tpl.replace("{{input}}", safe))
+    except ValueError as exc:
+        return _err(f"工作流图 JSON 解析失败：{exc}")
+
+    headers: Dict[str, str] = {}
+    key = resolve_credential(conn.get("cred") or "")
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    # 1) 提交
+    try:
+        resp = requests.post(
+            f"{base}/prompt", json={"prompt": graph, "client_id": "cosmac"},
+            headers=headers, timeout=30,
+        )
+    except requests.RequestException as exc:
+        return _err(f"提交失败：{exc}")
+    if not (200 <= resp.status_code < 300):
+        return _err(f"ComfyUI 提交返回 {resp.status_code}：{(resp.text or '')[:200]}")
+    pid = (resp.json() or {}).get("prompt_id")
+    if not pid:
+        return _err("ComfyUI 未返回 prompt_id")
+    # 2) 轮询
+    images = _comfy_poll(base, pid, headers, timeout)
+    if images is None:
+        return _err(f"等待超时（{timeout}s），工作流可能还在跑")
+    if not images:
+        return _err("ComfyUI 已完成但没有产出图片")
+    # 3) 下载 → 上传 Matrix → 发图
+    sent = 0
+    for img in images[:COMFY_MAX_IMAGES]:
+        data, mime, fname = _comfy_download(base, img, headers)
+        if not data:
+            continue
+        mxc = client.upload_media(data, mime, fname)
+        if not mxc:
+            continue
+        if client.send_image(room_id, mxc, fname, {"mimetype": mime, "size": len(data)}):
+            sent += 1
+    if sent == 0:
+        return _err("生成了图但上传/发送失败")
+    return {"ok": True, "status": 200, "output": f"已生成 {sent} 张图并发到本群", "error": ""}
+
+
+def _comfy_poll(
+    base: str, pid: str, headers: Dict[str, str], timeout: int
+) -> Optional[List[Dict[str, Any]]]:
+    """轮询 /history/{pid} 直到出 outputs；返回图片项列表，超时返回 None。"""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            r = requests.get(f"{base}/history/{pid}", headers=headers, timeout=15)
+            if r.status_code == 200:
+                hist = r.json() or {}
+                entry = hist.get(pid)
+                if entry and entry.get("outputs"):
+                    imgs: List[Dict[str, Any]] = []
+                    for node_out in entry["outputs"].values():
+                        for im in (node_out or {}).get("images", []) or []:
+                            if im.get("filename"):
+                                imgs.append(im)
+                    return imgs
+        except requests.RequestException:
+            pass
+        time.sleep(2)
+    return None
+
+
+def _comfy_download(
+    base: str, img: Dict[str, Any], headers: Dict[str, str]
+) -> Tuple[Optional[bytes], str, str]:
+    """从 /view 下载一张产出图，返回 (bytes, mime, filename)。失败 bytes=None。"""
+    fname = img.get("filename") or "output.png"
+    params = {
+        "filename": fname,
+        "subfolder": img.get("subfolder", ""),
+        "type": img.get("type", "output"),
+    }
+    ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else "png"
+    mime = _MIME.get(ext, "application/octet-stream")
+    try:
+        r = requests.get(f"{base}/view", params=params, headers=headers, timeout=60)
+        if r.status_code == 200 and r.content:
+            return r.content, mime, fname
+    except requests.RequestException:
+        pass
+    return None, mime, fname
+
+
 # 按 platform 分派到各自适配器
 def run_connector(
-    conn: Dict[str, Any], user_input: str, *, timeout: int = DEFAULT_TIMEOUT
+    conn: Dict[str, Any], user_input: str, *,
+    client: Any = None, room_id: str = "", timeout: int = DEFAULT_TIMEOUT,
 ) -> Dict[str, Any]:
-    """按连接器的 platform 分派执行。未知平台返回 ok=False。"""
+    """按连接器的 platform 分派执行。未知平台返回 ok=False。
+
+    client/room_id 仅 ComfyUI 用（要把生成的图发回群）；其它平台忽略。
+    """
     platform = (conn.get("platform") or "webhook").lower()
     if platform in ("webhook", "n8n", "make", "custom", ""):
         return run_webhook(conn, user_input, timeout=timeout)
@@ -202,4 +326,6 @@ def run_connector(
         return run_dify(conn, user_input, timeout=timeout)
     if platform == "coze":
         return run_coze(conn, user_input, timeout=timeout)
-    return _err(f"暂不支持的平台「{platform}」（当前支持 webhook/dify/coze）")
+    if platform == "comfyui":
+        return run_comfyui(conn, user_input, client=client, room_id=room_id)
+    return _err(f"暂不支持的平台「{platform}」（当前 webhook/dify/coze/comfyui）")
