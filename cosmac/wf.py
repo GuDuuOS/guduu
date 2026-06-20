@@ -10,16 +10,66 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import os
 import re
+import socket
 import time
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 
 import requests
 
 logger = logging.getLogger("cosmac.wf")
+
+
+def check_outbound_url(url: str) -> str:
+    """SSRF 防护：校验"服务端将要外呼的 URL"是否安全。放行返回 ""，否则返回拒绝原因。
+
+    管理员可在连接器里填任意 URL，服务端会带着 Bearer 密钥去打它——必须挡住"打内网/
+    localhost/云元数据(169.254.169.254)"这类 SSRF + 凭据外泄：
+      - 只允许 http/https；
+      - 把主机名解析成 IP，**任一**解析结果落在危险段就拒绝：
+        · 链路本地(含云 metadata)/保留/组播/未指定 —— **永远拒绝**；
+        · 私网/环回 —— 默认拒绝；自建内网工作流可设 COSMAC_WF_ALLOW_INTERNAL=1 放行。
+    调用方还须 ``allow_redirects=False``，否则重定向到内网可绕过本校验。
+    （残留：getaddrinfo 与 requests 各解析一次，存在 DNS rebinding 的理论窗口；
+      要彻底防需把校验过的 IP 钉死再连，本期先挡住绝大多数直球 SSRF。）
+    """
+    try:
+        u = urlparse(url)
+    except Exception:
+        return "URL 非法"
+    if u.scheme not in ("http", "https"):
+        return f"只允许 http/https（收到 {u.scheme or '空'}）"
+    host = u.hostname
+    if not host:
+        return "URL 缺少主机名"
+    allow_internal = os.environ.get("COSMAC_WF_ALLOW_INTERNAL", "").lower() in (
+        "1", "true", "yes",
+    )
+    try:
+        infos = socket.getaddrinfo(host, u.port or 0, proto=socket.IPPROTO_TCP)
+    except Exception as exc:
+        return f"无法解析主机 {host}：{exc}"
+    for info in infos:
+        try:
+            addr = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            return f"解析到非法 IP：{info[4][0]}"
+        if (
+            addr.is_link_local or addr.is_reserved
+            or addr.is_multicast or addr.is_unspecified
+        ):
+            return f"目标 {addr} 属链路本地/保留段，已拒绝（防 SSRF/云元数据）"
+        if (addr.is_private or addr.is_loopback) and not allow_internal:
+            return (
+                f"目标 {addr} 属内网/环回，已拒绝；自建内网工作流请设 "
+                "COSMAC_WF_ALLOW_INTERNAL=1"
+            )
+    return ""
 
 DEFAULT_TIMEOUT = 30  # 秒；webhook 同步等待上限
 _MAX_OUT = 4000       # 结果文本截断，避免把超长内容塞进群/上下文
@@ -53,6 +103,9 @@ def run_webhook(
     url = (conn.get("url") or "").strip()
     if not url:
         return {"ok": False, "status": None, "output": "", "error": "连接器未配置 URL"}
+    bad = check_outbound_url(url)  # SSRF 防护
+    if bad:
+        return {"ok": False, "status": None, "output": "", "error": bad}
     method = (conn.get("method") or "POST").upper()
     headers = {"Content-Type": "application/json"}
     token = resolve_credential(conn.get("cred") or "")
@@ -64,7 +117,8 @@ def run_webhook(
         payload["callback_url"] = callback_url
     try:
         resp = requests.request(
-            method, url, json=payload, headers=headers, timeout=timeout
+            method, url, json=payload, headers=headers, timeout=timeout,
+            allow_redirects=False,  # 防重定向到内网绕过 SSRF 校验
         )
     except requests.RequestException as exc:
         logger.warning("工作流 webhook 调用失败: %s", exc)
@@ -102,6 +156,9 @@ def run_dify(
     mode=workflow|chat、input_key=workflow 输入变量名(默认 input)。
     """
     base = (conn.get("url") or "https://api.dify.ai").rstrip("/")
+    bad = check_outbound_url(base)  # SSRF 防护
+    if bad:
+        return _err(bad)
     key = resolve_credential(conn.get("cred") or "")
     if not key:
         return _err("Dify 连接器缺凭据（服务端 env COSMAC_WF_<CRED> 未配）")
@@ -121,7 +178,8 @@ def run_dify(
             "response_mode": "blocking", "user": "cosmac",
         }
     try:
-        resp = requests.post(url, json=payload, headers=headers, timeout=timeout)
+        resp = requests.post(url, json=payload, headers=headers, timeout=timeout,
+                             allow_redirects=False)
     except requests.RequestException as exc:
         logger.warning("Dify 调用失败: %s", exc)
         return _err(f"请求失败：{exc}")
@@ -158,6 +216,9 @@ def run_coze(
     ref_id=workflow_id、input_key=参数名(默认 input)。
     """
     base = (conn.get("url") or "https://api.coze.cn").rstrip("/")
+    bad = check_outbound_url(base)  # SSRF 防护
+    if bad:
+        return _err(bad)
     key = resolve_credential(conn.get("cred") or "")
     if not key:
         return _err("Coze 连接器缺凭据（服务端 env COSMAC_WF_<CRED> 未配）")
@@ -169,7 +230,8 @@ def run_coze(
     payload = {"workflow_id": wfid, "parameters": {ikey: user_input}}
     try:
         resp = requests.post(
-            f"{base}/v1/workflow/run", json=payload, headers=headers, timeout=timeout
+            f"{base}/v1/workflow/run", json=payload, headers=headers, timeout=timeout,
+            allow_redirects=False,
         )
     except requests.RequestException as exc:
         logger.warning("Coze 调用失败: %s", exc)
@@ -220,6 +282,9 @@ def run_comfyui(
     base = (conn.get("url") or "").rstrip("/")
     if not base:
         return _err("ComfyUI 连接器未配置 URL")
+    bad = check_outbound_url(base)  # SSRF 防护
+    if bad:
+        return _err(bad)
     graph_tpl = conn.get("graph") or ""
     if not graph_tpl:
         return _err("ComfyUI 连接器未配置工作流图（graph）")

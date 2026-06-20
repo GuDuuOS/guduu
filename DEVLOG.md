@@ -7,6 +7,12 @@
 
 ---
 
+## 2026-06-19 — 工作流安全（上）：SSRF 防护 + AGENTS.md 状态同步
+- **#1【P1 SSRF/凭据外泄】**：管理员可在连接器填任意 URL，服务端带 `COSMAC_WF_*` Bearer 去打它——能借此打内网/`localhost`/云元数据 `169.254.169.254`。新增 `wf.check_outbound_url`：只允许 http/https；把主机名解析成 IP，链路本地/保留/组播**永远拒绝**，私网/环回默认拒绝（自建内网可设 `COSMAC_WF_ALLOW_INTERNAL=1`）。webhook/dify/coze/comfyui 四个连接器外呼前都校验，并 `allow_redirects=False` 防重定向绕过。
+- **#6【P2 规范】**：AGENTS.md 路线图同步 CLAUDE.md（模块2 ✅ / 模块3 🟡，原来停在模块2 进行中）。
+- 验证：`test_wf` 加 SSRF 用例（环回/元数据/私网/非 http/公网放行/内网开关），22 例全过、ruff 通过。
+- 余下工作流安全项（普通成员越权执行 / 回调端点 DoS / 回调 token 进 URL / 同步调用阻塞事务）下一条处理。
+
 ## 2026-06-19 — 知识库(RAG)健壮性修复（向量空间隔离 + 复用查询向量 + key 兜底）
 - **#1【P1 安全】方舟 key 误发 OpenAI**：`get_embedder` 主路径已由并行会话改掉（不再自动挪用 `ARK_API_KEY`）。再补一道兜底：若有人把 `ark-…` key 配进 `COSMAC_EMBED_API_KEY` 却没给 `base_url`，强制指向方舟端点——绝不让 ark key 默认连 `api.openai.com`。
 - **#2【P1 正确性】换 embedder 后旧向量污染检索**：`KnowledgeChunk` 只存了向量、没存"用哪个 embedder/维度"。从哈希兜底切到真嵌入后，新查询向量与旧哈希向量在不同空间里算余弦 = 乱序/失真。修：embedder 加 `tag`（如 `hash:256`/`oai:openai:text-embedding-3-small`），分块新增 `embed_tag` 列入库记下，`search` **只比同 tag** 的分块。旧数据需重新入库才会被检索。

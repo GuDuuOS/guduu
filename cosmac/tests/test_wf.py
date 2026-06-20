@@ -44,6 +44,13 @@ class FakeMxClient:
 
 
 class TestWfEngine(unittest.TestCase):
+    def setUp(self) -> None:
+        # 这些用例验证"请求/解析逻辑"，URL 用 mock 主机（h/host 不可解析）。
+        # SSRF 校验单独在 TestSsrfGuard 里验，这里放行它，专注请求逻辑。
+        p = mock.patch.object(wf, "check_outbound_url", return_value="")
+        p.start()
+        self.addCleanup(p.stop)
+
     def test_credential_from_env(self) -> None:
         with mock.patch.dict(os.environ, {"COSMAC_WF_N8N_MAIN": "secret-123"}):
             self.assertEqual(wf.resolve_credential("n8n_main"), "secret-123")
@@ -188,6 +195,38 @@ class TestWfEngine(unittest.TestCase):
         )
         self.assertFalse(r["ok"])
         self.assertIn("JSON", r["error"])
+
+
+class TestSsrfGuard(unittest.TestCase):
+    """SSRF 防护：check_outbound_url 必须挡住内网/环回/云元数据。"""
+
+    def test_blocks_loopback_and_metadata(self) -> None:
+        for url in (
+            "http://127.0.0.1/x",
+            "http://localhost/x",
+            "http://169.254.169.254/latest/meta-data/",  # 云 metadata
+            "http://[::1]/x",
+        ):
+            self.assertNotEqual(wf.check_outbound_url(url), "", f"应拒绝 {url}")
+
+    def test_blocks_private_ranges(self) -> None:
+        for url in ("http://10.0.0.5/x", "http://192.168.1.1/x", "http://172.16.0.1/x"):
+            self.assertNotEqual(wf.check_outbound_url(url), "", f"应拒绝 {url}")
+
+    def test_rejects_non_http_scheme(self) -> None:
+        self.assertNotEqual(wf.check_outbound_url("file:///etc/passwd"), "")
+        self.assertNotEqual(wf.check_outbound_url("gopher://x/"), "")
+
+    def test_allows_public_ip(self) -> None:
+        # 公网 IP 直接放行（不依赖外部 DNS）
+        self.assertEqual(wf.check_outbound_url("https://1.1.1.1/x"), "")
+
+    def test_allow_internal_env_opens_private(self) -> None:
+        with mock.patch.dict(os.environ, {"COSMAC_WF_ALLOW_INTERNAL": "1"}):
+            self.assertEqual(wf.check_outbound_url("http://192.168.1.1/x"), "")
+        # 但链路本地(云元数据)即便放开内网也**永远**拒绝
+        with mock.patch.dict(os.environ, {"COSMAC_WF_ALLOW_INTERNAL": "1"}):
+            self.assertNotEqual(wf.check_outbound_url("http://169.254.169.254/"), "")
 
 
 if __name__ == "__main__":
