@@ -285,7 +285,22 @@ class Toolbox:
         except Exception:
             return []
 
+    def _sender_can_run_workflow(self, room_id: str, sender: str) -> bool:
+        """跑工作流(外部/付费、用服务端共享凭据)要求群管理员；DM(1:1)放行。读不到权限→拒绝。"""
+        try:
+            if self.client.joined_member_count(room_id) <= 2:
+                return True  # 私聊
+            pl = self.client.get_state_event(room_id, "m.room.power_levels", "") or {}
+            users = pl.get("users") or {}
+            level = users.get(sender, pl.get("users_default", 0))
+            return isinstance(level, int) and level >= 50
+        except Exception:
+            return False
+
     def _tool_run_workflow(self, args: Dict[str, Any], ctx: ToolContext) -> str:
+        # #2 越权防护：跟聊天命令一致——群里非管理员不能借主 AI 触发工作流
+        if not self._sender_can_run_workflow(ctx.room_id, ctx.sender):
+            return "只有群管理员能让我跑工作流（它会触发外部/付费操作）。"
         defs = self._workflow_defs()
         slug = (args.get("slug") or "").strip()
         if not slug:
@@ -303,6 +318,31 @@ class Toolbox:
         from cosmac.wf import run_connector
 
         user_input = args.get("input") or ""
+        # #5：ComfyUI 可能等到 120s，会卡住 Agent 和 appservice 事务。放后台跑、立即给 Agent
+        # 一个"已开始"结果让它继续；ComfyUI 自己把图发回房间。
+        if conn.get("platform") == "comfyui":
+            import threading
+
+            def _work() -> None:
+                try:
+                    r = run_connector(
+                        conn, user_input, client=self.client, room_id=ctx.room_id
+                    )
+                    self._record_workflow_run(
+                        slug, conn.get("platform", "webhook"), ctx, user_input, r
+                    )
+                    if not r.get("ok"):
+                        self.client.send_text(
+                            ctx.room_id, f"⚠️ 工作流执行失败：{r.get('error')}"
+                        )
+                except Exception:
+                    pass
+
+            threading.Thread(target=_work, daemon=True).start()
+            return (
+                f"工作流「{conn.get('name') or slug}」已开始（生成中），"
+                "完成后我会把结果发到群里。"
+            )
         result = run_connector(
             conn, user_input, client=self.client, room_id=ctx.room_id
         )

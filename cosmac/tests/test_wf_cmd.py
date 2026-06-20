@@ -32,7 +32,12 @@ class FakeClient:
     def resolve_alias(self, _a): return CTRL
     def joined_member_count(self, _r): return 5
     def get_state_event(self, _room, etype, _sk="") -> Any:
-        return {"workflows": self._wf} if etype == WORKFLOWS_EVENT_TYPE else None
+        if etype == WORKFLOWS_EVENT_TYPE:
+            return {"workflows": self._wf}
+        if etype == "m.room.power_levels":
+            # 默认把测试发送者都当管理员（这些用例验证执行逻辑，不验权限）
+            return {"users_default": 100}
+        return None
 
 
 def _bot(workflows=None) -> CosmacBot:
@@ -61,6 +66,18 @@ class TestWfCommand(unittest.TestCase):
         out = _bot()._run_wf_command(ROOM, "@u:host", "工作流 列表")
         self.assertIn("cover", out)
         self.assertIn("封面生成", out)
+
+    def test_run_requires_admin_in_group(self) -> None:
+        # #2 越权：群里非管理员(power<50)跑工作流被挡；列表仍可看
+        bot = _bot()
+        bot.client.get_state_event = lambda _r, etype, _sk="": (
+            {"workflows": [WF]} if etype == WORKFLOWS_EVENT_TYPE
+            else {"users": {"@u:host": 0}, "users_default": 0}  # 非管理员
+        )
+        out = bot._run_wf_command(ROOM, "@u:host", "工作流 跑 cover 测试")
+        self.assertIn("只有群管理员", out)
+        # 查看不受限
+        self.assertIn("cover", bot._run_wf_command(ROOM, "@u:host", "工作流 列表"))
 
     def test_run_success_and_records(self) -> None:
         bot = _bot()
@@ -108,11 +125,15 @@ class TestWfCommand(unittest.TestCase):
 
     def test_callback_posts_result_and_completes(self) -> None:
         bot = _bot(workflows=[{**WF, "async": True}])
-        with mock.patch("cosmac.wf.run_connector", return_value={"ok": True}):
+        with mock.patch("cosmac.wf.run_connector", return_value={"ok": True}) as m:
             bot._run_wf_command(ROOM, "@u:host", "工作流 跑 cover x")
+        # #4：DB 只存 token 哈希；明文 token 在交给平台的回调 URL 里
+        cb = m.call_args[1]["callback_url"]
+        tok = cb.split("token=", 1)[1].split("&", 1)[0]
         with session_scope() as s:
             run = recent_runs(s, slug="cover")[0]
-            rid, tok = run.id, run.token
+            rid = run.id
+            self.assertNotEqual(run.token, tok)  # 存的是哈希、不是明文
         # 正确 token → 200，结果发回原群，状态结清
         code = bot.handle_wf_callback(rid, tok, {"output": "成片已生成: http://v"})
         self.assertEqual(code, 200)

@@ -39,6 +39,13 @@ class FakeClient:
     def get_messages(self, room_id, limit=20):
         return [{"sender": "@alice:test", "body": "历史消息一条"}]
 
+    # 工作流越权闸用：当作 1:1 私聊（放行），不干扰工具执行测试
+    def joined_member_count(self, room_id):
+        return 2
+
+    def get_state_event(self, room_id, etype, state_key=""):
+        return None
+
 
 class FakeLLM(LLMProvider):
     """假大脑：按预设脚本逐轮返回 TurnResult（先调工具，再给最终文本）。"""

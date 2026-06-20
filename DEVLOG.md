@@ -7,6 +7,13 @@
 
 ---
 
+## 2026-06-19 — 工作流安全（下）：越权/DoS/回调token/同步阻塞
+- **#2【P1 越权】普通群成员能跑所有工作流**（触发付费生成/外部写、用服务端共享凭据）：聊天命令 `工作流 跑` 与 AI 工具 `run_workflow` 都加权限闸——群里要求发送者是房间管理员(power≥50)，普通成员只能「列表」；DM(1:1) 放行。
+- **#3【P1 DoS】公开回调端点无认证读全 body**：验证 run_id/token 前就按 `Content-Length` 把请求体读进内存。改成先按上限(512KB)挡，超了直接 413、不读 body。
+- **#4【P2 回调 token】**：① token 改优先从请求头 `X-Cosmac-Token` 取（不进 URL/日志），兼容老 `?token=`；② DB **只存 token 哈希**(sha256)、不存明文，比对用 `hmac.compare_digest` 防时序侧信道。
+- **#5【P2 同步阻塞】ComfyUI 等到 120s 卡住 appservice 事务**：把 ComfyUI（慢）放**后台线程**跑、立即返回"已开始"，它自己把图发回群；webhook/dify/coze(≤30s) 仍同步。聊天命令和 AI 工具两条路径都改。
+- 验证：`test_wf_cmd` 加越权闸 + token 哈希用例；cosmac **129 单测全过**、ruff、client build 通过。纯后端 → 部署 `restart guduu-bot`。
+
 ## 2026-06-19 — 工作流安全（上）：SSRF 防护 + AGENTS.md 状态同步
 - **#1【P1 SSRF/凭据外泄】**：管理员可在连接器填任意 URL，服务端带 `COSMAC_WF_*` Bearer 去打它——能借此打内网/`localhost`/云元数据 `169.254.169.254`。新增 `wf.check_outbound_url`：只允许 http/https；把主机名解析成 IP，链路本地/保留/组播**永远拒绝**，私网/环回默认拒绝（自建内网可设 `COSMAC_WF_ALLOW_INTERNAL=1`）。webhook/dify/coze/comfyui 四个连接器外呼前都校验，并 `allow_redirects=False` 防重定向绕过。
 - **#6【P2 规范】**：AGENTS.md 路线图同步 CLAUDE.md（模块2 ✅ / 模块3 🟡，原来停在模块2 进行中）。

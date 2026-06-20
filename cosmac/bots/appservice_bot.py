@@ -41,6 +41,18 @@ from cosmac.skills_text import render_skills  # 纯渲染、不依赖 DB
 
 logger = logging.getLogger("cosmac.appservice_bot")
 
+# 公开回调端点（外部工作流平台调）允许的最大请求体（防无认证内存 DoS）。
+# 工作流结果文本不大、下游还会截断，512KB 绰绰有余。
+_MAX_CALLBACK_BODY = 512 * 1024
+
+
+def _token_hash(token: str) -> str:
+    """回调 token 只在 DB 里存**哈希**（#4）：DB/日志泄露也拿不到可用的明文 token。
+    明文 token 只活在交给外部平台的回调地址里、且单次用完即废。"""
+    import hashlib
+
+    return hashlib.sha256((token or "").encode("utf-8")).hexdigest()
+
 
 class CosmacBot:
     """主 AI 的事件处理核心：把 Synapse 推来的事件变成 AI 的反应。"""
@@ -729,6 +741,15 @@ class CosmacBot:
                 lines.append(f"  · {w.get('slug')}（{w.get('name') or w.get('slug')}）{hint}")
             return "\n".join(lines)
         if body.startswith(("跑", "run", "执行")):
+            # #2 越权防护：跑工作流会触发付费生成/外部写操作、且用的是服务端共享凭据，
+            # 群里要求发送者是房间管理员（power≥50）；普通成员只能「工作流 列表」查看。
+            # 私聊(DM)是 1:1、用户对自己负责，放行。
+            try:
+                is_dm = self.client.joined_member_count(room_id) <= 2
+            except Exception:
+                is_dm = False
+            if not is_dm and not self._is_room_admin(room_id, sender):
+                return "只有群管理员能跑工作流（它会触发外部/付费操作）。你可以用「工作流 列表」查看。"
             rest = body.split(maxsplit=1)
             arg = rest[1].strip() if len(rest) > 1 else ""
             parts = arg.split(maxsplit=1)
@@ -743,7 +764,11 @@ class CosmacBot:
             # 异步连接器（长任务）：登记 pending + 回调 URL，提交后即返回，等平台回调
             if conn.get("async") and self.config.public_url:
                 return self._dispatch_async(conn, user_input, room_id, sender, name)
-            # 同步：等结果回来再发
+            # #5：ComfyUI 可能轮询到 120s，会卡住 appservice 事务响应（Synapse 超时重试）。
+            # 放后台线程跑、立即返回；ComfyUI 自己把图发回房间。webhook/dify/coze 较快(≤30s)，仍同步。
+            if conn.get("platform") == "comfyui":
+                self._run_wf_in_background(conn, user_input, room_id, sender, name)
+                return f"⏳ 工作流「{name}」已开始（生成中），完成后结果会自动发到本群。"
             from cosmac.wf import run_connector
 
             result = run_connector(
@@ -755,6 +780,31 @@ class CosmacBot:
                 return f"✅ 工作流「{name}」已执行：\n{out}"
             return f"⚠️ 工作流「{name}」执行失败：{result.get('error')}"
         return f"没听懂「{body}」。发「工作流 帮助」看用法。"
+
+    def _run_wf_in_background(self, conn, user_input, room_id, sender, name) -> None:
+        """把慢同步连接器（如 ComfyUI）放后台线程跑，避免阻塞 appservice 事务响应（#5）。
+
+        bot 是 ThreadingHTTPServer，起线程安全。ComfyUI 成功时已自行把图发回房间；
+        失败/异常补一条文字。运行记录尽力落库。
+        """
+        import threading
+
+        def work() -> None:
+            try:
+                from cosmac.wf import run_connector
+
+                result = run_connector(
+                    conn, user_input, client=self.client, room_id=room_id
+                )
+                self._record_wf_run(room_id, sender, conn, user_input, result)
+                if not result.get("ok"):
+                    self.client.send_text(
+                        room_id, f"⚠️ 工作流「{name}」执行失败：{result.get('error')}"
+                    )
+            except Exception:
+                logger.exception("后台工作流执行出错：%s", name)
+
+        threading.Thread(target=work, daemon=True, name=f"wf-{name}").start()
 
     def _dispatch_async(self, conn, user_input, room_id, sender, name) -> str:
         """异步连接器：建 pending 运行(带一次性 token)+ 回调 URL，提交给平台后即返回。
@@ -774,7 +824,8 @@ class CosmacBot:
             with session_scope() as s:
                 run = create_pending(
                     s, slug=conn.get("slug", ""), platform=conn.get("platform", "webhook"),
-                    room_id=room_id, sender=sender, user_input=user_input, token=token,
+                    room_id=room_id, sender=sender, user_input=user_input,
+                    token=_token_hash(token),  # #4：DB 只存 token 哈希，不存明文
                 )
                 run_id = run.id
             cb = f"{self.config.public_url.rstrip('/')}/cosmac/wf/callback/{run_id}?token={token}"
@@ -803,7 +854,11 @@ class CosmacBot:
                 run = get_run(s, run_id)
                 if run is None or run.status != "pending":
                     return 404
-                if not token or token != run.token:
+                # #4：比对 token 的哈希（DB 存的是哈希），用 compare_digest 防时序侧信道
+                import hmac
+                if not token or not hmac.compare_digest(
+                    _token_hash(token), run.token or ""
+                ):
                     return 403
                 room_id = run.room_id
                 slug = run.slug
@@ -1047,10 +1102,16 @@ class _Handler(BaseHTTPRequestHandler):
         except (ValueError, IndexError):
             self._send_json(400, {"error": "bad run id"})
             return
-        token = ""
-        if "token=" in self.path:
+        # #4：token 优先从请求头取（不进 URL/日志）；兼容老路径里的 ?token=（平台改不了头时）
+        token = (self.headers.get("X-Cosmac-Token") or "").strip()
+        if not token and "token=" in self.path:
             token = self.path.split("token=", 1)[1].split("&", 1)[0]
-        length = int(self.headers.get("Content-Length", 0))
+        # #3 防 DoS：验证前就按 Content-Length 限制请求体大小，绝不把超大请求整个读进内存。
+        # 工作流结果文本本就不大（下游还会截断），512KB 足够；超了直接 413、不读 body。
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        if length > _MAX_CALLBACK_BODY:
+            self._send_json(413, {"error": "body too large"})
+            return
         raw = self.rfile.read(length) if length else b"{}"
         try:
             body = json.loads(raw) if raw else {}
