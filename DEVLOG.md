@@ -7,6 +7,12 @@
 
 ---
 
+## 2026-06-19 — 模块2 上线：cosmac DB 接生产 Postgres + 修嵌入挪用 ARK key 的坑
+- **DB 上线**:服务器给 cosmac 单开 Postgres 库(cosmac_user/cosmac),`COSMAC_DATABASE_URL` 写进 guduu-bot.service,重启后 bot 连上并建好四表(cosmac_skill/agent/kb_doc/kb_chunk)。至此命令建技能、知识库、RAG 在生产真正可用(此前只有 state event 的全局技能/智能体能用)。具体连接信息进本机 DEPLOY.md。
+- **修坑(P1)**:`get_embedder()` 原把 `ARK_API_KEY` 也当嵌入 key→去调 `text-embedding-3-small`,但方舟没这模型、会报错拖垮知识库入库/检索。改为**只认显式 `COSMAC_EMBED_API_KEY`/`OPENAI_API_KEY`**,不挪用 ARK;没配就用哈希词袋(词法检索)。要在方舟做嵌入需显式配 COSMAC_EMBED_API_KEY+BASE_URL+MODEL。
+- 验证:cosmac 88 单测全过、ruff 通过。服务器侧:`init_engine` 列出四表通过。
+- 部署:`restart guduu-bot`(已含连接串);本次嵌入修复需再 `git pull` + restart。无前端改动。
+
 ## 2026-06-19 — 模块2：知识库接活（bot RAG 注入 + 入库聊天命令）
 - 把上一步的知识库引擎接进主 AI，端到端闭环：群里加文档 → 主 AI 据此回答。
 - **入库命令** `cosmac/db/kb_cmd.py`（同 skill_cmd 套路）：`知识 列表/添加/删除/搜`；`添加 <标题> ｜ <正文>`。作用域:群=本群库 / 私聊=个人库;写操作群里需管理员;容量护栏(单篇≤20000字、每作用域≤200篇);删除只能删本作用域、按编号。

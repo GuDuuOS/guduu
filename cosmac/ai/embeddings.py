@@ -116,18 +116,23 @@ def _env(*names: str) -> str:
 
 
 def get_embedder() -> Embedder:
-    """按环境挑嵌入器：有 OpenAI 兼容 key 用真嵌入，否则降级哈希词袋。
+    """按环境挑嵌入器：**显式配了嵌入 key** 才用真嵌入，否则降级哈希词袋。
 
     认这些环境变量：
-        COSMAC_EMBED_API_KEY / OPENAI_API_KEY / ARK_API_KEY  —— key
-        COSMAC_EMBED_MODEL                                   —— 模型（默认 text-embedding-3-small）
-        COSMAC_EMBED_BASE_URL                                —— OpenAI 兼容端点（方舟等）
+        COSMAC_EMBED_API_KEY  —— 专用嵌入 key（配它时建议同时给 MODEL/BASE_URL）
+        OPENAI_API_KEY        —— 用 OpenAI 官方嵌入（默认 text-embedding-3-small 就是它家的）
+        COSMAC_EMBED_MODEL    —— 模型（默认 text-embedding-3-small）
+        COSMAC_EMBED_BASE_URL —— OpenAI 兼容端点（如方舟/自建）
+
+    **故意不挪用 ``ARK_API_KEY``**：它是给 LLM(deepseek/方舟) 用的，方舟的嵌入是另一套
+    模型 id（不存在 text-embedding-3-small），自动拿来当嵌入只会报错、拖垮知识库。
+    要在方舟上做嵌入，请显式配 COSMAC_EMBED_API_KEY + COSMAC_EMBED_BASE_URL + COSMAC_EMBED_MODEL。
     """
-    key = _env("COSMAC_EMBED_API_KEY", "OPENAI_API_KEY", "ARK_API_KEY")
+    key = _env("COSMAC_EMBED_API_KEY", "OPENAI_API_KEY")
     if not key:
         return HashingEmbedder()
     model = _env("COSMAC_EMBED_MODEL") or "text-embedding-3-small"
-    base_url = _env("COSMAC_EMBED_BASE_URL", "ARK_BASE_URL") or None
+    base_url = _env("COSMAC_EMBED_BASE_URL") or None
     try:
         return OpenAICompatEmbedder(api_key=key, model=model, base_url=base_url)
     except Exception:
