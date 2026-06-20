@@ -30,6 +30,9 @@
         <button class="adm-mi" :class="{ active: tab === 'rules' }" @click="switchToRules">
           <span class="adm-mi-ic">⚖️</span> 规则
         </button>
+        <button class="adm-mi" :class="{ active: tab === 'workflows' }" @click="switchToWorkflows">
+          <span class="adm-mi-ic">🔗</span> 工作流
+        </button>
         <button class="adm-mi" :class="{ active: tab === 'overview' }" @click="switchToOverview">
           <span class="adm-mi-ic">📊</span> 数据概览
         </button>
@@ -449,6 +452,97 @@
         </div>
       </template>
 
+      <!-- 工作流面板:配置外部连接器(n8n/Make 等),写控制室 state event -->
+      <template v-else-if="tab === 'workflows'">
+        <header class="adm-head">
+          <div>
+            <h1 class="adm-h1">工作流</h1>
+            <p class="adm-hint">
+              对接 n8n / Make 等外部平台 · 群里发「工作流 跑 &lt;slug&gt;」或直接让主 AI 触发 · 保存后约 20 秒热生效
+            </p>
+          </div>
+          <div class="adm-actions">
+            <button class="adm-btn ghost" :disabled="wfLoading || wfSaving" @click="loadWorkflows">
+              {{ wfLoading ? '加载中…' : '重新加载' }}
+            </button>
+            <button class="adm-btn" :disabled="wfLoading || wfSaving" @click="startAddWorkflow">＋ 新建连接器</button>
+          </div>
+        </header>
+
+        <div v-if="wfLoading" class="adm-center"><div class="adm-spin" /> 加载连接器…</div>
+
+        <div v-else class="adm-form">
+          <div v-if="wfEditing" class="adm-skill-edit">
+            <label class="adm-field">
+              <span>标识 slug（英文/数字/-，全局唯一）</span>
+              <input v-model.trim="wfForm.slug" :disabled="wfForm._isEdit" placeholder="cover-gen" />
+            </label>
+            <label class="adm-field">
+              <span>名称</span>
+              <input v-model.trim="wfForm.name" placeholder="封面生成" />
+            </label>
+            <label class="adm-field">
+              <span>平台</span>
+              <select v-model="wfForm.platform" class="cam-select">
+                <option value="webhook">Webhook（n8n / Make / 自建）</option>
+              </select>
+              <em class="adm-note">目前支持 Webhook 型；Dify/Coze/ComfyUI 后续加。</em>
+            </label>
+            <label class="adm-field">
+              <span>Webhook URL</span>
+              <input v-model.trim="wfForm.url" placeholder="https://n8n.example.com/webhook/xxx" />
+            </label>
+            <label class="adm-field">
+              <span>请求方法</span>
+              <select v-model="wfForm.method" class="cam-select">
+                <option value="POST">POST</option>
+                <option value="GET">GET</option>
+              </select>
+            </label>
+            <label class="adm-field">
+              <span>凭据名（可选）</span>
+              <input v-model.trim="wfForm.cred" placeholder="如 n8n_main（可留空）" />
+              <em class="adm-note">🔒 这里只填"名字"。真密钥在服务器环境变量 <code>COSMAC_WF_&lt;大写名字&gt;</code> 里配，不进网页/Matrix。留空=URL 自带令牌/无需鉴权。</em>
+            </label>
+            <label class="adm-field">
+              <span>输入提示（给用户看的，可选）</span>
+              <input v-model.trim="wfForm.input_hint" placeholder="如 描述要生成的封面" />
+            </label>
+            <label class="adm-tool">
+              <input type="checkbox" v-model="wfForm.enabled" />
+              <span class="adm-tool-l">启用</span>
+            </label>
+            <div class="adm-actions">
+              <button class="adm-btn ghost" :disabled="wfSaving" @click="wfEditing = false">取消</button>
+              <button class="adm-btn" :disabled="wfSaving || !wfForm.slug || !wfForm.url" @click="saveWorkflow">
+                {{ wfSaving ? '保存中…' : '保存' }}
+              </button>
+            </div>
+          </div>
+
+          <p v-if="!workflows.length" class="adm-hint">还没有连接器。点右上「新建连接器」加一个(先在 n8n/Make 建好 webhook,把 URL 填进来)。</p>
+          <table v-else class="adm-table">
+            <thead>
+              <tr><th>标识</th><th>名称</th><th>平台</th><th>URL</th><th>状态</th><th>操作</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="w in workflows" :key="w.slug">
+                <td><code>{{ w.slug }}</code></td>
+                <td>{{ w.name || '—' }}</td>
+                <td>{{ w.platform }}</td>
+                <td class="adm-skill-desc">{{ w.url }}</td>
+                <td><span class="adm-badge" :class="{ on: w.enabled }">{{ w.enabled ? '启用' : '停用' }}</span></td>
+                <td class="adm-row-actions">
+                  <button class="adm-btn ghost sm" :disabled="wfSaving" @click="startEditWorkflow(w)">编辑</button>
+                  <button class="adm-btn ghost sm" :disabled="wfSaving" @click="toggleWorkflow(w)">{{ w.enabled ? '停用' : '启用' }}</button>
+                  <button class="adm-btn ghost sm danger" :disabled="wfSaving" @click="removeWorkflow(w)">删除</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
+
       <!-- 数据概览面板 -->
       <template v-else-if="tab === 'overview'">
         <header class="adm-head">
@@ -594,6 +688,8 @@ import {
   setGlobalAgents,
   getGlobalRules,
   setGlobalRules,
+  getWorkflows,
+  setWorkflows,
   AI_TOOL_CATALOG,
   AI_PROVIDERS,
   type AdminUser,
@@ -601,6 +697,7 @@ import {
   type GlobalSkill,
   type GlobalAgent,
   type GlobalRule,
+  type WorkflowDef,
 } from '@/matrix/client'
 import { useToast } from '@/composables/useToast'
 
@@ -609,8 +706,8 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 
 const { success, warn } = useToast()
 
-// 当前管理模块：用户管理 / 频道管理 / AI 配置 / 技能库 / 智能体 / 规则 / 数据概览
-const tab = ref<'users' | 'rooms' | 'ai' | 'skills' | 'agents' | 'rules' | 'overview'>('users')
+// 当前管理模块：用户/频道/AI配置/技能库/智能体/规则/工作流/数据概览
+const tab = ref<'users' | 'rooms' | 'ai' | 'skills' | 'agents' | 'rules' | 'workflows' | 'overview'>('users')
 
 // 页面状态机：checking 校验中 / denied 无权限 / ok 已是管理员
 const state = ref<'checking' | 'denied' | 'ok'>('checking')
@@ -1093,6 +1190,92 @@ async function saveRules() {
   } finally {
     ruSaving.value = false
   }
+}
+
+/* —— 工作流连接器（写控制室 state event）—— */
+const workflows = ref<WorkflowDef[]>([])
+const wfLoading = ref(false)
+const wfSaving = ref(false)
+const wfLoaded = ref(false)
+const wfEditing = ref(false)
+const wfForm = reactive<WorkflowDef & { _isEdit: boolean }>({
+  slug: '', name: '', platform: 'webhook', url: '', method: 'POST',
+  cred: '', input_hint: '', enabled: true, _isEdit: false,
+})
+
+function switchToWorkflows() {
+  tab.value = 'workflows'
+  if (!wfLoaded.value) loadWorkflows()
+}
+
+async function loadWorkflows() {
+  wfLoading.value = true
+  try {
+    workflows.value = await getWorkflows()
+    wfLoaded.value = true
+  } catch (e: any) {
+    warn('加载失败', e?.message || '无法读取连接器')
+  } finally {
+    wfLoading.value = false
+  }
+}
+
+function startAddWorkflow() {
+  Object.assign(wfForm, {
+    slug: '', name: '', platform: 'webhook', url: '', method: 'POST',
+    cred: '', input_hint: '', enabled: true, _isEdit: false,
+  })
+  wfEditing.value = true
+}
+
+function startEditWorkflow(w: WorkflowDef) {
+  Object.assign(wfForm, { ...w, _isEdit: true })
+  wfEditing.value = true
+}
+
+async function persistWorkflows(next: WorkflowDef[], okMsg: string) {
+  wfSaving.value = true
+  try {
+    await setWorkflows(next)
+    workflows.value = next
+    success('已保存', okMsg)
+  } catch (e: any) {
+    warn('保存失败', e?.message || '无法写入控制室')
+    throw e
+  } finally {
+    wfSaving.value = false
+  }
+}
+
+async function saveWorkflow() {
+  const slug = wfForm.slug.trim()
+  if (!slug || !wfForm.url.trim()) return
+  const item: WorkflowDef = {
+    slug, name: wfForm.name.trim(), platform: wfForm.platform,
+    url: wfForm.url.trim(), method: wfForm.method, cred: wfForm.cred.trim(),
+    input_hint: wfForm.input_hint.trim(), enabled: wfForm.enabled,
+  }
+  const next = workflows.value.slice()
+  const i = next.findIndex((w) => w.slug === slug)
+  if (i >= 0) next[i] = item
+  else next.push(item)
+  try {
+    await persistWorkflows(next, '已保存连接器')
+    wfEditing.value = false
+  } catch { /* 已提示 */ }
+}
+
+async function toggleWorkflow(w: WorkflowDef) {
+  const next = workflows.value.map((x) =>
+    x.slug === w.slug ? { ...x, enabled: !x.enabled } : x,
+  )
+  try { await persistWorkflows(next, w.enabled ? '已停用' : '已启用') } catch { /* 已提示 */ }
+}
+
+async function removeWorkflow(w: WorkflowDef) {
+  if (!confirm(`确认删除连接器「${w.name || w.slug}」？`)) return
+  const next = workflows.value.filter((x) => x.slug !== w.slug)
+  try { await persistWorkflows(next, '已删除') } catch { /* 已提示 */ }
 }
 
 /* —— 数据概览 —— */

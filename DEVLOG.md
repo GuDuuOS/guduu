@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-06-19 — 模块3 P1 闭环：工作流后台 UI + 主 AI 工具 run_workflow
+- 把 P1 闭环补齐:① 后台能配连接器;② 主 AI 能自然语言触发。
+- **主 AI 工具 `run_workflow`**:`Toolbox` 加该工具(读控制室连接器定义→跑→尽力入库),`Toolbox(client, control_room_alias=...)` 注入控制室别名;bot 构造时传入。不带 slug 调用→返回可用列表。也加进 `AI_TOOL_CATALOG`(后台工具开关可控)。
+- **后台「工作流」tab**:`client.ts` 加 `getWorkflows/setWorkflows` + `WorkflowDef` 类型;`AdminView` 加 CRUD(slug/名称/平台/URL/方法/凭据名/输入提示/启用)。凭据名旁明示"真密钥在服务端 env `COSMAC_WF_<CRED>`、不进网页"。
+- 验证:`test_wf_cmd` 加 run_workflow 工具例;`test_runtime_config` 工具数 4→5;cosmac **107 单测全过、ruff 通过**、client build 通过;**preview 直连生产**:工作流连接器 round-trip + 清理,生产无残留、无控制台报错。
+- 部署:**发 dist + restart guduu-bot**(前端加 tab、后端加工具)。端到端:后台配 n8n/Make webhook → 群里 `工作流 跑 <slug>` 或让主 AI 触发 → 结果回群。平台需鉴权时在服务端配 `COSMAC_WF_<CRED>`。
+- 待续:Dify/Coze/ComfyUI 专用适配器、异步回调入站端点、定时触发。
+
 ## 2026-06-19 — 模块3 开工：外部工作流连接器(P1 通用 webhook 引擎 + 命令)
 - **定调(负责人拍板)**:模块3 不自建工作流引擎,而是**对接 n8n/Make/Coze/ComfyUI/Dify** 等现成平台;P1 先做**通用 webhook 连接器**(覆盖 n8n/Make/任意自建端点),配置式后台编排,同步执行。
 - **架构**:连接器**定义**走控制室 state event `cosmac.workflows`(浏览器够不到 DB,同 Skill/Agent);**密钥绝不进 Matrix**——定义里只放凭据名 `cred`,真值在服务端 env `COSMAC_WF_<CRED>`(同 LLM key 策略);**运行记录**进 cosmac DB。

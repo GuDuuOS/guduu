@@ -56,7 +56,9 @@ class CosmacBot:
         # 主 AI 的"大脑"（可配置的多模型后端）
         self.llm: LLMProvider = get_provider(config)
         # 主 AI 的"工具箱"（把指令落成真实 IM 操作）+ "会动手的大脑"Agent
-        self.toolbox = Toolbox(self.client)
+        self.toolbox = Toolbox(
+            self.client, control_room_alias=config.control_room_alias
+        )
         self.agent = Agent(
             llm=self.llm,
             toolbox=self.toolbox,

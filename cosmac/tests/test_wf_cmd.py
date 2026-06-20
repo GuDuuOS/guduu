@@ -33,8 +33,10 @@ class FakeClient:
 
 
 def _bot(workflows=None) -> CosmacBot:
-    bot = CosmacBot(CosmacConfig(llm_provider="echo"))
+    # control_room_alias 非空：run_workflow 工具据此找控制室（FakeClient.resolve_alias 忽略实参）
+    bot = CosmacBot(CosmacConfig(llm_provider="echo", control_room_alias="#cosmac-ctrl:host"))
     bot.client = FakeClient(workflows if workflows is not None else [WF])
+    bot.toolbox = bot.toolbox.__class__(bot.client, control_room_alias="#cosmac-ctrl:host")
     return bot
 
 
@@ -83,6 +85,23 @@ class TestWfCommand(unittest.TestCase):
     def test_no_connectors(self) -> None:
         out = _bot(workflows=[])._run_wf_command(ROOM, "@u:host", "工作流 列表")
         self.assertIn("还没有", out)
+
+    def test_run_workflow_ai_tool(self) -> None:
+        # 主 AI 工具路径：execute(run_workflow) 跑连接器并返回结果
+        from cosmac.ai.base import ToolCall
+        from cosmac.ai.tools import ToolContext
+        bot = _bot()
+        ctx = ToolContext(ROOM, "@u:host")
+        with mock.patch("cosmac.wf.run_connector",
+                        return_value={"ok": True, "output": "图已生成"}):
+            out = bot.toolbox.execute(
+                ToolCall(id="t", name="run_workflow",
+                         arguments={"slug": "cover", "input": "蓝色"}), ctx)
+        self.assertIn("图已生成", out)
+        # 不带 slug → 返回可用列表
+        out2 = bot.toolbox.execute(
+            ToolCall(id="t2", name="run_workflow", arguments={}), ctx)
+        self.assertIn("cover", out2)
 
 
 if __name__ == "__main__":

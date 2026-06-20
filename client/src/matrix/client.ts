@@ -756,6 +756,8 @@ const SKILLS_EVENT_TYPE = 'cosmac.skills'
 const AGENTS_EVENT_TYPE = 'cosmac.agents'
 /** 控制室里「全局规则(Rule)」state event 的类型（与 bot 端 RULES_EVENT_TYPE 一致）。 */
 const RULES_EVENT_TYPE = 'cosmac.rules'
+/** 控制室里「工作流连接器」state event 的类型（与 bot 端 WORKFLOWS_EVENT_TYPE 一致）。 */
+const WORKFLOWS_EVENT_TYPE = 'cosmac.workflows'
 
 /** 主 AI 可用工具目录（工具开关 UI 用；name 要与 bot 端 Toolbox 注册的一致）。 */
 export const AI_TOOL_CATALOG: { name: string; label: string }[] = [
@@ -763,6 +765,7 @@ export const AI_TOOL_CATALOG: { name: string; label: string }[] = [
   { name: 'send_message_to_room', label: '往房间发消息' },
   { name: 'list_room_members', label: '查看房间成员' },
   { name: 'get_recent_messages', label: '读取聊天记录' },
+  { name: 'run_workflow', label: '跑外部工作流(n8n/Make 等)' },
 ]
 
 /** 可选的模型后端目录（管理后台「AI 配置」的 provider 下拉用）。
@@ -1087,6 +1090,48 @@ export async function setGlobalRules(rules: GlobalRule[]): Promise<void> {
   if (!mx) throw new Error('未登录')
   const rid = await ensureControlRoom()
   await (mx as any).sendStateEvent(rid, RULES_EVENT_TYPE, { rules }, '')
+}
+
+/** 一个「工作流连接器」定义（对接 n8n/Make 等外部平台）。 */
+export interface WorkflowDef {
+  slug: string
+  name: string
+  platform: string          // 目前 'webhook'（覆盖 n8n/Make/自建）
+  url: string
+  method: string            // POST/GET
+  cred: string              // 凭据名（真值在服务端 env COSMAC_WF_<CRED>；这里只放名字）
+  input_hint: string
+  enabled: boolean
+}
+
+/** 读工作流连接器列表（控制室 state event）；不存在返回 []。 */
+export async function getWorkflows(): Promise<WorkflowDef[]> {
+  if (!mx) return []
+  const rid = await resolveControlRoom()
+  if (!rid) return []
+  try {
+    const ev = await (mx as any).getStateEvent(rid, WORKFLOWS_EVENT_TYPE, '')
+    const arr = Array.isArray(ev?.workflows) ? ev.workflows : []
+    return arr.map((w: any) => ({
+      slug: String(w?.slug || ''),
+      name: String(w?.name || ''),
+      platform: String(w?.platform || 'webhook'),
+      url: String(w?.url || ''),
+      method: String(w?.method || 'POST'),
+      cred: String(w?.cred || ''),
+      input_hint: String(w?.input_hint || ''),
+      enabled: w?.enabled !== false,
+    })).filter((w: WorkflowDef) => w.slug)
+  } catch {
+    return []
+  }
+}
+
+/** 整体写入工作流连接器列表（必要时先建控制室）。 */
+export async function setWorkflows(workflows: WorkflowDef[]): Promise<void> {
+  if (!mx) throw new Error('未登录')
+  const rid = await ensureControlRoom()
+  await (mx as any).sendStateEvent(rid, WORKFLOWS_EVENT_TYPE, { workflows }, '')
 }
 
 /** 读某个频道当前时间线的消息（含发送者昵称与 cosmac.card 富卡）。 */

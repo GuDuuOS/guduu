@@ -51,7 +51,7 @@ class TestRuntimeConfig(unittest.TestCase):
         before = bot._applied_sig
         bot._apply_runtime_config()
         self.assertEqual(bot._applied_sig, before)
-        self.assertEqual(len(bot.toolbox.specs()), 4)  # 仍是全部 4 个工具
+        self.assertEqual(len(bot.toolbox.specs()), 5)  # 仍是全部 5 个工具(含 run_workflow)
 
     def test_persona_override_rebuilds_agent(self) -> None:
         # 下发新人设 → 签名变、Agent 被换成新对象、system_prompt 生效

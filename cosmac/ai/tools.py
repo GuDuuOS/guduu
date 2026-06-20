@@ -21,6 +21,7 @@ from typing import Any, Callable, Dict, List, Optional, Set
 
 from cosmac.ai.base import ToolCall, ToolSpec
 from cosmac.bots.matrix_client import MatrixClient
+from cosmac.config import WORKFLOWS_EVENT_TYPE
 
 logger = logging.getLogger("cosmac.ai.tools")
 
@@ -47,8 +48,10 @@ class Toolbox:
       - get_recent_messages   读某房间最近的聊天记录（默认当前房间）
     """
 
-    def __init__(self, client: MatrixClient):
+    def __init__(self, client: MatrixClient, control_room_alias: str = ""):
         self.client = client
+        # 控制室别名：run_workflow 工具据此读「工作流连接器」定义（state event）。
+        self._control_room_alias = control_room_alias
         # 工具名 → (说明书, 执行函数)。执行函数签名: (arguments, ctx) -> 结果文本
         self._tools: Dict[str, Dict[str, Any]] = {}
         # 启用集合：None = 全部启用（默认）；否则只启用集合内的工具。
@@ -199,6 +202,30 @@ class Toolbox:
             fn=self._tool_get_messages,
         )
 
+        # 5) 跑外部工作流连接器（n8n/Make 等）
+        self._register(
+            name="run_workflow",
+            description=(
+                "运行一个已配置的外部工作流/自动化（对接 n8n、Make 等平台）。"
+                "当用户想『跑某个工作流、用 n8n/自动化做某事、触发某流程』时调用。"
+                "不确定 slug 就先不带 slug 调用一次，会返回可用工作流列表。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "slug": {
+                        "type": "string",
+                        "description": "工作流标识(slug)；不确定就留空以获取可用列表。",
+                    },
+                    "input": {
+                        "type": "string",
+                        "description": "传给工作流的输入文本/参数（如『科技感蓝色封面』）。",
+                    },
+                },
+            },
+            fn=self._tool_run_workflow,
+        )
+
     # —— 各工具的具体执行（转发到 MatrixClient）——
 
     def _tool_create_room(self, args: Dict[str, Any], ctx: ToolContext) -> str:
@@ -239,3 +266,64 @@ class Toolbox:
             return f"房间 {room_id} 没查到聊天记录（或查询失败）。"
         # 用 JSON 回灌，模型读起来结构清晰
         return "最近聊天记录（旧→新）：\n" + json.dumps(msgs, ensure_ascii=False)
+
+    # —— 工作流连接器 ——
+
+    def _workflow_defs(self) -> List[Dict[str, Any]]:
+        """读控制室「工作流连接器」定义（启用的）；失败/无配置返回空。"""
+        if not self._control_room_alias:
+            return []
+        try:
+            ctrl = self.client.resolve_alias(self._control_room_alias)
+            if not ctrl:
+                return []
+            ev = self.client.get_state_event(ctrl, WORKFLOWS_EVENT_TYPE) or {}
+            return [
+                w for w in (ev.get("workflows") or [])
+                if isinstance(w, dict) and w.get("slug") and w.get("enabled", True)
+            ]
+        except Exception:
+            return []
+
+    def _tool_run_workflow(self, args: Dict[str, Any], ctx: ToolContext) -> str:
+        defs = self._workflow_defs()
+        slug = (args.get("slug") or "").strip()
+        if not slug:
+            if not defs:
+                return "当前没有已配置的工作流连接器（去管理后台→工作流添加）。"
+            listing = "；".join(
+                f"{w.get('slug')}（{w.get('name') or ''}）" for w in defs
+            )
+            return f"可用工作流：{listing}。请带 slug 再调一次。"
+        conn = next((w for w in defs if w.get("slug") == slug), None)
+        if conn is None:
+            avail = "、".join(w.get("slug", "") for w in defs) or "（空）"
+            return f"没找到工作流「{slug}」。可用：{avail}"
+        # 延迟导入：HTTP 执行与 DB 记录都不在工具加载期引入
+        from cosmac.wf import run_connector
+
+        user_input = args.get("input") or ""
+        result = run_connector(conn, user_input)
+        self._record_workflow_run(
+            slug, conn.get("platform", "webhook"), ctx, user_input, result
+        )
+        if result.get("ok"):
+            return (
+                f"工作流「{conn.get('name') or slug}」已执行，返回："
+                f"{result.get('output') or '（无内容）'}"
+            )
+        return f"工作流「{conn.get('name') or slug}」执行失败：{result.get('error')}"
+
+    def _record_workflow_run(self, slug, platform, ctx, user_input, result) -> None:
+        """尽力把运行记录落库；DB 不可用就跳过（不影响已拿到的结果）。"""
+        try:
+            from cosmac.db import session_scope
+            from cosmac.db.wf_repo import record_run
+
+            with session_scope() as s:
+                record_run(
+                    s, slug=slug, platform=platform, room_id=ctx.room_id,
+                    sender=ctx.sender, user_input=user_input, result=result,
+                )
+        except Exception:
+            pass
