@@ -758,9 +758,10 @@ const AGENTS_EVENT_TYPE = 'cosmac.agents'
 const RULES_EVENT_TYPE = 'cosmac.rules'
 /** 控制室里「工作流连接器」state event 的类型（与 bot 端 WORKFLOWS_EVENT_TYPE 一致）。 */
 const WORKFLOWS_EVENT_TYPE = 'cosmac.workflows'
-/** 控制室里「会员等级」state event 的类型（与 bot 端 MEMBERS_EVENT_TYPE 一致）。
- *  管理后台写、主 AI 读；只存非免费的覆盖，未列出的用户默认免费会员。 */
+/** 旧版会员聚合事件，仅用于读取已有数据。 */
 const MEMBERS_EVENT_TYPE = 'cosmac.members'
+/** 新版单用户会员事件：state_key=userId，避免并发覆盖和事件容量上限。 */
+const MEMBER_EVENT_TYPE = 'cosmac.member'
 
 /** 主 AI 可用工具目录（工具开关 UI 用；name 要与 bot 端 Toolbox 注册的一致）。 */
 export const AI_TOOL_CATALOG: { name: string; label: string }[] = [
@@ -804,8 +805,9 @@ async function resolveControlRoom(): Promise<string | null> {
   try {
     const r = await (mx as any).getRoomIdForAlias(alias)
     return r?.room_id || null
-  } catch {
-    return null // 别名未注册（控制室还没建）
+  } catch (e: any) {
+    if (e?.errcode === 'M_NOT_FOUND') return null // 明确不存在，才允许后续创建
+    throw e // 网络/权限/服务器错误不能伪装成“不存在”
   }
 }
 
@@ -983,60 +985,50 @@ export function memberTierLabel(tier: string | undefined): string {
 export type MemberMap = Record<string, string>
 
 /**
- * 读控制室会员 map（管理员用）。控制室/事件不存在或读失败时返回空 map（全员按免费处理）。
+ * 读控制室会员 map（管理员用）。控制室不存在返回空；其它读取错误向上抛。
  * 普通用户读不到控制室——他们查自己等级走「DM 问 bot：会员」。
  */
 export async function getMembers(): Promise<MemberMap> {
   if (!mx) return {}
   const rid = await resolveControlRoom()
   if (!rid) return {}
-  try {
-    const ev = await (mx as any).getStateEvent(rid, MEMBERS_EVENT_TYPE, '')
-    const raw = ev?.members
-    const out: MemberMap = {}
-    if (raw && typeof raw === 'object') {
-      for (const [uid, rec] of Object.entries(raw)) {
+  const events: any[] = await (mx as any).roomState(rid)
+  const out: MemberMap = {}
+  // 先兼容旧聚合事件；随后单用户事件覆盖，free tombstone 可撤销旧等级。
+  for (const event of events || []) {
+    const type = event?.getType?.() ?? event?.type
+    const stateKey = event?.getStateKey?.() ?? event?.state_key
+    const content = event?.getContent?.() ?? event?.content ?? {}
+    if (type === MEMBERS_EVENT_TYPE && stateKey === '') {
+      for (const [uid, rec] of Object.entries(content?.members || {})) {
         const tier = (rec as any)?.tier
-        // 只收已知的非免费等级（免费是默认、不显式存）
-        if (typeof tier === 'string' && tier !== 'free'
-            && MEMBER_TIERS.some((t) => t.slug === tier)) {
-          out[uid] = tier
-        }
+        if (tier !== 'free' && MEMBER_TIERS.some((t) => t.slug === tier)) out[uid] = tier
       }
     }
-    return out
-  } catch {
-    return {} // 房间在但还没写过会员数据
   }
+  for (const event of events || []) {
+    const type = event?.getType?.() ?? event?.type
+    if (type !== MEMBER_EVENT_TYPE) continue
+    const uid = event?.getStateKey?.() ?? event?.state_key
+    const content = event?.getContent?.() ?? event?.content ?? {}
+    if (typeof uid !== 'string' || !uid.startsWith('@') || !uid.includes(':')) continue
+    const tier = content?.tier
+    if (tier === 'free') delete out[uid]
+    else if (MEMBER_TIERS.some((t) => t.slug === tier)) out[uid] = tier
+  }
+  return out
 }
 
 /**
- * 设/调某用户的会员等级（必要时先建控制室）。tier='free' = 撤销（从 map 移除）。
- * 读改写整份 map 后整体覆盖写回；bot 会读到并据此做后续门控/自查。
+ * 设/调某用户的会员等级（必要时先建控制室）。每个用户独立 state_key，互不覆盖。
+ * tier='free' 作为 tombstone，既是撤销，也会覆盖旧聚合事件里的历史记录。
  */
 export async function setMemberTier(userId: string, tier: string): Promise<void> {
   if (!mx) throw new Error('未登录')
   if (!MEMBER_TIERS.some((t) => t.slug === tier)) throw new Error('未知会员等级')
   const rid = await ensureControlRoom()
-  // 先读当前 map（带完整记录），改写本人后整体写回。
-  // #2：必须区分"事件不存在(404=还没写过，从空开始合法)"与"瞬时读失败(网络/权限)"——
-  // 后者绝不能当空 map 处理，否则写回会**清空其他所有会员**。读失败 → 抛错中止、不写。
-  let members: Record<string, any> = {}
-  try {
-    const ev = await (mx as any).getStateEvent(rid, MEMBERS_EVENT_TYPE, '')
-    if (ev?.members && typeof ev.members === 'object') members = { ...ev.members }
-  } catch (e: any) {
-    if (e?.errcode !== 'M_NOT_FOUND') {
-      throw new Error('读取当前会员失败，已取消保存（避免清空其他会员），请重试')
-    }
-    /* M_NOT_FOUND：确实还没写过，从空开始 */
-  }
-  if (tier === 'free') {
-    delete members[userId] // 免费=默认=移出 map
-  } else {
-    members[userId] = { tier, source: 'admin', updated_ts: Math.floor(Date.now() / 1000) }
-  }
-  await (mx as any).sendStateEvent(rid, MEMBERS_EVENT_TYPE, { members }, '')
+  const content = { tier, source: 'admin', updated_ts: Math.floor(Date.now() / 1000) }
+  await (mx as any).sendStateEvent(rid, MEMBER_EVENT_TYPE, content, userId)
 }
 
 /* =====================================================================

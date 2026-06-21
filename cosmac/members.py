@@ -9,8 +9,8 @@
 为什么放这里
 ------------
 - **枚举/标签/校验**是纯逻辑，前后端都要用同一套口径，集中在这一处避免飘移。
-- **存储**走控制室的 ``cosmac.members`` state event（见 config.MEMBERS_EVENT_TYPE 的长注释：
-  权威数据、用户不可自改、只有管理员/bot 能写）。这里提供一个薄封装 :class:`MembersStore`，
+- **存储**走控制室的单用户 ``cosmac.member`` state event，旧 ``cosmac.members`` 只读兼容
+  （权威数据、用户不可自改、只有管理员/bot 能写）。这里提供 :class:`MembersStore`，
   把「读当前 map / 查某人等级 / 授予 / 撤销」收口成几个方法，供 bot 调用。
 
 谁来写
@@ -19,8 +19,7 @@
 2. **未来模块4（交易系统）支付成功**：服务端调 :meth:`MembersStore.grant` —— 这就是本期
    预留给「购买获得会员」的服务端接口。本期不接真实支付，只把接口和数据模型立起来。
 
-注意：本模块**只依赖** MatrixClient 的 ``resolve_alias`` / ``get_state_event`` /
-``set_state_event`` 三个方法，不引入任何额外依赖，方便单测用假 client 注入。
+注意：本模块只依赖 MatrixClient 的 state 读写方法，不引入额外依赖，方便单测注入假 client。
 """
 
 from __future__ import annotations
@@ -29,7 +28,7 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
-from cosmac.config import GATING_EVENT_TYPE, MEMBERS_EVENT_TYPE
+from cosmac.config import GATING_EVENT_TYPE, MEMBER_EVENT_TYPE, MEMBERS_EVENT_TYPE
 
 logger = logging.getLogger("cosmac.members")
 
@@ -108,13 +107,13 @@ def parse_members(content: Optional[Dict[str, Any]]) -> Dict[str, Dict[str, Any]
 
 
 class MembersStore:
-    """控制室 ``cosmac.members`` 的薄封装：读当前 map / 查等级 / 授予 / 撤销。
+    """控制室会员等级的薄封装：读当前 map / 查等级 / 授予 / 撤销。
 
-    所有写操作都是「读改写」整份 map（state event 没有部分更新语义），并发写极少（管理员
-    手动调整 + 偶发支付回调），冲突概率可忽略；真出现也只是最后写赢，不致命。
+    新数据按用户拆成 ``cosmac.member`` state event，state_key 是 user_id；旧版
+    ``cosmac.members`` 聚合事件只读兼容。单用户写入既不会覆盖其他用户，也不受整表容量限制。
 
     构造参数：
-        client:               提供 resolve_alias/get_state_event/set_state_event 的 MatrixClient。
+        client: 提供 resolve_alias/get_state_event/get_room_state/set_state_event 的 MatrixClient。
         control_room_alias:   控制室别名（#cosmac-ctrl:<server>）。
     """
 
@@ -131,36 +130,55 @@ class MembersStore:
             return None
 
     def get_all(self) -> Dict[str, Dict[str, Any]]:
-        """读控制室会员 map（{user_id: {tier, source, updated_ts}}）。失败/无数据返回空。
-
-        **注意**：此方法对只读查询友好（读失败回落空=按免费处理，不致命）。但**写操作
-        （grant）绝不能用它**——读失败回空会导致整份 map 被覆盖、清空其他会员。写路径用
-        :meth:`_read_all_strict`（读失败抛异常）。
-        """
+        """合并读取新旧会员数据；失败/无数据返回空，供列表展示与命令查询。"""
         room = self._ctrl_room()
         if not room:
             return {}
         try:
-            ev = self._client.get_state_event(room, MEMBERS_EVENT_TYPE)
-            return parse_members(ev)
+            # 先读旧聚合数据，再让新单用户事件覆盖；free 是 tombstone，用来撤销旧记录。
+            legacy = parse_members(
+                self._client.get_state_event(room, MEMBERS_EVENT_TYPE)
+            )
+            for ev in self._client.get_room_state(room):
+                if not isinstance(ev, dict) or ev.get("type") != MEMBER_EVENT_TYPE:
+                    continue
+                uid = ev.get("state_key")
+                content = ev.get("content")
+                if not isinstance(uid, str) or not uid.startswith("@") or ":" not in uid:
+                    continue
+                content = content if isinstance(content, dict) else {}
+                tier = normalize_tier(content.get("tier"))
+                if tier == DEFAULT_TIER:
+                    legacy.pop(uid, None)
+                else:
+                    legacy[uid] = {
+                        "tier": tier,
+                        "source": str(content.get("source") or "admin"),
+                        "updated_ts": content.get("updated_ts"),
+                    }
+            return legacy
         except Exception as e:
             logger.debug("读取会员等级失败（忽略）：%s", e)
             return {}
 
-    def _read_all_strict(self, room: str) -> Dict[str, Dict[str, Any]]:
-        """读会员 map，**读失败抛异常**（区别于"读到空"）——给写操作用（#2）。
-
-        get_state_event 语义：404→None（确实还没写过，合法空）；403/网络/5xx→抛异常。
-        所以这里只有"事件不存在"才返回空 map，瞬时读失败会向上抛、让 grant 放弃写入，
-        绝不拿一份（因读失败而）空的 map 去覆盖、清空其他会员。
-        """
-        ev = self._client.get_state_event(room, MEMBERS_EVENT_TYPE)
-        return parse_members(ev)
-
     def get_tier(self, user_id: str) -> str:
-        """查某用户的会员等级 slug；未记录 → 默认（免费）。"""
-        rec = self.get_all().get(user_id)
-        return normalize_tier(rec.get("tier")) if rec else DEFAULT_TIER
+        """查某用户等级；优先单用户事件，缺失时回退旧聚合数据。"""
+        room = self._ctrl_room()
+        if not room:
+            return DEFAULT_TIER
+        try:
+            current = self._client.get_state_event(room, MEMBER_EVENT_TYPE, user_id)
+            if current is not None:
+                return normalize_tier(current.get("tier"))
+            legacy = parse_members(
+                self._client.get_state_event(room, MEMBERS_EVENT_TYPE)
+            )
+            rec = legacy.get(user_id)
+            return normalize_tier(rec.get("tier")) if rec else DEFAULT_TIER
+        except Exception as e:
+            # 会员读失败按免费处理，使付费能力自然 fail-closed；不会误授予权限。
+            logger.warning("读取用户会员等级失败，按免费处理 user=%s: %s", user_id, e)
+            return DEFAULT_TIER
 
     def grant(
         self,
@@ -172,7 +190,7 @@ class MembersStore:
         """授予/调整某用户的会员等级（**预留给模块4支付的服务端入口**，也用于 bot 命令）。
 
         - tier 经校验：非法直接拒（返回 False），不写脏数据进控制室。
-        - tier == 免费 等价于「撤销」（从 map 里删掉该用户，回落默认）。
+        - tier == 免费 写入 tombstone；既表示撤销，也能覆盖旧聚合事件里的历史等级。
         - source 记录来源（"admin"/"purchase"/…），便于以后审计「这级是怎么来的」。
         成功写入返回 True；控制室不存在/写失败返回 False（调用方据此提示）。
         """
@@ -183,27 +201,18 @@ class MembersStore:
         if not room:
             logger.warning("授予会员失败：控制室不存在（还没建）")
             return False
-        # #2：**先严格读**当前 map——读失败抛异常→放弃写入，绝不拿空表覆盖、清空其他会员。
-        try:
-            current = self._read_all_strict(room)
-        except Exception:
-            logger.exception(
-                "授予会员失败：读当前会员出错，放弃写入（避免清空其他会员）user=%s", user_id
-            )
+        if not user_id.startswith("@") or ":" not in user_id:
+            logger.warning("授予会员失败：非法 user_id %r", user_id)
             return False
-        # 读成功后再改写整份 map 写回
-        if tier == DEFAULT_TIER:
-            current.pop(user_id, None)  # 免费=撤销=移出 map
-        else:
-            current[user_id] = {
-                "tier": tier,
-                "source": source,
-                "updated_ts": int(now_ts if now_ts is not None else time.time()),
-            }
+        content = {
+            "tier": tier,
+            "source": source,
+            "updated_ts": int(now_ts if now_ts is not None else time.time()),
+        }
         try:
             return bool(
                 self._client.set_state_event(
-                    room, MEMBERS_EVENT_TYPE, {"members": current}
+                    room, MEMBER_EVENT_TYPE, content, user_id
                 )
             )
         except Exception:
@@ -296,18 +305,33 @@ class GatingStore:
     写由管理后台浏览器直接走 Matrix（bot 不写门控）。读失败保留上次成功值（不失效开放）。
     """
 
-    def __init__(self, client: Any, control_room_alias: str, ttl: float = 15.0):
+    def __init__(
+        self,
+        client: Any,
+        control_room_alias: str,
+        ttl: float = 15.0,
+        retry_backoff: float = 5.0,
+    ):
+        """创建门控读取器。
+
+        ``retry_backoff`` 是读取失败后的最短重试间隔。故障期间沿用上次成功配置；若从未
+        成功读取，则返回全能力 ``admin`` 的保守策略，避免默认 free 造成越权。
+        """
         self._client = client
         self._alias = control_room_alias
         self._ttl = ttl
+        self._retry_backoff = retry_backoff
         self._cache: Dict[str, str] = {}
         self._cache_ts: float = float("-inf")
+        self._next_retry_ts: float = float("-inf")
 
     def get_all(self) -> Dict[str, str]:
         """返回**合并默认后**的完整门控映射 {能力key: 门槛slug}（带 TTL 缓存）。"""
         now = time.monotonic()
         if now - self._cache_ts < self._ttl and self._cache:
             return self._cache
+        if now < self._next_retry_ts:
+            return self._cache or {key: GATE_ADMIN for key in _GATE_DEFAULTS}
         merged = dict(_GATE_DEFAULTS)  # 先铺默认
         try:
             room = self._client.resolve_alias(self._alias)
@@ -316,24 +340,21 @@ class GatingStore:
                 merged.update(parse_gates(ev))
             self._cache = merged
             self._cache_ts = now
+            self._next_retry_ts = float("-inf")
             return merged
         except Exception as e:
-            # 读失败：有上次成功值就沿用（不因抖动突然放开/锁死）。
-            # #3：**不刷新 cache_ts**——否则把"失败"缓存一个 TTL，会延长付费门控被绕过的
-            # 窗口。这里让下次调用立即重试，尽快拿到真实策略。若**从未**读成功过（无缓存），
-            # 只能暂用默认（多为 free）——靠启动 warm() 把这个窗口压到极小（见 warm 注释）。
+            # 失败本身不冒充成功缓存，但需要短退避，避免每条消息同时冲击故障中的 Synapse。
+            self._next_retry_ts = now + self._retry_backoff
             if self._cache:
-                logger.warning("读取门控策略失败，沿用上次成功值，将尽快重试：%s", e)
+                logger.warning("读取门控策略失败，沿用上次成功值，稍后重试：%s", e)
             else:
                 logger.warning(
-                    "门控策略首次读取失败、暂用内置默认（部分能力默认免费，付费门控本窗口可能"
-                    "被绕过），将每次调用重试直到读到真实策略：%s", e
+                    "门控策略首次读取失败，临时收紧为仅管理员，稍后重试：%s", e
                 )
-            return self._cache or merged
+            return self._cache or {key: GATE_ADMIN for key in _GATE_DEFAULTS}
 
     def warm(self) -> bool:
-        """启动时预热一次（best-effort）：尽快建立"上次成功值"缓存，把"首读失败→暂用默认
-        →付费门控被绕过"的窗口压到极小（#3）。读到真实策略返回 True，否则 False（不抛、不阻断启动）。"""
+        """启动时预热一次；失败不阻断启动，但运行期会使用 fail-closed 策略。"""
         try:
             self.get_all()
             return bool(self._cache)

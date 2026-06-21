@@ -7,6 +7,13 @@
 
 ---
 
+## 2026-06-21 — 权限与工作流可靠性复查修复
+- **门控 fail-closed + 退避**：控制室首次读取失败时临时收紧为仅管理员；已有成功缓存继续沿用。失败后短暂退避，避免 Synapse 故障时每条消息重复请求。
+- **会员按用户拆分 state**：新写入改用 `cosmac.member`，以 user_id 为 state_key；旧 `cosmac.members` 聚合事件只读兼容，free tombstone 可覆盖旧记录。消除并发整表覆盖和单事件容量上限。
+- **前端严格区分错误**：控制室别名只有 `M_NOT_FOUND` 才视为不存在；网络/权限错误向上抛。后台会员读取失败不再伪装成“全员免费”。
+- **工作流可靠状态**：采用 `queued -> pending -> processing`。只安全回收未开始外呼的 queued；网络超时/5xx 保留 pending/token，避免平台已接单后诱导重试。pending 默认 7 天超时（`COSMAC_WF_CALLBACK_TIMEOUT` 可调），到期提示先核对外部平台。
+- 验证：`ruff` 通过；CosMac 后端 **177 单测全过**；client build 通过（JS hash `index-BXhjDtJk.js`）。本次前后端均有改动，需部署 dist 并重启 `guduu-bot`。
+
 ## 2026-06-21 — 修复：管理后台「工作流」平台下拉框文字被竖直裁切
 - 现象：工作流连接器表单里 `平台/请求方法/Dify应用类型` 等 select，选中项文字下半截被切掉。
 - 根因：两套样式叠加打架——全局 `.cam-select` 给了**固定 `height:34px`**，而 `AdminView` 的 `.adm-form .adm-field select`(优先级更高)又把 `padding` 设成 `9px 11px`+`line-height:1.5`。34px 固定高 − 上下 18px 内边距 = 仅 16px 容文字 < 行高 ~21px → 裁切。

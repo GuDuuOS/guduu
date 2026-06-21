@@ -201,10 +201,10 @@ AGENTS_EVENT_TYPE = "cosmac.agents"
 # （如：对外报价/发布须经确认、不杜撰数据），无论群里用哪个智能体都注入、优先级最高。
 RULES_EVENT_TYPE = "cosmac.rules"
 
-# 管理后台写、bot 读的「会员等级」state event 类型（存控制室）。
-# 把每个用户的会员身份(免费/付费/创作者)集中存在控制室一个 state event 里，内容形如
+# 旧版「会员等级」聚合 state event 类型，仅保留读取兼容。旧数据把所有用户集中存在
+# 一个 state event 里，内容形如
 # {"members": {"@alice:host": {"tier":"paid","source":"admin","updated_ts":...}, ...}}。
-# 未列出的用户一律按「免费会员」处理（只存非免费的覆盖，省空间）。
+# 新代码不再写它：整表读改写会发生并发覆盖，也会撞 Matrix event 大小上限。
 # **为什么走控制室 state event 而非 account data**：会员等级是管理员/支付系统设定的、
 # 用户不能自改的权威数据（付费门槛要靠它）；account data 用户自己能改、不安全。控制室
 # 又只有服务器管理员能进（见 CONTROL_ADMINS_EVENT_TYPE 对齐逻辑），普通用户读不到——
@@ -212,6 +212,11 @@ RULES_EVENT_TYPE = "cosmac.rules"
 # 写入方：① 管理后台(管理员 power=50 够写 state)手动调整；② 未来模块4支付成功后由 bot
 # (power=100)经 grant_member_tier 写入(预留接口)。会员等级的**枚举/标签/校验**见 cosmac.members。
 MEMBERS_EVENT_TYPE = "cosmac.members"
+
+# 新版「单用户会员等级」state event 类型。每个用户使用自己的 user_id 作为 state_key，
+# 内容形如 {"tier":"paid","source":"admin","updated_ts":...}。按用户拆开后，管理员和
+# 支付回调同时更新不同用户时互不覆盖；写 free 作为 tombstone，可显式盖掉旧聚合数据。
+MEMBER_EVENT_TYPE = "cosmac.member"
 
 # 管理后台写、bot 读的「功能门控策略」state event 类型（存控制室）。
 # 把「每个能力需要的最低会员等级」集中存这里，内容形如

@@ -288,15 +288,30 @@ def run_webhook(
     try:
         resp = _fetch(method, url, json_body=payload, headers=headers, timeout=timeout)
     except _TooBig:
-        return {"ok": False, "status": None, "output": "", "error": "平台响应过大，已拒绝"}
+        # 已经收到平台响应后才发现响应体过大，任务可能已被平台接受，不能诱导立即重试。
+        return {
+            "ok": False, "status": None, "output": "",
+            "error": "平台响应过大，提交结果未知", "ambiguous": True,
+        }
     except requests.RequestException as exc:
         logger.warning("工作流 webhook 调用失败: %s", exc)
-        return {"ok": False, "status": None, "output": "", "error": f"请求失败：{exc}"}
+        # 超时/断线可能发生在平台已接单之后。保留 pending/token 等回调，避免重复扣费。
+        return {
+            "ok": False, "status": None, "output": "",
+            "error": f"请求失败、提交结果未知：{exc}", "ambiguous": True,
+        }
 
     ok = 200 <= resp.status_code < 300
     text = _extract_text(resp)
     err = "" if ok else f"平台返回 {resp.status_code}"
-    return {"ok": ok, "status": resp.status_code, "output": text, "error": err}
+    return {
+        "ok": ok,
+        "status": resp.status_code,
+        "output": text,
+        "error": err,
+        # 5xx 也可能是平台接单后内部响应失败；4xx 才能较可靠地视为明确拒绝。
+        "ambiguous": resp.status_code >= 500,
+    }
 
 
 def _extract_text(resp: requests.Response) -> str:

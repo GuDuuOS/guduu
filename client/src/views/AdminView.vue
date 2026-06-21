@@ -865,10 +865,10 @@ async function check() {
 async function loadUsers() {
   loading.value = true
   try {
-    // 用户列表是主体；会员 map 并行读、失败不阻断（读不到就全员按免费显示）
+    // 会员读取失败不能伪装成“全员免费”，否则管理员会在错误数据上继续操作。
     const [list, mp] = await Promise.all([
       listUsers(),
-      getMembers().catch(() => ({} as MemberMap)),
+      getMembers(),
     ])
     users.value = list
     members.value = mp

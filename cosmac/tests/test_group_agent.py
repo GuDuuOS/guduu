@@ -22,6 +22,7 @@ from cosmac.config import (
     CosmacConfig,
 )
 from cosmac.db import init_engine
+from cosmac.members import GatingStore, MembersStore
 
 CTRL = "!ctrl:host"
 ROOM = "!grp:host"
@@ -54,6 +55,9 @@ class FakeClient:
 def _bot(channel_cfg=None, agents=None, skills=None, rules=None, messages=None) -> CosmacBot:
     bot = CosmacBot(CosmacConfig(llm_provider="echo"))
     bot.client = FakeClient(channel_cfg, agents, skills, rules, messages)
+    # 所有读取都注入同一个假 client，避免测试触发真实 Matrix 网络请求。
+    bot.members = MembersStore(bot.client, bot.config.control_room_alias)
+    bot.gating = GatingStore(bot.client, bot.config.control_room_alias, ttl=0)
     return bot
 
 

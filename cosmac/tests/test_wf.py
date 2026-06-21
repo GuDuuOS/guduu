@@ -141,6 +141,7 @@ class TestWfEngine(unittest.TestCase):
             r = wf.run_connector(conn, "x")
         self.assertFalse(r["ok"])
         self.assertIn("500", r["error"])
+        self.assertTrue(r["ambiguous"])  # 5xx 可能发生在平台接单之后
 
     def test_network_error_is_caught(self) -> None:
         conn = {"url": "https://h/wh"}
@@ -148,6 +149,7 @@ class TestWfEngine(unittest.TestCase):
             r = wf.run_connector(conn, "x")
         self.assertFalse(r["ok"])
         self.assertIn("请求失败", r["error"])
+        self.assertTrue(r["ambiguous"])  # 超时/断线不能证明平台未接单
 
     def test_missing_url(self) -> None:
         r = wf.run_connector({"slug": "x"}, "y")

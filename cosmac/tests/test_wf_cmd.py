@@ -11,6 +11,7 @@ from unittest import mock
 
 from cosmac.bots.appservice_bot import CosmacBot
 from cosmac.config import WORKFLOWS_EVENT_TYPE, CosmacConfig
+from cosmac.members import GatingStore, MembersStore
 from cosmac.db import init_engine, session_scope
 from cosmac.db.wf_repo import recent_runs
 
@@ -49,6 +50,9 @@ def _bot(workflows=None) -> CosmacBot:
     ))
     bot.client = FakeClient(workflows if workflows is not None else [WF])
     bot.toolbox = bot.toolbox.__class__(bot.client, control_room_alias="#cosmac-ctrl:host")
+    # 测试里的权限/门控都走同一个假 client，禁止误连本机 Synapse。
+    bot.members = MembersStore(bot.client, bot.config.control_room_alias)
+    bot.gating = GatingStore(bot.client, bot.config.control_room_alias, ttl=0)
     return bot
 
 
@@ -223,7 +227,7 @@ class TestWfCommand(unittest.TestCase):
         self.assertIn("claimed_at", cols)
 
     def test_recover_interrupted_runs(self) -> None:
-        # #2：启动时把上次遗留的、**久未完成**的 pending 结清为 error 并通知群（不永久卡 pending）
+        # 启动时把上次遗留的久未执行 queued 结清为 error 并通知群。
         from datetime import datetime, timedelta
 
         from cosmac.db.models import WorkflowRun
@@ -243,8 +247,8 @@ class TestWfCommand(unittest.TestCase):
         bot = _bot()
         bot.recover_interrupted_runs()
         with session_scope() as s:
-            self.assertEqual(get_run(s, rid).status, "error")  # 不再卡 pending
-        self.assertTrue(any("重启中断" in t for _r, t in bot.client.sent))  # 通知到群
+            self.assertEqual(get_run(s, rid).status, "error")
+        self.assertTrue(any("提交队列中断" in t for _r, t in bot.client.sent))
 
     def test_reclaim_orphans_grace_spares_recent(self) -> None:
         # #1：新近的 pending 不回收（外部平台可能仍在跑、稍后回调；回收会误杀+双扣费）
@@ -252,7 +256,8 @@ class TestWfCommand(unittest.TestCase):
 
         from cosmac.db.models import WorkflowRun
         from cosmac.db.wf_repo import (
-            _ORPHAN_GRACE_SECONDS, create_pending, get_run, reclaim_orphans,
+            _ORPHAN_GRACE_SECONDS, create_pending, get_run, mark_submission_started,
+            reclaim_orphans,
         )
 
         with session_scope() as s:
@@ -264,18 +269,54 @@ class TestWfCommand(unittest.TestCase):
                 s, slug="old", platform="webhook", room_id=ROOM,
                 sender="@u:host", user_input="x", token="h2",
             )
-            recent_id, old_id = recent.id, old.id
+            waiting = create_pending(
+                s, slug="waiting", platform="webhook", room_id=ROOM,
+                sender="@u:host", user_input="x", token="h3",
+            )
+            mark_submission_started(s, waiting.id)
+            recent_id, old_id, waiting_id = recent.id, old.id, waiting.id
         with session_scope() as s:  # 只把 old 推到宽限期外
             s.get(WorkflowRun, old_id).updated_at = (
                 datetime.utcnow() - timedelta(seconds=_ORPHAN_GRACE_SECONDS + 60)
             )
+            # 外部平台已接收的 pending 即使同样很旧，也必须继续等合法回调。
+            s.get(WorkflowRun, waiting_id).updated_at = (
+                datetime.utcnow() - timedelta(days=2)
+            )
         with session_scope() as s:
-            ids = {rid for rid, _slug, _room in reclaim_orphans(s)}
+            ids = {rid for rid, _slug, _room, _reason in reclaim_orphans(s)}
         self.assertIn(old_id, ids)          # 久的被回收
         self.assertNotIn(recent_id, ids)    # 新的留着等回调
+        self.assertNotIn(waiting_id, ids)   # 已提交的慢任务绝不按固定时长误杀
         with session_scope() as s:
             self.assertEqual(get_run(s, old_id).status, "error")
-            self.assertEqual(get_run(s, recent_id).status, "pending")
+            self.assertEqual(get_run(s, recent_id).status, "queued")
+            self.assertEqual(get_run(s, waiting_id).status, "pending")
+
+    def test_pending_callback_timeout_is_configurable(self) -> None:
+        """超过配置期限的 pending 会收口，避免平台永不回调时永久残留。"""
+        from datetime import datetime, timedelta
+
+        from cosmac.db.models import WorkflowRun
+        from cosmac.db.wf_repo import (
+            create_pending, get_run, mark_submission_started, reclaim_orphans,
+        )
+
+        with session_scope() as s:
+            run = create_pending(
+                s, slug="lost", platform="webhook", room_id=ROOM,
+                sender="@u:host", user_input="x", token="h",
+            )
+            mark_submission_started(s, run.id)
+            rid = run.id
+        with session_scope() as s:
+            s.get(WorkflowRun, rid).updated_at = datetime.utcnow() - timedelta(hours=2)
+        with mock.patch.dict("os.environ", {"COSMAC_WF_CALLBACK_TIMEOUT": "3600"}):
+            with session_scope() as s:
+                rows = reclaim_orphans(s)
+        self.assertEqual(rows[0][3], "等待外部平台回调超时")
+        with session_scope() as s:
+            self.assertEqual(get_run(s, rid).status, "error")
 
     def test_seen_txn_lru_bounded(self) -> None:
         # #2：内存去重有界，不会无限增长
@@ -297,21 +338,22 @@ class TestWfCommand(unittest.TestCase):
             pend = [r for r in recent_runs(s, slug="img") if r.status == "pending"]
             self.assertEqual(pend, [])  # 没有永久等不到回调的 pending
 
-    def test_async_submit_exception_completes_and_notifies(self) -> None:
-        # #4：异步提交抛异常 → 结清 pending(error) + 通知群，不留永久 pending
+    def test_async_submit_exception_keeps_pending_and_warns(self) -> None:
+        # 外呼异常可能发生在平台接单之后，保留 pending/token，避免立即重试导致双扣费。
         bot = _bot(workflows=[{**WF, "async": True}])
         with mock.patch("cosmac.wf.run_connector", side_effect=RuntimeError("boom")):
             bot._run_wf_command(ROOM, "@u:host", "工作流 跑 cover x")
         with session_scope() as s:
-            self.assertEqual(recent_runs(s, slug="cover")[0].status, "error")
-        self.assertTrue(any("提交失败" in t for _r, t in bot.client.sent))
+            self.assertEqual(recent_runs(s, slug="cover")[0].status, "pending")
+        self.assertTrue(any("提交结果未知" in t for _r, t in bot.client.sent))
 
     def test_atomic_claim_only_once(self) -> None:
         # #3：claim_pending 原子 CAS——只有一个并发回调能把 pending 抢成 processing
-        from cosmac.db.wf_repo import claim_pending, create_pending
+        from cosmac.db.wf_repo import claim_pending, create_pending, mark_submission_started
         with session_scope() as s:
             rid = create_pending(s, slug="x", platform="webhook", room_id=ROOM,
                                  sender="@u:host", user_input="i", token="h").id
+            mark_submission_started(s, rid)
         with session_scope() as s:
             self.assertTrue(claim_pending(s, rid))   # 抢到
         with session_scope() as s:
@@ -322,10 +364,11 @@ class TestWfCommand(unittest.TestCase):
         from datetime import datetime, timedelta
 
         from cosmac.db.models import WorkflowRun
-        from cosmac.db.wf_repo import claim_pending, create_pending
+        from cosmac.db.wf_repo import claim_pending, create_pending, mark_submission_started
         with session_scope() as s:
             rid = create_pending(s, slug="x", platform="webhook", room_id=ROOM,
                                  sender="@u:host", user_input="i", token="h").id
+            mark_submission_started(s, rid)
         with session_scope() as s:
             self.assertTrue(claim_pending(s, rid))   # pending→processing
         with session_scope() as s:

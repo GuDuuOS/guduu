@@ -265,6 +265,22 @@ class MatrixClient:
             f"读 state {event_type}@{room_id} 失败: HTTP {resp.status_code}"
         )
 
+    def get_room_state(self, room_id: str) -> List[Dict[str, Any]]:
+        """读取房间当前全部 state events。
+
+        会员后台需要枚举 ``cosmac.member`` 的不同 state_key；单事件接口无法列出这些键，
+        因此使用 Matrix 标准 ``/rooms/{roomId}/state``。任何非 200 或网络错误都向上抛，
+        调用方不能把权限/网络故障误当成空会员表。
+        """
+        url = self._url(f"/_matrix/client/v3/rooms/{quote(room_id)}/state")
+        resp = self._session.get(url, timeout=10)
+        if resp.status_code != 200:
+            raise RuntimeError(f"读房间 state {room_id} 失败: HTTP {resp.status_code}")
+        data = resp.json()
+        if not isinstance(data, list):
+            raise RuntimeError(f"读房间 state {room_id} 失败: 响应不是数组")
+        return data
+
     def set_state_event(
         self,
         room_id: str,

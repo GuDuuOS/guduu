@@ -55,10 +55,21 @@ class FakeClient:
     def get_state_event(self, _room, event_type, _state_key=""):
         if event_type == "m.room.power_levels":
             return {"users": dict(self._power)}
-        return self._state.get(event_type)
+        return self._state.get((event_type, _state_key), self._state.get(event_type))
+
+    def get_room_state(self, _room):
+        """把内存 state 展开成 Matrix room state 数组，覆盖单用户 state_key 场景。"""
+        events = []
+        for key, content in self._state.items():
+            if isinstance(key, tuple):
+                event_type, state_key = key
+            else:
+                event_type, state_key = key, ""
+            events.append({"type": event_type, "state_key": state_key, "content": content})
+        return events
 
     def set_state_event(self, _room, event_type, content, _state_key="") -> bool:
-        self._state[event_type] = content
+        self._state[(event_type, _state_key)] = content
         return True
 
     def send_text(self, _room, text, txn_id=None):
@@ -150,8 +161,8 @@ class MembersStoreTests(unittest.TestCase):
         self.assertFalse(s.grant(ALICE, TIER_PAID))
         self.assertEqual(s.get_all(), {})
 
-    def test_grant_aborts_on_read_failure_no_overwrite(self):
-        # #2：读当前会员瞬时失败 → grant 放弃写入，绝不拿空表覆盖、清空其他会员
+    def test_grant_does_not_need_legacy_read(self):
+        # 单用户 state 写入不再依赖读取旧整表；即使旧聚合读取失败也不会覆盖其他会员。
         fake = FakeClient(CTRL)
         fake._state[MEMBERS_EVENT_TYPE] = {
             "members": {ALICE: {"tier": "paid"}, BOB: {"tier": "creator"}}
@@ -165,9 +176,9 @@ class MembersStoreTests(unittest.TestCase):
             return real_get(room, et, sk)
 
         fake.get_state_event = boom
-        self.assertFalse(store.grant("@c:guduu.local", TIER_PAID))  # 读失败 → 拒绝写
+        self.assertTrue(store.grant("@c:guduu.local", TIER_PAID))
         fake.get_state_event = real_get  # 恢复读，确认原数据没被覆盖
-        self.assertEqual(set(store.get_all().keys()), {ALICE, BOB})
+        self.assertEqual(set(store.get_all().keys()), {ALICE, BOB, "@c:guduu.local"})
 
     def test_grant_first_member_when_absent(self):
         # 事件不存在(get_state_event→None) 是合法空表，正常写入第一个会员（不被 #2 误伤）
@@ -255,7 +266,7 @@ class GatingPureTests(unittest.TestCase):
         self.assertEqual(store.required("ai_chat"), TIER_CREATOR)
 
     def test_gating_retries_after_read_failure(self):
-        # #3：读失败不缓存"失败"——下次调用立即重试，读到真实策略即生效（不延长付费门控绕过窗口）
+        # 首读失败 fail-closed，并在短退避后重试；故障期不会放开也不会每条消息打服务器。
         fake = FakeClient(CTRL)
         real = fake.get_state_event
         calls = {"n": 0}
@@ -269,9 +280,26 @@ class GatingPureTests(unittest.TestCase):
             return real(room, et, sk)
 
         fake.get_state_event = flaky
-        store = GatingStore(fake, "#cosmac-ctrl:guduu.local", ttl=60)  # 大 TTL
-        self.assertEqual(store.required("ai_chat"), TIER_FREE)  # 首读失败→暂用默认
-        self.assertEqual(store.required("ai_chat"), TIER_PAID)  # 立即重试→读到真实策略
+        store = GatingStore(
+            fake, "#cosmac-ctrl:guduu.local", ttl=60, retry_backoff=0
+        )
+        self.assertEqual(store.required("ai_chat"), GATE_ADMIN)
+        self.assertEqual(store.required("ai_chat"), TIER_PAID)
+
+    def test_gating_failure_backoff_avoids_request_storm(self):
+        """退避期内重复读取不再访问 Matrix，并持续使用保守策略。"""
+        fake = FakeClient(CTRL)
+        calls = {"n": 0}
+
+        def boom(*_args):
+            calls["n"] += 1
+            raise RuntimeError("down")
+
+        fake.get_state_event = boom
+        store = GatingStore(fake, "#cosmac-ctrl:guduu.local", ttl=0, retry_backoff=60)
+        self.assertEqual(store.required("ai_chat"), GATE_ADMIN)
+        self.assertEqual(store.required("ai_chat"), GATE_ADMIN)
+        self.assertEqual(calls["n"], 1)
 
     def test_gating_warm(self):
         # #3：启动预热建立缓存

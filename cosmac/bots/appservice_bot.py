@@ -110,6 +110,7 @@ class CosmacBot:
         # #2：用有界 LRU(OrderedDict) 防无限增长；并尽力持久化到 DB，重启后也能识别重放。
         self._seen_txns: "OrderedDict[str, None]" = OrderedDict()
         self._seen_txn_calls = 0  # 计数器，偶尔触发一次 DB 旧记录清理
+        self._last_orphan_sweep: float = float("-inf")
         # 「按群模型覆盖」用的 Agent 缓存：model_id → Agent（同 provider 换 model）。
         # 全局配置(provider/人设)变化时清空，避免用到旧 provider/人设构建的实例。
         self._model_agents: Dict[str, Agent] = {}
@@ -129,6 +130,7 @@ class CosmacBot:
     # —— 事件分发 ——
 
     _SEEN_TXN_MAX = 4096  # 内存去重 LRU 上限（防无限增长）
+    _ORPHAN_SWEEP_INTERVAL = 300.0  # 有事务流量时每 5 分钟检查一次提交遗孤
 
     def handle_transaction(self, txn_id: str, events: List[Dict[str, Any]]) -> bool:
         """处理 Synapse 推来的一批事件（一个事务）。返回是否可回 200。
@@ -138,6 +140,11 @@ class CosmacBot:
           - False：另一处理中(未过期)，或 DB 暂判定让位（回非 200，让 Synapse 稍后重试）——
                    避免重复处理，也避免"先标记后处理"在崩溃时永久丢一整批。
         """
+        now = time.monotonic()
+        if now - self._last_orphan_sweep >= self._ORPHAN_SWEEP_INTERVAL:
+            # 在正常事务循环里周期执行，弥补“只在启动时扫一次”导致新遗孤永久残留。
+            self._last_orphan_sweep = now
+            self.recover_interrupted_runs()
         # 内存快路：本进程已处理过直接跳过（也是 DB 不可用时的唯一防线）
         if txn_id in self._seen_txns:
             logger.info("事务 %s 已处理过（内存），跳过", txn_id)
@@ -170,11 +177,11 @@ class CosmacBot:
         return True
 
     def recover_interrupted_runs(self) -> None:
-        """启动时结清上次进程遗留的未完成工作流运行并通知用户（尽力而为，#2）。
+        """周期结清长期停在提交阶段的工作流运行并通知用户（尽力而为）。
 
         进程内线程池不跨重启——in-flight/排队的提交与 ComfyUI 轮询随旧进程一起消失，
-        对应的 pending/processing 永远等不到完成。这里在启动时一次性收口：标记失败、
-        告诉用户"因服务重启中断、请重试"，避免永久干等。DB 不可用则跳过。
+        对应的 queued 永远等不到开始。启动时和事务周期内都收口；pending 只在超过可配置
+        回调期限后标记超时，避免永久残留。DB 不可用则跳过。
         （注意：这是"让中断**可见**"，不是"恢复执行"——真要不丢任务需durable队列，见架构说明。）
         """
         try:
@@ -185,14 +192,15 @@ class CosmacBot:
                 orphans = reclaim_orphans(s)
         except Exception:
             return  # 没 DB / 出错：跳过，不阻断启动
-        for run_id, slug, room_id in orphans:
+        for run_id, slug, room_id, reason in orphans:
             if not room_id:
                 continue
             try:
                 # 固定 txn id：万一通知本身重发也被 Synapse 去重，群里不重复
                 self.client.send_text(
                     room_id,
-                    f"⚠️ 工作流「{slug}」(#{run_id}) 因服务重启中断，请重试。",
+                    f"⚠️ 工作流「{slug}」(#{run_id}) {reason}。"
+                    "请先到外部平台确认任务状态，再决定是否重试。",
                     txn_id=f"cosmac-wf-orphan-{run_id}",
                 )
             except Exception:
@@ -1060,7 +1068,9 @@ class CosmacBot:
 
         try:
             from cosmac.db import session_scope
-            from cosmac.db.wf_repo import complete_run, create_pending
+            from cosmac.db.wf_repo import (
+                complete_run, create_pending, get_run, mark_submission_started,
+            )
 
             token = secrets.token_urlsafe(16)
             with session_scope() as s:
@@ -1079,18 +1089,39 @@ class CosmacBot:
             # 提交成功就等平台回调；提交失败则结清 pending + 通知群。
             def _submit() -> None:
                 err = ""
+                ambiguous = False
                 try:
+                    # 先持久化“已开始外呼”，再发 HTTP。此后崩溃也保留 token 等合法回调，
+                    # 避免外部已接单、本地却把 queued 回收后引发重复扣费。
+                    with session_scope() as s2:
+                        if not mark_submission_started(s2, run_id):
+                            return
                     r = run_connector(
                         conn, user_input, callback_url=cb, callback_token=token
                     )
                     if not r.get("ok"):
                         err = r.get("error") or "提交失败"
+                        ambiguous = bool(r.get("ambiguous"))
                 except Exception as exc:
-                    # #4：提交抛异常也要结清 pending + 通知，否则平台没收到任务、用户却看到"已提交"，
-                    # 这条 run 永久卡 pending。
+                    # worker 已进入 pending 后出现未知异常，外部请求可能已经发出；按结果未知处理，
+                    # 保留 token 等回调/超时收口，不能直接提示重试导致重复扣费。
                     logger.exception("异步工作流提交出错：%s", name)
-                    err = f"提交异常：{exc}"
+                    err = f"提交异常、结果未知：{exc}"
+                    ambiguous = True
                 if err:
+                    # 平台可能在提交 HTTP 响应返回前就完成回调。若回调线程已结清运行，
+                    # 这里必须静默结束，不能再往群里补一条相互矛盾的失败/未知提示。
+                    with session_scope() as s2:
+                        latest = get_run(s2, run_id)
+                        if latest is not None and latest.status in ("ok", "error"):
+                            return
+                if err and ambiguous:
+                    self.client.send_text(
+                        room_id,
+                        f"⚠️ 工作流「{name}」提交结果未知：{err}。"
+                        "系统会继续等待回调，请先到外部平台确认，不要立即重试。",
+                    )
+                elif err:
                     with session_scope() as s2:
                         complete_run(s2, run_id, error=err)
                     self.client.send_text(

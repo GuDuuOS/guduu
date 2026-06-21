@@ -207,6 +207,10 @@ export ANTHROPIC_API_KEY=sk-ant-...
 > 方舟(DeepSeek)复用 `openai` SDK，只是 base_url 指向方舟。模型 id 以你方舟控制台实际开通/创建的接入点为准。
 CosMac Star 服务依赖见 `cosmac/requirements.txt`。
 
+异步工作流回调默认最多等待 **7 天**；可用 `COSMAC_WF_CALLBACK_TIMEOUT` 配置秒数（最低
+3600）。网络超时/5xx 属“提交结果未知”，系统会保留回调 token，管理员应先去外部平台
+确认状态，不要立即重试；到期后运行记录自动标记 error 并在原群提示。
+
 ---
 
 ## 8. 核心改动记录 (Synapse core modifications log)
