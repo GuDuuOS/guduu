@@ -2,7 +2,7 @@
   <div v-if="visible" class="cam-overlay" @click.self="close">
     <div class="cam-modal" role="dialog" aria-modal="true">
       <div class="cam-head">
-        <span class="cam-title">筱雨中枢 AI 设置</span>
+        <span class="cam-title">安其中枢 AI 设置</span>
         <span class="cam-sub">主 AI · 总控大脑全局配置</span>
         <button class="cam-close" title="关闭" @click="close">×</button>
       </div>
@@ -25,7 +25,7 @@
         <template v-if="tab === 'persona'">
           <div class="cam-field">
             <label class="cam-field-label">AI 名称</label>
-            <input v-model="state.persona.aiName" class="cam-input" placeholder="如 筱雨中枢 AI" />
+            <input v-model="state.persona.aiName" class="cam-input" placeholder="如 安其中枢 AI" />
           </div>
           <div class="cam-field">
             <label class="cam-field-label">语气 / 风格</label>

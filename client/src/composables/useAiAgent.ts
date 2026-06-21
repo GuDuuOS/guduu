@@ -158,12 +158,12 @@ export interface AiMessage {
 /* ===== 团队阵容（4 个 AI bot + 4 位真人协作）===== */
 /** AI Agent：主 AI 可直接派单干"数字活" */
 const AGENTS = {
-  hub: '筱雨中枢 AI',
+  hub: '安其中枢 AI',
   topic: '选题 Agent',
   copy: '文案 Agent',
   data: '数据 Agent'
 } as const
-/** 真人协作：主 AI 只能 @ 提醒，干"线下/关系活"——老周(摄影)/阿杰(剪辑)/小鹿(商务)/筱雨(主理人) */
+/** 真人协作：主 AI 只能 @ 提醒，干"线下/关系活"——老周(摄影)/阿杰(剪辑)/小鹿(商务)/安其(主理人) */
 
 const messages = reactive<AiMessage[]>([])
 let seq = 0
@@ -178,7 +178,7 @@ const STEP_MS = 520
 interface Roster { name: string; role: string; reason: string; always?: boolean; keys?: RegExp }
 const ROSTER: Roster[] = [
   { name: 'CosMac Star',     role: '总控',     reason: '总控协调（默认加入）', always: true },
-  { name: '筱雨',      role: '主理人',   reason: '拍板 / 重大决策',     keys: /(选题|脚本|拍摄|发布|商单|定档|审核|预算)/ },
+  { name: '安其',      role: '主理人',   reason: '拍板 / 重大决策',     keys: /(选题|脚本|拍摄|发布|商单|定档|审核|预算)/ },
   { name: '小鹿',      role: '商务运营', reason: '商单 / 私域 / 合作',  keys: /(商单|品牌|合作|报价|私域|社群|合同|回款)/ },
   { name: '老周',      role: '摄影',     reason: '拍摄 / 现场',         keys: /(拍摄|拍|镜头|现场|场地|道具|布景)/ },
   { name: '阿杰',      role: '视频剪辑', reason: '剪辑 / 成片交付',     keys: /(剪辑|成片|初剪|交付|字幕|封面|导出)/ },
@@ -283,7 +283,7 @@ function proposeMembers(text: string): Candidate[] {
     selected: !!r.always || (r.keys ? r.keys.test(text) : false)
   }))
   if (list.filter((c) => c.selected).length <= 1) {
-    for (const n of ['筱雨', '小鹿']) {
+    for (const n of ['安其', '小鹿']) {
       const c = list.find((x) => x.name === n)
       if (c) c.selected = true
     }
@@ -469,7 +469,7 @@ function fmtTime(offsetMin: number): string {
 function hubKickoff(card: Extract<AiCard, { kind: 'plan' }>): MessageData {
   return {
     id: `${card.channelId}-k0`,
-    sender: { type: 'bot', name: '筱雨中枢 AI', avatar: 'G' },
+    sender: { type: 'bot', name: '安其中枢 AI', avatar: 'G' },
     time: fmtTime(0),
     html: `🚀 <b>爆款专班启动</b>：${card.topic.title}<br/>平台 <b>${card.brief.platform}</b> · 形式 <b>${card.brief.format}</b> · 面向 <b>${card.brief.audience}</b> · 主攻 <b>${card.brief.goal}</b>。已按全链路派单，各位就位：`,
     doc: {
@@ -486,7 +486,7 @@ function hubKickoff(card: Extract<AiCard, { kind: 'plan' }>): MessageData {
           ])
         }
       }],
-      footer: '// dispatched by 筱雨中枢 AI'
+      footer: '// dispatched by 安其中枢 AI'
     }
   }
 }
@@ -517,7 +517,7 @@ function campaignDrip(card: Extract<AiCard, { kind: 'plan' }>): MessageData[] {
       html: `已算好流量高峰：<b>${p} ${PEAK_TIMES[hash(card.topic.title) % 5]} 首发</b>，其余平台错峰跟发，并写入「发布-排期日历」。发布后 24h 我自动出复盘。`
     },
     {
-      id: `${id}-d6`, sender: { type: 'bot', name: '筱雨中枢 AI', avatar: 'G' }, time: fmtTime(7),
+      id: `${id}-d6`, sender: { type: 'bot', name: '安其中枢 AI', avatar: 'G' }, time: fmtTime(7),
       html: `全员就位 ✅ 进度看板已建：选题✓ 脚本✓ 待拍摄 → 待剪辑 → 待发布。<b>需要你拍板的 3 个节点已加进「待办事宜」</b>（确认标题 / 审脚本约拍 / 审成片定档）。有卡点我会 @ 对应的人，无需你盯。`,
       rich: {
         variant: 'ok', tag: 'RUNNING', title: '专班运转中',
@@ -592,7 +592,7 @@ function genDeal(brand: string, seed: number, brief: DealBrief): Extract<AiCard,
     { agent: '数据 Agent', task: '调刊例 + 近 90 天均播', output: `按「${brief.pricing}」给出建议报价` },
     { agent: '文案 Agent', task: '拟合作话术 + 广告法自检', output: '合规话术 + 植入脚本框架' },
     { agent: '小鹿（商务）', task: '发报价 + 谈判', output: '对方确认打包价与档期', human: true },
-    { agent: '筱雨中枢 AI', task: '占位排期 + 合同流转', output: '排期占位 + 合同进「合作-合同报价」' }
+    { agent: '安其中枢 AI', task: '占位排期 + 合同流转', output: '排期占位 + 合同进「合作-合同报价」' }
   ]
   const nextActions = [
     `确认报价单与底价（围绕「${brief.bottomLine}」）`,
@@ -606,7 +606,7 @@ function genDeal(brand: string, seed: number, brief: DealBrief): Extract<AiCard,
 function hubKickoffDeal(card: Extract<AiCard, { kind: 'deal' }>): MessageData {
   return {
     id: `${card.channelId}-k0`,
-    sender: { type: 'bot', name: '筱雨中枢 AI', avatar: 'G' },
+    sender: { type: 'bot', name: '安其中枢 AI', avatar: 'G' },
     time: fmtTime(0),
     html: `💼 <b>商单专班启动</b>：${card.brand}<br/>形式 <b>${card.brief.form}</b> · 报价策略 <b>${card.brief.pricing}</b> · 底线 <b>${card.brief.bottomLine}</b>。报价单已出，派单如下：`,
     doc: {
@@ -648,7 +648,7 @@ function dealDrip(card: Extract<AiCard, { kind: 'deal' }>): MessageData[] {
       html: `对方接受 <b>打包价 ${card.packagePrice}</b>，要排到下周，合同随后发来。`
     },
     {
-      id: `${id}-d5`, sender: { type: 'bot', name: '筱雨中枢 AI', avatar: 'G' }, time: fmtTime(7),
+      id: `${id}-d5`, sender: { type: 'bot', name: '安其中枢 AI', avatar: 'G' }, time: fmtTime(7),
       html: `已在「发布-排期日历」<b>占位下周档期</b>，合同流转到「合作-合同报价」自动审条款。<b>需要你拍板的 3 个节点已进「待办事宜」</b>（确认报价 / 审合同 / 回款跟进）。`,
       rich: {
         variant: 'ok', tag: 'RUNNING', title: '商单运转中',
@@ -729,7 +729,7 @@ function genCrisis(event: string, seed: number, brief: CrisisBrief): Extract<AiC
     { agent: '数据 Agent', task: '聚合争议评论 + 定性', output: `负面占比 ${28 + (seed % 12)}%、高频词「恰饭/不标注/割韭菜」` },
     { agent: '文案 Agent', task: `按「${brief.tone}」拟回应 + 广告法自检`, output: '置顶说明定稿（真诚、不甩锅）' },
     { agent: '小鹿（商务）', task: `在${brief.scope}执行${brief.action}`, output: '三平台置顶 + 盯评论区', human: true },
-    { agent: '筱雨中枢 AI', task: '盯舆情曲线 + 复盘归档', output: `善后：${brief.aftercare}，2h 内出回落报告` }
+    { agent: '安其中枢 AI', task: '盯舆情曲线 + 复盘归档', output: `善后：${brief.aftercare}，2h 内出回落报告` }
   ]
   const nextActions = [
     `审定置顶说明文案（基调：${brief.tone}）`,
@@ -743,7 +743,7 @@ function genCrisis(event: string, seed: number, brief: CrisisBrief): Extract<AiC
 function hubKickoffCrisis(card: Extract<AiCard, { kind: 'crisis' }>): MessageData {
   return {
     id: `${card.channelId}-k0`,
-    sender: { type: 'bot', name: '筱雨中枢 AI', avatar: 'G' },
+    sender: { type: 'bot', name: '安其中枢 AI', avatar: 'G' },
     time: fmtTime(0),
     html: `🚨 <b>舆情应对启动</b>：${card.event}<br/>基调 <b>${card.brief.tone}</b> · 范围 <b>${card.brief.scope}</b> · 动作 <b>${card.brief.action}</b>。回应稿已出，派单如下：`,
     doc: {
@@ -786,7 +786,7 @@ function crisisDrip(card: Extract<AiCard, { kind: 'crisis' }>): MessageData[] {
       html: `回应后 30 分钟：<b>负面占比 37% → 14%</b>，情绪明显回落，未向其他平台进一步扩散，高赞评论转向「知错能改」。`
     },
     {
-      id: `${id}-d5`, sender: { type: 'bot', name: '筱雨中枢 AI', avatar: 'G' }, time: fmtTime(7),
+      id: `${id}-d5`, sender: { type: 'bot', name: '安其中枢 AI', avatar: 'G' }, time: fmtTime(7),
       html: `舆情已控住 ✅ 善后「${card.brief.aftercare}」已安排，本次已写进「平台规则与避雷库」。<b>需要你拍板的 3 个节点已进「待办事宜」</b>（审文案 / 盯舆情 / 复盘整改）。`,
       rich: {
         variant: 'ok', tag: 'RESOLVED', title: '舆情已控住',
@@ -874,7 +874,7 @@ function genReview(subject: string, seed: number, brief: ReviewBrief): Extract<A
 function hubKickoffReview(card: Extract<AiCard, { kind: 'review' }>): MessageData {
   return {
     id: `${card.channelId}-k0`,
-    sender: { type: 'bot', name: '筱雨中枢 AI', avatar: 'G' },
+    sender: { type: 'bot', name: '安其中枢 AI', avatar: 'G' },
     time: fmtTime(0),
     html: `🔧 <b>复盘优化启动</b>：${card.subject}<br/>问题 <b>${card.brief.problem}</b> · 动作 <b>${card.brief.fix}</b> · 分发 <b>${card.brief.redistribute}</b>。诊断已出，派单如下：`,
     doc: {
@@ -912,7 +912,7 @@ function reviewDrip(card: Extract<AiCard, { kind: 'review' }>): MessageData[] {
       html: `已按「${card.brief.redistribute}」排好重发，标了 A/B 测试。<b>预测新版完播 +${9 + (hash(card.subject) % 6)}pt</b>，发后 24h 自动对比新旧数据。`
     },
     {
-      id: `${id}-d5`, sender: { type: 'bot', name: '筱雨中枢 AI', avatar: 'G' }, time: fmtTime(7),
+      id: `${id}-d5`, sender: { type: 'bot', name: '安其中枢 AI', avatar: 'G' }, time: fmtTime(7),
       html: `优化方案就绪 ✅ 钩子已沉淀进库，下条同类选题会自动推荐沿用。<b>需要你拍板的 3 个节点已进「待办事宜」</b>（定钩子 / 审片 / 看 A/B）。`,
       rich: {
         variant: 'ok', tag: 'OPTIMIZED', title: '优化方案就绪',
@@ -987,7 +987,7 @@ function genGrowth(theme: string, seed: number, brief: GrowthBrief): Extract<AiC
     { agent: '数据 Agent', task: `算${brief.base}画像 + 转化测算`, output: `预计 3 天拉活 +${30 + (seed % 12)}%，成本近 0` },
     { agent: '文案 Agent', task: `写群公告 + 「${brief.hook}」话题`, output: `群公告 + 3 天打卡话题 + 海报文案` },
     { agent: '小鹿（商务）', task: `在${brief.base}上线 + 盯互动`, output: '活动上线、答疑、催参与', human: true },
-    { agent: '筱雨中枢 AI', task: `按「${brief.rhythm}」排 SOP + 复盘`, output: '固化 SOP + 自动周复盘' }
+    { agent: '安其中枢 AI', task: `按「${brief.rhythm}」排 SOP + 复盘`, output: '固化 SOP + 自动周复盘' }
   ]
   const nextActions = [
     `确认活动机制与福利（钩子：${brief.hook}）`,
@@ -1000,7 +1000,7 @@ function genGrowth(theme: string, seed: number, brief: GrowthBrief): Extract<AiC
 function hubKickoffGrowth(card: Extract<AiCard, { kind: 'growth' }>): MessageData {
   return {
     id: `${card.channelId}-k0`,
-    sender: { type: 'bot', name: '筱雨中枢 AI', avatar: 'G' },
+    sender: { type: 'bot', name: '安其中枢 AI', avatar: 'G' },
     time: fmtTime(0),
     html: `📣 <b>私域增长启动</b>：${card.brief.goal}<br/>阵地 <b>${card.brief.base}</b> · 钩子 <b>${card.brief.hook}</b> · 节奏 <b>${card.brief.rhythm}</b>。活动方案已出，派单如下：`,
     doc: {
@@ -1038,7 +1038,7 @@ function growthDrip(card: Extract<AiCard, { kind: 'growth' }>): MessageData[] {
       html: `上线首日：<b>沉睡群打开率 +${22 + (hash(card.brief.base) % 18)}%</b>，打卡参与 ${120 + (hash(card.theme) % 80)} 人次，已有 ${3 + (hash(card.theme) % 6)} 人主动咨询付费。`
     },
     {
-      id: `${id}-d5`, sender: { type: 'bot', name: '筱雨中枢 AI', avatar: 'G' }, time: fmtTime(7),
+      id: `${id}-d5`, sender: { type: 'bot', name: '安其中枢 AI', avatar: 'G' }, time: fmtTime(7),
       html: `私域这波跑起来了 ✅ 已按「${card.brief.rhythm}」固化 SOP，结束自动出复盘。<b>需要你拍板的 3 个节点已进「待办事宜」</b>（定机制 / 开打卡 / 看转化）。`,
       rich: {
         variant: 'ok', tag: 'GROWING', title: '私域增长运转中',
@@ -1066,7 +1066,7 @@ function push(role: AiMessage['role'], text?: string, card?: AiCard) {
  * 并把结果署名给该 Agent。传 null = 中枢自办（建群 / 查任务等编排动作）。
  */
 function respond(assignee: string | null, steps: string[], produce: (m: AiMessage) => void) {
-  const dispatch = assignee && assignee !== AGENTS.hub ? [`筱雨中枢 · 派单 → ${assignee}`] : []
+  const dispatch = assignee && assignee !== AGENTS.hub ? [`安其中枢 · 派单 → ${assignee}`] : []
   const m: AiMessage = reactive({
     id: ++seq,
     role: 'ai',
@@ -1407,7 +1407,7 @@ export function useAiAgent() {
       const lc = useLiveChannels()
       lc.create(id, {
         title: `爆款专班 · ${card.theme}`,
-        topic: `${card.brief.platform} · ${card.brief.format} · 目标「${card.brief.goal}」— 由筱雨中枢统筹`,
+        topic: `${card.brief.platform} · ${card.brief.format} · 目标「${card.brief.goal}」— 由安其中枢统筹`,
         memberCount: 6,
         stack: [
           { label: 'G', bot: true },
@@ -1456,7 +1456,7 @@ export function useAiAgent() {
       const lc = useLiveChannels()
       lc.create(id, {
         title: `商单专班 · ${card.brand}`,
-        topic: `${card.brief.form} · ${card.brief.pricing} · 打包价 ${card.packagePrice} — 由筱雨中枢统筹`,
+        topic: `${card.brief.form} · ${card.brief.pricing} · 打包价 ${card.packagePrice} — 由安其中枢统筹`,
         memberCount: 5,
         stack: [
           { label: 'G', bot: true },
@@ -1500,7 +1500,7 @@ export function useAiAgent() {
       const lc = useLiveChannels()
       lc.create(id, {
         title: `舆情应对 · ${card.event}`,
-        topic: `${card.brief.tone} · ${card.brief.scope} · ${card.brief.action} — 由筱雨中枢统筹`,
+        topic: `${card.brief.tone} · ${card.brief.scope} · ${card.brief.action} — 由安其中枢统筹`,
         memberCount: 5,
         stack: [
           { label: 'G', bot: true },
@@ -1533,7 +1533,7 @@ export function useAiAgent() {
       const lc = useLiveChannels()
       lc.create(id, {
         title: `复盘专班 · ${card.subject}`,
-        topic: `${card.brief.problem} · ${card.brief.fix} · ${card.brief.redistribute} — 由筱雨中枢统筹`,
+        topic: `${card.brief.problem} · ${card.brief.fix} · ${card.brief.redistribute} — 由安其中枢统筹`,
         memberCount: 5,
         stack: [
           { label: 'G', bot: true }, { label: '数', bot: true }, { label: '文', bot: true },
@@ -1557,7 +1557,7 @@ export function useAiAgent() {
       const lc = useLiveChannels()
       lc.create(id, {
         title: `私域增长 · ${card.brief.goal}`,
-        topic: `${card.brief.base} · ${card.brief.hook} · ${card.brief.rhythm} — 由筱雨中枢统筹`,
+        topic: `${card.brief.base} · ${card.brief.hook} · ${card.brief.rhythm} — 由安其中枢统筹`,
         memberCount: 5,
         stack: [
           { label: 'G', bot: true }, { label: '数', bot: true }, { label: '文', bot: true },

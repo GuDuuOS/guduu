@@ -8,9 +8,9 @@
   >
     <!-- Header（放大态作为弹窗顶栏）-->
     <div class="ai-head">
-      <span class="ai-title">筱雨中枢 AI</span>
+      <span class="ai-title">安其中枢 AI</span>
       <div class="ai-head-actions">
-        <button class="ai-ic-btn" title="筱雨中枢 AI 设置" @click="openSettings">
+        <button class="ai-ic-btn" title="安其中枢 AI 设置" @click="openSettings">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
             <circle cx="12" cy="12" r="3" />
@@ -80,7 +80,7 @@
       <div class="ai-intro">
         <img class="ai-avatar" src="/gudu-logo.svg" alt="中枢 AI" />
         <div class="ai-meta">
-          <div class="ai-name">筱雨中枢 AI</div>
+          <div class="ai-name">安其中枢 AI</div>
           <div class="ai-handle">@xiaoyu_ai</div>
         </div>
         <button class="ai-clear-btn" @click="reset">清空本频道记录</button>
@@ -123,7 +123,7 @@
           <!-- 承办 Agent 署名（主 AI 派单后由谁交付）-->
           <div v-if="!m.thinking && m.agent" class="ai-by">
             <span class="ai-by-ava">{{ m.agent.slice(0, 1) }}</span>
-            <span class="ai-by-tx">由 <b>{{ m.agent }}</b> 交付 · 筱雨中枢派单</span>
+            <span class="ai-by-tx">由 <b>{{ m.agent }}</b> 交付 · 安其中枢派单</span>
           </div>
 
           <TypeOut

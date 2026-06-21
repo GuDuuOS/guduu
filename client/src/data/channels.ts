@@ -55,7 +55,7 @@ export interface WorkspaceData {
 }
 
 export const workspaceDataMap: Record<string, WorkspaceData> = reactive({
-  /** ===== 筱雨工作室 · 10 个创作运营场景 ===== */
+  /** ===== 安其影视工作室 · 10 个创作运营场景 ===== */
   [tenant.hqId]: {
     name: tenant.name,
     channels: [
@@ -90,9 +90,9 @@ export const channels      = workspaceDataMap[defaultWorkspaceId].channels
 export const dms           = workspaceDataMap[defaultWorkspaceId].dms
 
 export const currentUser: Member = {
-  name: '筱雨',
+  name: '安其',
   role: 'admin',
-  avatar: '雨',
+  avatar: '安',
   color: '#7a5a3a',
   online: true
 }
@@ -102,7 +102,7 @@ export const channelMembers: Member[] = [
   { name: '选题 Agent', role: 'bot',     avatar: '题', bot: true, online: true },
   { name: '数据 Agent', role: 'bot',     avatar: '数', bot: true, online: true },
   { name: '文案 Agent', role: 'bot',     avatar: '文', bot: true, online: true },
-  { name: '筱雨',      role: 'admin',    avatar: '雨', color: '#7a5a3a', online: true },
+  { name: '安其',      role: 'admin',    avatar: '安', color: '#7a5a3a', online: true },
   { name: '小鹿',      role: '商务运营', avatar: '鹿', color: '#5a7a8a', online: true },
   { name: '老周',      role: '摄影',     avatar: '周', color: '#a07050' },
   { name: '阿杰',      role: '视频剪辑', avatar: '杰', color: '#7a8a5a' }
@@ -135,7 +135,7 @@ export const channelKnowledge: ChannelInfoItem[] = [
 /** 频道生效的自动化规则 */
 export const channelRules: ChannelInfoItem[] = [
   { label: '爆款苗子自动提醒', desc: '发布 2 小时播放破万即推送' },
-  { label: '差评 / 争议评论预警', desc: '负面情绪超阈值通知筱雨' },
+  { label: '差评 / 争议评论预警', desc: '负面情绪超阈值通知安其' },
   { label: '发布前合规自检',   desc: '违禁词 / 版权风险拦截' },
   { label: '商单到期自动跟进', desc: '合作交付前 3 天提醒' }
 ]

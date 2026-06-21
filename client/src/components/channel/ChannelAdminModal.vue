@@ -363,4 +363,4 @@ onMounted(() => document.addEventListener('keydown', onKey))
 onBeforeUnmount(() => document.removeEventListener('keydown', onKey))
 </script>
 
-<!-- 弹窗样式见全局 src/styles/admin-modal.css（与筱雨中枢 AI 设置弹窗共用 .cam-*）-->
+<!-- 弹窗样式见全局 src/styles/admin-modal.css（与安其中枢 AI 设置弹窗共用 .cam-*）-->

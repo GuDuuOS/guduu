@@ -6,7 +6,7 @@ export const officeMessages: DayMessages[] = [
     messages: [
       {
         id: 'o1',
-        sender: { type: 'human', name: '筱雨', avatar: '雨', color: '#7a5a3a' },
+        sender: { type: 'human', name: '安其', avatar: '安', color: '#7a5a3a' },
         time: '09:38',
         html: '@文案Agent 帮我把这周的数据整理成一份内容复盘，我自己存档、也方便对外发刊例。'
       },
@@ -16,7 +16,7 @@ export const officeMessages: DayMessages[] = [
         time: '09:38',
         html: '好的。已从 <code>抖音 / 小红书 / 公众号 / 视频号</code> 自动抓取本周数据，初稿如下，请审阅：',
         doc: {
-          title: '筱雨工作室 · 本周内容复盘',
+          title: '安其影视工作室 · 本周内容复盘',
           subtitle: '2026 年第 21 周（5 月 17 日 — 5 月 23 日）· 全平台',
           sections: [
             {

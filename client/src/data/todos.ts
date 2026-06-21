@@ -99,7 +99,7 @@ export function addCampaignTodos(
     sourceLabel: srcLabel,
     status: 'pending',
     priority,
-    assignee: '筱雨',
+    assignee: '安其',
     due
   })
   const today = t.groups.find((g) => g.id === 'today')
@@ -137,7 +137,7 @@ export function addDealTodos(
     sourceLabel: srcLabel,
     status: 'pending',
     priority,
-    assignee: '筱雨',
+    assignee: '安其',
     due
   })
   const today = t.groups.find((g) => g.id === 'today')
@@ -174,7 +174,7 @@ export function addCrisisTodos(
     sourceLabel: srcLabel,
     status: 'pending',
     priority,
-    assignee: '筱雨',
+    assignee: '安其',
     due
   })
   const today = t.groups.find((g) => g.id === 'today')
@@ -204,7 +204,7 @@ export function addReviewTodos(
   const srcLabel = `复盘专班 · ${opts.subject}`
   const mk = (n: number, title: string, priority: TodoPriority, due: string): TodoItem => ({
     id: `review-${opts.channelId}-${n}`, title, source: opts.channelId, sourceLabel: srcLabel,
-    status: 'pending', priority, assignee: '筱雨', due
+    status: 'pending', priority, assignee: '安其', due
   })
   const today = t.groups.find((g) => g.id === 'today')
   const week = t.groups.find((g) => g.id === 'this-week')
@@ -230,7 +230,7 @@ export function addGrowthTodos(
   const srcLabel = `私域增长 · ${opts.goal}`
   const mk = (n: number, title: string, priority: TodoPriority, due: string): TodoItem => ({
     id: `growth-${opts.channelId}-${n}`, title, source: opts.channelId, sourceLabel: srcLabel,
-    status: 'pending', priority, assignee: '筱雨', due
+    status: 'pending', priority, assignee: '安其', due
   })
   const today = t.groups.find((g) => g.id === 'today')
   const week = t.groups.find((g) => g.id === 'this-week')

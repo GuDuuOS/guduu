@@ -130,7 +130,7 @@ function buildUnit(unit: UnitStatus, dash: DashboardData): CardActionPayload {
   }
   rows.push(['本月发布', `${4 + (unit.name.length * 7) % 16} 条`])
   rows.push(['最近更新', '今日 · 已同步'])
-  rows.push(['负责人', '筱雨'])
+  rows.push(['负责人', '安其'])
 
   const sections: CardActionPayload['sections'] = [
     { title: '账号概况', table: { headers: ['项', '值'], rows } }
@@ -138,7 +138,7 @@ function buildUnit(unit: UnitStatus, dash: DashboardData): CardActionPayload {
   if (unit.warn) {
     sections.unshift({
       title: '状态提示',
-      body: '⚠ 该平台账号处于需关注状态（如更新滞后 / 数据下滑），已自动提醒筱雨跟进。'
+      body: '⚠ 该平台账号处于需关注状态（如更新滞后 / 数据下滑），已自动提醒安其跟进。'
     })
   }
 

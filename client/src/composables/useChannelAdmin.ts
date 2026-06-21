@@ -72,7 +72,7 @@ const MEMBER_POOL: Record<string, PoolItem[]> = {
     { label: '脚本初稿', value: '6 篇', dom: ['*'] },
     { label: '合规自检', value: '通过', dom: ['*'] }
   ],
-  '筱雨': [
+  '安其': [
     { label: '全平台粉丝', value: '98.3w', dom: ['*'] },
     { label: '本月商单', value: '2 单', dom: ['*'] },
     { label: '本月收入', value: '¥ 4.8w', dom: ['*'] },

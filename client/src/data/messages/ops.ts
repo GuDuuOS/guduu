@@ -57,7 +57,7 @@ const dcsCoord: OpsScenario = {
         },
         {
           id: 'dcs-2',
-          sender: { type: 'human', name: '筱雨', avatar: '雨', color: '#7a5a3a' },
+          sender: { type: 'human', name: '安其', avatar: '安', color: '#7a5a3a' },
           time: '08:18',
           html: '@选题Agent 这个不错。结合我上周那条「35 岁职场危机」的爆款，能再延展几个角度吗？'
         },
@@ -75,7 +75,7 @@ const dcsCoord: OpsScenario = {
         },
         {
           id: 'dcs-5',
-          sender: { type: 'human', name: '筱雨', avatar: '雨', color: '#7a5a3a' },
+          sender: { type: 'human', name: '安其', avatar: '安', color: '#7a5a3a' },
           time: '08:23',
           html: '先存选题库，明早<b>选题会</b>一起定。@文案Agent 别急着写。'
         }
@@ -140,7 +140,7 @@ const emergency: OpsScenario = {
         },
         {
           id: 'em-4',
-          sender: { type: 'human', name: '筱雨', avatar: '雨', color: '#7a5a3a' },
+          sender: { type: 'human', name: '安其', avatar: '安', color: '#7a5a3a' },
           time: '10:48',
           html: '是我疏忽，那条确实是商单没打标。@文案Agent 写一段诚恳的置顶说明：承认没标广告、说明这家店是我自己常去的、退一步把合作费捐了。'
         },
@@ -167,7 +167,7 @@ const emergency: OpsScenario = {
         },
         {
           id: 'em-6',
-          sender: { type: 'human', name: '筱雨', avatar: '雨', color: '#7a5a3a' },
+          sender: { type: 'human', name: '安其', avatar: '安', color: '#7a5a3a' },
           time: '10:53',
           html: '就用这版。@小鹿 置顶到三个平台，捐款截图我十分钟后发你。'
         },
@@ -231,7 +231,7 @@ const gridDispatch: OpsScenario = {
         },
         {
           id: 'gd-2',
-          sender: { type: 'human', name: '筱雨', avatar: '雨', color: '#7a5a3a' },
+          sender: { type: 'human', name: '安其', avatar: '安', color: '#7a5a3a' },
           time: '09:12',
           html: '周四公众号那篇标题还没定。@文案Agent 给几个，要打开率高的。'
         },
@@ -243,7 +243,7 @@ const gridDispatch: OpsScenario = {
         },
         {
           id: 'gd-4',
-          sender: { type: 'human', name: '筱雨', avatar: '雨', color: '#7a5a3a' },
+          sender: { type: 'human', name: '安其', avatar: '安', color: '#7a5a3a' },
           time: '09:15',
           html: '用第 2 个。'
         },
@@ -276,7 +276,7 @@ const plantStartup: OpsScenario = {
       messages: [
         {
           id: 'ps-1',
-          sender: { type: 'human', name: '筱雨', avatar: '雨', color: '#7a5a3a' },
+          sender: { type: 'human', name: '安其', avatar: '安', color: '#7a5a3a' },
           time: '15:02',
           html: '明天拍「租房 vs 买房」那条，@文案Agent 出个分镜脚本，控制在 75 秒内。'
         },
@@ -326,7 +326,7 @@ const plantStartup: OpsScenario = {
         },
         {
           id: 'ps-5',
-          sender: { type: 'human', name: '筱雨', avatar: '雨', color: '#7a5a3a' },
+          sender: { type: 'human', name: '安其', avatar: '安', color: '#7a5a3a' },
           time: '15:24',
           html: '道具和场地清单也列一下。'
         },
@@ -395,7 +395,7 @@ const windRemote: OpsScenario = {
         },
         {
           id: 'wr-4',
-          sender: { type: 'human', name: '筱雨', avatar: '雨', color: '#7a5a3a' },
+          sender: { type: 'human', name: '安其', avatar: '安', color: '#7a5a3a' },
           time: '11:14',
           html: '前 3 秒确实平。@文案Agent 给两个更抓人的开头，同样的内容。'
         },
@@ -470,7 +470,7 @@ const shiftHandover: OpsScenario = {
         },
         {
           id: 'sh-3',
-          sender: { type: 'human', name: '筱雨', avatar: '雨', color: '#7a5a3a' },
+          sender: { type: 'human', name: '安其', avatar: '安', color: '#7a5a3a' },
           time: '14:10',
           html: '抖音那条别写「全网最低价」这种承诺，容易翻车。'
         },
@@ -545,7 +545,7 @@ const workPermit: OpsScenario = {
         },
         {
           id: 'wp-3',
-          sender: { type: 'human', name: '筱雨', avatar: '雨', color: '#7a5a3a' },
+          sender: { type: 'human', name: '安其', avatar: '安', color: '#7a5a3a' },
           time: '16:18',
           html: '90 天账期太长，改成 30 天；独家期砍掉或压到 1 个月；二次传播限定半年内、且不能改我的口播原意。'
         },
@@ -571,7 +571,7 @@ const workPermit: OpsScenario = {
         },
         {
           id: 'wp-5',
-          sender: { type: 'human', name: '筱雨', avatar: '雨', color: '#7a5a3a' },
+          sender: { type: 'human', name: '安其', avatar: '安', color: '#7a5a3a' },
           time: '16:25',
           html: '发吧。'
         },
@@ -641,7 +641,7 @@ const utilityCoord: OpsScenario = {
         },
         {
           id: 'uc-5',
-          sender: { type: 'human', name: '筱雨', avatar: '雨', color: '#7a5a3a' },
+          sender: { type: 'human', name: '安其', avatar: '安', color: '#7a5a3a' },
           time: '09:45',
           html: '可以，@文案Agent 写个群公告，再配 3 天打卡话题。'
         },
@@ -705,7 +705,7 @@ const safetyBriefing: OpsScenario = {
         },
         {
           id: 'sb-2',
-          sender: { type: 'human', name: '筱雨', avatar: '雨', color: '#7a5a3a' },
+          sender: { type: 'human', name: '安其', avatar: '安', color: '#7a5a3a' },
           time: '09:08',
           html: 'Top1 和 Top3 这周做。Top2 留着下周，最近裸辞话题有点多了。'
         },
@@ -759,7 +759,7 @@ const processHandover: OpsScenario = {
           id: 'ph-1',
           sender: { type: 'human', name: '阿杰', avatar: '杰', color: '#7a8a5a' },
           time: '17:20',
-          html: '「副业避坑 2.0」初剪好了，时长 68s，节奏比上版紧。@筱雨 审一下。'
+          html: '「副业避坑 2.0」初剪好了，时长 68s，节奏比上版紧。@安其 审一下。'
         },
         {
           id: 'ph-2',
@@ -786,7 +786,7 @@ const processHandover: OpsScenario = {
         },
         {
           id: 'ph-3',
-          sender: { type: 'human', name: '筱雨', avatar: '雨', color: '#7a5a3a' },
+          sender: { type: 'human', name: '安其', avatar: '安', color: '#7a5a3a' },
           time: '17:30',
           html: '0:32 那个错别字改一下，封面换第 2 版（那个表情更抓人）。其他 OK。'
         },

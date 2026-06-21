@@ -118,7 +118,7 @@ function run(raw: string) {
       if (localConnected.value) { out('out', '本地电脑已连接'); break }
       out('ok', '✓ 已安装本地 Agent (macOS)')
       out('ok', '✓ 建立端到端安全隧道')
-      out('ok', '✓ 已连接本地电脑：筱雨-MBP')
+      out('ok', '✓ 已连接本地电脑：安其-MBP')
       out('sys', '— 可用能力 —')
       out('out', '· 读写本地文件 / 文件夹')
       out('out', '· 调用本地应用与浏览器')
@@ -132,7 +132,7 @@ function run(raw: string) {
       break
     case 'shell':
       if (!localConnected.value) { out('err', '请先 connect 连接本地电脑'); break }
-      out('ok', '✓ 已打开本地终端会话 (zsh @ 筱雨-MBP)')
+      out('ok', '✓ 已打开本地终端会话 (zsh @ 安其-MBP)')
       out('out', '· 主 AI 可执行本地命令，每次执行前需你授权')
       break
     case 'browser':
@@ -146,7 +146,7 @@ function run(raw: string) {
       out('out', '  screen_2026-05-24_1530.png')
       break
     case 'status':
-      out('out', localConnected.value ? '● 本地电脑 筱雨-MBP 已连接' : '○ 未连接，使用 connect 连接')
+      out('out', localConnected.value ? '● 本地电脑 安其-MBP 已连接' : '○ 未连接，使用 connect 连接')
       break
     case 'disconnect':
       localConnected.value = false

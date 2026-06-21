@@ -7,6 +7,13 @@
 
 ---
 
+## 2026-06-21 — 品牌化清理（R·彻底清除 demo 人设"筱雨" + Matrix/Synapse 复查）
+- 负责人改定：**全删 筱雨 demo**。把全客户端 ~60 处硬编码"筱雨"统一脚本重命名为真实租户 **安其/安其影视工作室**（保留 demo 结构、避免删数组破坏 fallback 渲染；真实后端下这些 mock 本就不显示）：
+  - `筱雨中枢 AI→安其中枢 AI`、`筱雨工作室→安其影视工作室`、`筱雨-MBP→安其-MBP`、人名 `筱雨→安其`、头像 `雨→安`。
+  - 覆盖 `useAiAgent`(演示团队/派单/卡片)、`data/messages/*`(模拟聊天)、`data/channels|todos|dashboards|pluginStore`、`useCli|useCardAction|useDashboardDetail|useChannelAdmin`、`SystemAiModal|AiChatPanel`、注释与 CSS。grep 复核 **0 处筱雨残留**。
+- **Matrix/Synapse 复查**：客户端 70 处命中，分类后——**55 处是协议/SDK/内部标识**(`matrix-js-sdk`/`/_matrix`/`/_synapse`/`m.room.*`/`MatrixClient`/`.well-known`，① 协议层+③ 内部，**绝不能改**)，**15 处是开发者代码注释**(准确描述"接 Matrix/Synapse 真后端"，非用户可见、§7 ② 不含注释)。**用户可见层 0 处 Matrix/Synapse 泄漏**（已在上一刀清掉）。结论：保留这两类是对的，强行改注释/SDK 反而错。
+- 验证：client build 通过（新 hash `index-CZ4rOlxp.js`）；纯字符串重命名。**需部署前端 dist**。
+
 ## 2026-06-21 — 品牌化清理（R·demo 人设"筱雨"残留→tenant 配置，只修常显文案）
 - 发现 demo 人设"筱雨工作室"半迁移：`tenant.ts` 已配真实租户**安其影视工作室**（且其 docstring 明令"不可在源码写死主理人标识"），但 ~20 处仍写死"筱雨"。负责人拍板**只修常显文案**（任何后端下都显示的地方），demo/mock 数据保留作示意。
 - 改（路由到 tenant 配置，符合换皮设计）：

@@ -48,7 +48,7 @@ export const safetyMessages: DayMessages[] = [
       },
       {
         id: 's3',
-        sender: { type: 'human', name: '筱雨', avatar: '雨', color: '#7a5a3a' },
+        sender: { type: 'human', name: '安其', avatar: '安', color: '#7a5a3a' },
         time: '08:20',
         html: '@选题Agent 把今天所有「和搞钱 / 副业相关」的热点选题调出来给我。'
       },
@@ -60,7 +60,7 @@ export const safetyMessages: DayMessages[] = [
       },
       {
         id: 's5',
-        sender: { type: 'human', name: '筱雨', avatar: '雨', color: '#7a5a3a' },
+        sender: { type: 'human', name: '安其', avatar: '安', color: '#7a5a3a' },
         time: '08:24',
         html: '@CosMac Star 把本月已发内容按平台播放汇总成图给我看看。'
       },
@@ -68,7 +68,7 @@ export const safetyMessages: DayMessages[] = [
         id: 's6',
         sender: duuBot,
         time: '08:24',
-        html: '好的筱雨，本月各平台播放表现如下：',
+        html: '好的安其，本月各平台播放表现如下：',
         chartCard: {
           chartId: 'chUnit',
           title: '本月各平台播放 · 实际 vs 目标'

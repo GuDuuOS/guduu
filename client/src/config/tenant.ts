@@ -34,5 +34,5 @@ export function brandOf(dept: string): string {
   return `${dept} · ${tenant.productName}`
 }
 
-/** 衍生：工作室 brand 字段，如 "筱雨工作室 · 创作工作台" */
+/** 衍生：工作室 brand 字段，如 "安其影视工作室 · 创作工作台" */
 export const tenantBrand = `${tenant.name} · ${tenant.productName}`
