@@ -78,7 +78,7 @@
             <input v-model="liveInvite" class="cam-input" placeholder="邀请已有用户：用户名 或 @用户:cosmac.cc" @keyup.enter="doInviteLive" />
             <button class="cam-add-btn" :disabled="!liveInvite.trim() || liveBusy" @click="doInviteLive">{{ liveBusy ? '邀请中…' : '＋ 邀请成员' }}</button>
           </div>
-          <div class="cam-help">真实频道成员，来自 Matrix。邀请 = 标准 Matrix 邀请；移出 = kick（需你在本群有管理员权限）。新建账号需走后台。</div>
+          <div class="cam-help">频道真实成员。邀请 = 把已有用户拉进频道；移出 = 移出频道（需你在本频道有管理员权限）。新建账号需走后台。</div>
         </template>
 
         <!-- 人员（demo：无真后端时的 mock 展示）-->

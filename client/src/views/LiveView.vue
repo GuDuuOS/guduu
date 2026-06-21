@@ -1830,7 +1830,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
         </div>
 
         <div class="nw-note">
-          💡 <b>新建账号 / 邀请链接</b> 需要后端支持（Synapse Admin API 不对外开放，不能从浏览器用管理员令牌建号），放到后续「成员管理后台」模块做。现在可邀请<b>已有账号</b>的用户。
+          💡 <b>新建账号 / 邀请链接</b> 需要后端支持（后端管理接口不对外开放，不能从浏览器用管理员令牌建号），放到后续「成员管理后台」模块做。现在可邀请<b>已有账号</b>的用户。
         </div>
 
         <div class="nw-foot">

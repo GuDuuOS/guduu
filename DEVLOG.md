@@ -7,6 +7,13 @@
 
 ---
 
+## 2026-06-21 — 品牌化清理（R·呈现层去 Matrix/Synapse 字样）
+- 按 §7 三层红线，**只改 ② 呈现层**（用户/管理员可见字样），不碰 ① 协议层、③ 内部标识符：
+- 核对后发现主品牌面**已全是 CosMac Star**（登录页/顶栏/中枢AI/页面标题），唯一残留 `guduu` 是 `BOT_LOCALPART='guduu'`（bot 账号身份，负责人已决定不迁移）→ 保留。
+- 清掉**面向用户的技术品牌词**：频道成员帮助文案去掉"来自 Matrix/标准 Matrix 邀请/kick"→中性表达；成员管理提示"Synapse Admin API 不对外开放"→"后端管理接口"；数据概览"数据来自 Synapse Admin API"→"服务器管理接口"；恢复账号密码提示"Synapse 要求"→"服务器要求"；AI/工作流密钥说明里"Matrix 事件无法加密/不进网页Matrix"→"平台事件/聊天数据"。
+- **刻意保留**：`/_synapse/admin`、`/_matrix/...` 等**字面协议路径**（① 不改，且管理员配 nginx CORS 时真要用到）；开发者代码注释里准确描述 Matrix/Synapse 技术栈的字样（非用户可见，不属 ②）。
+- 验证：client build 通过（新 hash `index-DnhZRWB9.js`）；纯静态文案改动、无逻辑。**需部署前端 dist**。
+
 ## 2026-06-21 — 模块3（工作流引擎）收尾打 ✅
 - 核对全链路后确认**模块3已功能完整**，最后一块"后台编排 UI"其实早在前几轮就建好了：
 - **后台编排 UI**（`AdminView.vue` 工作流面板）：4 平台（webhook/Dify/Coze/ComfyUI）连接器的列表/新建/编辑/启停/删除；平台相关字段按需显隐（webhook 的 method+async / Dify 的 mode / Coze 的 ref_id / ComfyUI 的 graph）；凭据**只填名**（真值在服务端 env `COSMAC_WF_<CRED>`，不进网页/Matrix）；保存写控制室 `cosmac.workflows` state event。

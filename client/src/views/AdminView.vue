@@ -232,7 +232,7 @@
               <input v-model.trim="aiForm.model" :placeholder="providerMeta.modelPlaceholder" />
               <em class="adm-note">⚠️ 填错会让 AI 回话报错；DeepSeek/Gemini 填方舟/Google 的模型 id 或接入点。</em>
             </label>
-            <em class="adm-note">🔒 出于安全，<b>API Key 不在网页配置</b>——密钥只在服务器环境变量/Secret&nbsp;Manager 里设（Matrix 事件无法加密，存进去会明文泄露）。切到服务器没配 key 的后端，AI 将无法回话。</em>
+            <em class="adm-note">🔒 出于安全，<b>API Key 不在网页配置</b>——密钥只在服务器环境变量/Secret&nbsp;Manager 里设（平台事件无法加密，存进去会明文泄露）。切到服务器没配 key 的后端，AI 将无法回话。</em>
           </template>
 
           <label class="adm-field">
@@ -525,7 +525,7 @@
             <label class="adm-field">
               <span>凭据名（可选）</span>
               <input v-model.trim="wfForm.cred" placeholder="如 n8n_main（可留空）" />
-              <em class="adm-note">🔒 这里只填"名字"。真密钥在服务器环境变量 <code>COSMAC_WF_&lt;大写名字&gt;</code> 里配，不进网页/Matrix。留空=URL 自带令牌/无需鉴权。</em>
+              <em class="adm-note">🔒 这里只填"名字"。真密钥在服务器环境变量 <code>COSMAC_WF_&lt;大写名字&gt;</code> 里配，不进网页或聊天数据。留空=URL 自带令牌/无需鉴权。</em>
             </label>
             <label class="adm-field">
               <span>输入提示（给用户看的，可选）</span>
@@ -577,7 +577,7 @@
           <div>
             <h1 class="adm-h1">数据概览</h1>
             <p class="adm-hint">
-              平台实时概况 · 数据来自 Synapse Admin API
+              平台实时概况 · 数据来自服务器管理接口
               <span v-if="ov.version"> · 服务端 {{ ov.version }}</span>
             </p>
           </div>
@@ -831,7 +831,7 @@ async function doDeactivate(u: AdminUser) {
 }
 
 async function doReactivate(u: AdminUser) {
-  const pwd = prompt(`恢复 ${u.name} 需同时设新密码（Synapse 要求，至少 8 位）：`)
+  const pwd = prompt(`恢复 ${u.name} 需同时设新密码（服务器要求，至少 8 位）：`)
   if (!pwd) return
   if (pwd.length < 8) { warn('密码太短', '至少 8 位'); return }
   busy.value = u.id
