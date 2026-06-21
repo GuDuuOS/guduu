@@ -7,6 +7,13 @@
 
 ---
 
+## 2026-06-21 — 模块3（工作流引擎）收尾打 ✅
+- 核对全链路后确认**模块3已功能完整**，最后一块"后台编排 UI"其实早在前几轮就建好了：
+- **后台编排 UI**（`AdminView.vue` 工作流面板）：4 平台（webhook/Dify/Coze/ComfyUI）连接器的列表/新建/编辑/启停/删除；平台相关字段按需显隐（webhook 的 method+async / Dify 的 mode / Coze 的 ref_id / ComfyUI 的 graph）；凭据**只填名**（真值在服务端 env `COSMAC_WF_<CRED>`，不进网页/Matrix）；保存写控制室 `cosmac.workflows` state event。
+- **全链路自洽**：UI→`setWorkflows`→控制室 state event→bot 读(`appservice_bot.py` get_state_event)→`run_connector` 按平台分发（wf.py 消费 mode/input_key/ref_id/graph，键名与 `WorkflowDef` 完全对齐）。
+- 至此模块3全件齐活：引擎(4平台)+聊天命令+`run_workflow`工具+异步回调+运行记录+后台UI+安全(够用即止)。durable队列/fencing/精确一次=已知边界本期不做。
+- 验证：代码层核对全链路键名一致 + client build 通过；UI 是前几轮已提交进 dist 的产物，本次**无代码改动**（仅文档），**无需部署**。增强项(更多适配器/graph 上传)按需再补。
+
 ## 2026-06-19 — 工作流安全（收口·只做零downside的对的修法 + 架构边界说清楚）
 - 评审又报 5 项。其中 3 项是真·廉价正确修法，已做；另 2 项（durable队列/多实例fencing）是**架构级**、单实例下属过度设计，已在回复里和负责人确认停止线，不再无限打补丁：
 - **#1【P1 内存LRU提前标完成】**：`_remember_txn` 原在处理**前**写入→处理途中重试命中内存快路回200，原处理若崩 DB 的 processing 再没机会重抢→永久丢。修：移到 `_finish_txn` **之后**，内存只记真正处理完的。
