@@ -1,4 +1,5 @@
 import { reactive, ref, watch } from 'vue'
+import { tenant } from '@/config/tenant'
 
 /* ===== 自定义资产数据模型 ===== */
 export type AssetCat = 'agent' | 'skill' | 'prompt' | 'workflow'
@@ -32,7 +33,7 @@ export const ASSET_CATS: AssetCatMeta[] = [
     label: 'AI Agent',
     color: '#c96442',
     bodyLabel: '人设 / System Prompt',
-    bodyPlaceholder: '描述这个 Agent 的身份、风格与职责，例如：你是筱雨工作室的选题助手，擅长结合平台热点给出可拍的选题角度…',
+    bodyPlaceholder: `描述这个 Agent 的身份、风格与职责，例如：你是${tenant.name}的选题助手，擅长结合平台热点给出可拍的选题角度…`,
     hasTag: true,
     tagPlaceholder: '触发指令，如 /topic'
   },
@@ -58,7 +59,7 @@ export const ASSET_CATS: AssetCatMeta[] = [
     label: '工作流',
     color: '#b58932',
     bodyLabel: '步骤（每行一步）',
-    bodyPlaceholder: '1. 抓取负面评论\n2. 分级并生成澄清话术\n3. 通知筱雨确认后置顶',
+    bodyPlaceholder: `1. 抓取负面评论\n2. 分级并生成澄清话术\n3. 通知${tenant.shortName}确认后置顶`,
     hasTag: false
   }
 ]
@@ -75,7 +76,7 @@ const SEED: CustomAsset[] = [
     cat: 'agent',
     name: '选题灵感 Agent',
     desc: '结合近 7 天平台热点给可拍的选题角度',
-    body: '你是筱雨工作室的选题助手。结合抖音 / 小红书近期热点，针对给定主题给出 3 个可拍的选题角度，每个附一句钩子。',
+    body: `你是${tenant.name}的选题助手。结合抖音 / 小红书近期热点，针对给定主题给出 3 个可拍的选题角度，每个附一句钩子。`,
     tag: '/topic',
     enabled: true
   },

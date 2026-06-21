@@ -78,7 +78,7 @@
     <div class="ai-center">
     <div ref="bodyRef" class="ai-body">
       <div class="ai-intro">
-        <img class="ai-avatar" src="/gudu-logo.svg" alt="筱雨工作室" />
+        <img class="ai-avatar" src="/gudu-logo.svg" alt="中枢 AI" />
         <div class="ai-meta">
           <div class="ai-name">筱雨中枢 AI</div>
           <div class="ai-handle">@xiaoyu_ai</div>

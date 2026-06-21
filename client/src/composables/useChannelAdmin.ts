@@ -123,7 +123,7 @@ const BASE_DATASCOPES: DataScope[] = [
 const BASE_PERSONA: ChannelPersona = {
   aiName: 'CosMac Star',
   tone: '懂内容 · 数据优先',
-  prompt: `你是${tenant.aiOwner}的${tenant.productName}助手，基于接入的各平台数据与创作素材作答；给出建议须标注数据依据，发布、商单报价等对外动作必须经筱雨确认后执行。`,
+  prompt: `你是${tenant.aiOwner}的${tenant.productName}助手，基于接入的各平台数据与创作素材作答；给出建议须标注数据依据，发布、商单报价等对外动作必须经${tenant.shortName}确认后执行。`,
   agentSlug: '', // 本群绑定的全局智能体 slug（空 = 不绑定，用上面的自定义人设）
 }
 const BASE_MODEL: ChannelModel = { model: 'CosMac Star-Pro', tokenBudget: 500, rateLimit: 60 }

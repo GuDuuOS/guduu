@@ -14,7 +14,7 @@ import {
 export { MODEL_OPTIONS }
 export type { Confidential, AccessLevel }
 
-/** 筱雨中枢 AI 设置弹窗的可见状态 */
+/** 中枢 AI 设置弹窗的可见状态 */
 const visible = ref(false)
 
 /**
@@ -23,9 +23,9 @@ const visible = ref(false)
  */
 const state = reactive({
   persona: {
-    aiName: '筱雨中枢 AI',
+    aiName: `${tenant.shortName}中枢 AI`,
     tone: '统筹 · 稳健 · 可追溯',
-    prompt: `你是${tenant.aiOwner}的${tenant.productName}总控 AI，统筹调度选题 / 文案 / 数据等子智能体、汇聚全平台数据；对外输出须严谨、标注依据，发布与商单等对外动作必须经筱雨确认后执行。`
+    prompt: `你是${tenant.aiOwner}的${tenant.productName}总控 AI，统筹调度选题 / 文案 / 数据等子智能体、汇聚全平台数据；对外输出须严谨、标注依据，发布与商单等对外动作必须经${tenant.shortName}确认后执行。`
   } as ChannelPersona,
 
   skills: [

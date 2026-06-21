@@ -7,6 +7,16 @@
 
 ---
 
+## 2026-06-21 — 品牌化清理（R·demo 人设"筱雨"残留→tenant 配置，只修常显文案）
+- 发现 demo 人设"筱雨工作室"半迁移：`tenant.ts` 已配真实租户**安其影视工作室**（且其 docstring 明令"不可在源码写死主理人标识"），但 ~20 处仍写死"筱雨"。负责人拍板**只修常显文案**（任何后端下都显示的地方），demo/mock 数据保留作示意。
+- 改（路由到 tenant 配置，符合换皮设计）：
+  - `useCustomAssets.ts`：建 Agent/工作流的**表单占位符** + 默认种子资产"你是筱雨工作室的…"→`${tenant.name}`、"通知筱雨确认"→`${tenant.shortName}`（导入 tenant）。
+  - `useSystemAi.ts`：中枢 AI 默认名"筱雨中枢 AI"→`${tenant.shortName}中枢 AI`；默认 prompt"经筱雨确认"→`${tenant.shortName}`。
+  - `useChannelAdmin.ts`：频道默认 AI prompt"经筱雨确认"→`${tenant.shortName}`。
+  - `AiChatPanel.vue`：AI 头像 `alt="筱雨工作室"`→`中枢 AI`。
+- **保留**（demo/mock 示意数据，真实后端下不显示）：`useAiAgent` 演示团队(老周/阿杰/小鹿/筱雨)与派单消息、`useCli` 筱雨-MBP、`data/messages/*` 模拟聊天、mock 成员/卡片/待办。
+- 验证：client build 通过（新 hash `index-BLY_ujTj.js`）；纯静态配置/文案改动。**需部署前端 dist**。
+
 ## 2026-06-21 — 品牌化清理（R·呈现层去 Matrix/Synapse 字样）
 - 按 §7 三层红线，**只改 ② 呈现层**（用户/管理员可见字样），不碰 ① 协议层、③ 内部标识符：
 - 核对后发现主品牌面**已全是 CosMac Star**（登录页/顶栏/中枢AI/页面标题），唯一残留 `guduu` 是 `BOT_LOCALPART='guduu'`（bot 账号身份，负责人已决定不迁移）→ 保留。
