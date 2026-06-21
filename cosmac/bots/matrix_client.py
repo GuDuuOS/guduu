@@ -265,6 +265,35 @@ class MatrixClient:
             f"读 state {event_type}@{room_id} 失败: HTTP {resp.status_code}"
         )
 
+    def set_state_event(
+        self,
+        room_id: str,
+        event_type: str,
+        content: Dict[str, Any],
+        state_key: str = "",
+    ) -> bool:
+        """写某房间的一个 state event（整体覆盖该 (type,state_key) 的内容）。成功返回 True。
+
+        用于 bot 写控制室的 cosmac.* 配置（如 cosmac.members 会员等级）。需要 bot 在该房
+        有写该 state 的权限（控制室里 bot=100，够）。失败只记日志、返回 False（调用方据此提示）。
+        与 get_state_event 对称；power_levels 那种「需读改写完整内容」的另有 set_power_levels。
+        """
+        url = self._url(
+            f"/_matrix/client/v3/rooms/{quote(room_id)}/state/"
+            f"{quote(event_type)}/{quote(state_key)}"
+        )
+        try:
+            resp = self._session.put(url, json=content, timeout=10)
+        except requests.RequestException as exc:
+            logger.warning("写 state %s@%s 异常: %s", event_type, room_id, exc)
+            return False
+        if resp.status_code == 200:
+            return True
+        logger.warning(
+            "写 state %s@%s 失败: %s %s", event_type, room_id, resp.status_code, resp.text
+        )
+        return False
+
     def get_members(self, room_id: str) -> List[Dict[str, str]]:
         """查房间已加入的成员列表（主 AI 的"眼睛"之一）。
 

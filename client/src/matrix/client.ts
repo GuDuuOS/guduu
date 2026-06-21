@@ -758,6 +758,9 @@ const AGENTS_EVENT_TYPE = 'cosmac.agents'
 const RULES_EVENT_TYPE = 'cosmac.rules'
 /** 控制室里「工作流连接器」state event 的类型（与 bot 端 WORKFLOWS_EVENT_TYPE 一致）。 */
 const WORKFLOWS_EVENT_TYPE = 'cosmac.workflows'
+/** 控制室里「会员等级」state event 的类型（与 bot 端 MEMBERS_EVENT_TYPE 一致）。
+ *  管理后台写、主 AI 读；只存非免费的覆盖，未列出的用户默认免费会员。 */
+const MEMBERS_EVENT_TYPE = 'cosmac.members'
 
 /** 主 AI 可用工具目录（工具开关 UI 用；name 要与 bot 端 Toolbox 注册的一致）。 */
 export const AI_TOOL_CATALOG: { name: string; label: string }[] = [
@@ -955,6 +958,80 @@ export async function setAiConfig(cfg: AiConfig): Promise<void> {
     },
     '',
   )
+}
+
+/* =====================================================================
+ *  管理后台 · 会员等级（账号权限分层）
+ *  存储：控制室 state event `cosmac.members`，{ members: { userId: {tier,...} } }。
+ *  未列出的用户 = 免费会员（只存非免费的覆盖）。管理员手动调整；未来支付(模块4)由 bot 写。
+ *  「服务器管理员」是另一套（独立于会员等级），仍走 Synapse admin 标志。
+ * ===================================================================== */
+
+/** 会员等级目录（与 bot 端 cosmac.members 的 MEMBER_TIERS 一致；slug 稳定、label 可改）。 */
+export const MEMBER_TIERS: { slug: string; label: string }[] = [
+  { slug: 'free', label: '免费会员' },
+  { slug: 'paid', label: '付费会员' },
+  { slug: 'creator', label: '创作者会员' },
+]
+
+/** 会员等级 slug → 中文标签（未知回落到「免费会员」）。 */
+export function memberTierLabel(tier: string | undefined): string {
+  return MEMBER_TIERS.find((t) => t.slug === tier)?.label || '免费会员'
+}
+
+/** 会员 map：userId → 等级 slug。只含非免费的；查不到即免费。 */
+export type MemberMap = Record<string, string>
+
+/**
+ * 读控制室会员 map（管理员用）。控制室/事件不存在或读失败时返回空 map（全员按免费处理）。
+ * 普通用户读不到控制室——他们查自己等级走「DM 问 bot：会员」。
+ */
+export async function getMembers(): Promise<MemberMap> {
+  if (!mx) return {}
+  const rid = await resolveControlRoom()
+  if (!rid) return {}
+  try {
+    const ev = await (mx as any).getStateEvent(rid, MEMBERS_EVENT_TYPE, '')
+    const raw = ev?.members
+    const out: MemberMap = {}
+    if (raw && typeof raw === 'object') {
+      for (const [uid, rec] of Object.entries(raw)) {
+        const tier = (rec as any)?.tier
+        // 只收已知的非免费等级（免费是默认、不显式存）
+        if (typeof tier === 'string' && tier !== 'free'
+            && MEMBER_TIERS.some((t) => t.slug === tier)) {
+          out[uid] = tier
+        }
+      }
+    }
+    return out
+  } catch {
+    return {} // 房间在但还没写过会员数据
+  }
+}
+
+/**
+ * 设/调某用户的会员等级（必要时先建控制室）。tier='free' = 撤销（从 map 移除）。
+ * 读改写整份 map 后整体覆盖写回；bot 会读到并据此做后续门控/自查。
+ */
+export async function setMemberTier(userId: string, tier: string): Promise<void> {
+  if (!mx) throw new Error('未登录')
+  if (!MEMBER_TIERS.some((t) => t.slug === tier)) throw new Error('未知会员等级')
+  const rid = await ensureControlRoom()
+  // 先读当前 map（带完整记录，保留 source/updated_ts 之外这里只重写本人）
+  let members: Record<string, any> = {}
+  try {
+    const ev = await (mx as any).getStateEvent(rid, MEMBERS_EVENT_TYPE, '')
+    if (ev?.members && typeof ev.members === 'object') members = { ...ev.members }
+  } catch {
+    /* 还没写过：从空开始 */
+  }
+  if (tier === 'free') {
+    delete members[userId] // 免费=默认=移出 map
+  } else {
+    members[userId] = { tier, source: 'admin', updated_ts: Math.floor(Date.now() / 1000) }
+  }
+  await (mx as any).sendStateEvent(rid, MEMBERS_EVENT_TYPE, { members }, '')
 }
 
 /** 一条「全局技能」定义（管理后台编辑、主 AI 注入）。slug 在全局内唯一。 */

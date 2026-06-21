@@ -201,6 +201,18 @@ AGENTS_EVENT_TYPE = "cosmac.agents"
 # （如：对外报价/发布须经确认、不杜撰数据），无论群里用哪个智能体都注入、优先级最高。
 RULES_EVENT_TYPE = "cosmac.rules"
 
+# 管理后台写、bot 读的「会员等级」state event 类型（存控制室）。
+# 把每个用户的会员身份(免费/付费/创作者)集中存在控制室一个 state event 里，内容形如
+# {"members": {"@alice:host": {"tier":"paid","source":"admin","updated_ts":...}, ...}}。
+# 未列出的用户一律按「免费会员」处理（只存非免费的覆盖，省空间）。
+# **为什么走控制室 state event 而非 account data**：会员等级是管理员/支付系统设定的、
+# 用户不能自改的权威数据（付费门槛要靠它）；account data 用户自己能改、不安全。控制室
+# 又只有服务器管理员能进（见 CONTROL_ADMINS_EVENT_TYPE 对齐逻辑），普通用户读不到——
+# 所以普通用户查自己等级走「DM 问 bot」(bot 在控制室、读得到)，见 appservice_bot 会员命令。
+# 写入方：① 管理后台(管理员 power=50 够写 state)手动调整；② 未来模块4支付成功后由 bot
+# (power=100)经 grant_member_tier 写入(预留接口)。会员等级的**枚举/标签/校验**见 cosmac.members。
+MEMBERS_EVENT_TYPE = "cosmac.members"
+
 # 管理后台写、bot 读的「外部工作流连接器」state event 类型（存控制室）。模块3:
 # 不自建工作流引擎，而是对接 n8n/Make/Coze/ComfyUI/Dify 等现成平台。每个连接器形如
 # {"slug","name","platform":"webhook","url","method","cred","input_hint","enabled"}。

@@ -96,6 +96,7 @@
 | **知识库** | ✅ CosMac Star DB + **pgvector** | 文档分块 + 向量检索(RAG)，state event 存不下也搜不了。**这是上 DB 的最硬理由**。 |
 | **群级 / Agent 记忆**（摘要、长期记忆） | ✅ CosMac Star DB | 派生数据，与原始聊天记录分开存。 |
 | **工作流连接器定义**（模块3，后台编排） | Matrix state event | 已定：存控制室 `cosmac.workflows`（浏览器够不到 DB，同 Skill/Agent）。外部平台 key 只进服务端 env（`COSMAC_WF_<CRED>`），定义里只放凭据名。 |
+| **会员等级**（账号权限分层：免费/付费/创作者） | Matrix state event | 已实现：存控制室 `cosmac.members`（同 admins 套路，管理员/bot 写、用户不可自改——付费门槛靠它）。**与「服务器管理员」正交**：管理员仍走 Synapse admin 标志。授予入口 `cosmac.members.MembersStore.grant`（**预留给模块4支付**）。枚举/校验见 `cosmac/members.py`。普通用户查自己等级走「DM 问 bot」命令`会员`（控制室只管理员可读）。门控按需再补。 |
 | 工作流运行记录（模块3）、交易（模块4）、个人主页（模块5） | ✅ CosMac Star DB | 关系型。 |
 
 **基建决策**：CosMac Star 的 DB **复用生产现成的 PostgreSQL**（Synapse 已在跑，见 `DEPLOY.md`），给 cosmac 服务**单开一个 database/schema**，按需装 **pgvector**。这走 §2 的第 3 条路径（新增独立服务/数据），与 Synapse 核心解耦、不碰它。

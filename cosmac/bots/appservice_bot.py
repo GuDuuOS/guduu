@@ -41,6 +41,12 @@ from cosmac.config import (
     WORKFLOWS_EVENT_TYPE,
     CosmacConfig,
 )
+from cosmac.members import (
+    MEMBER_TIERS,
+    MembersStore,
+    is_valid_tier,
+    tier_label,
+)
 from cosmac.skills_text import render_skills  # 纯渲染、不依赖 DB
 
 logger = logging.getLogger("cosmac.appservice_bot")
@@ -79,6 +85,9 @@ class CosmacBot:
         self.toolbox = Toolbox(
             self.client, control_room_alias=config.control_room_alias
         )
+        # 会员等级（账号权限分层）读写：控制室 cosmac.members（见 cosmac.members）。
+        # 用于「会员」自查/管理命令，以及预留给模块4支付的 grant_member_tier。
+        self.members = MembersStore(self.client, config.control_room_alias)
         # 让 run_workflow 工具能走异步连接器的回调协议（#1）：注入 bot 的 _dispatch_async。
         # 没配 public_url 时不注入——_dispatch_async 没有回调地址也没意义。
         if config.public_url:
@@ -785,7 +794,119 @@ class CosmacBot:
         if self._is_wf_command(text):
             self.client.send_text(room_id, self._run_wf_command(room_id, sender, text))
             return True
+        # 会员等级命令（自查 / 管理员设置）
+        if self._is_member_command(text):
+            self.client.send_text(room_id, self._run_member_command(sender, text))
+            return True
         return False
+
+    # —— 会员等级（账号权限分层）命令 ——
+
+    def _is_member_command(self, text: str) -> bool:
+        """是不是「会员」命令——纯字符串判断。"""
+        t = text.strip()
+        low = t.lower()
+        return (
+            t.startswith("会员")
+            or t.startswith("我的会员")
+            or t.startswith("/会员")
+            or low == "member"
+            or low.startswith("member ")
+            or low.startswith("/member")
+        )
+
+    # 中文等级词 → slug（命令里允许用中文或直接用 slug）
+    _TIER_ALIASES = {
+        "免费": "free", "免费会员": "free",
+        "付费": "paid", "付费会员": "paid",
+        "创作者": "creator", "创作者会员": "creator", "创作": "creator",
+    }
+
+    def _resolve_tier_word(self, word: str) -> Optional[str]:
+        """把命令里的等级词（中文别名或 slug）解析成合法 slug；无法识别返回 None。"""
+        w = (word or "").strip()
+        if is_valid_tier(w):
+            return w
+        return self._TIER_ALIASES.get(w)
+
+    def _run_member_command(self, sender: str, text: str) -> str:
+        """执行会员命令。
+
+        任何人可查自己：``会员`` / ``我的会员``。
+        平台管理员（控制室 power≥50）可管理（同工作流的授权口径——会员等级是付费门槛，
+        不能让普通人自封）：
+          ``会员 列表``            —— 列出所有非免费会员
+          ``会员 设置 @user 付费``  —— 设/调某人等级（免费=撤销）
+          ``会员 撤销 @user``       —— 回落到免费
+        全程兜异常，绝不抛。
+        """
+        # 去前缀，留下参数体
+        body = text.strip()
+        for p in ("我的会员", "会员", "/会员", "/member", "member"):
+            if body.lower().startswith(p.lower()):
+                body = body[len(p):]
+                break
+        body = body.strip()
+
+        # 无参 / 帮助：当作"查自己"（最常用），并附管理员用法提示
+        if not body or body in ("帮助", "help", "?", "？"):
+            mine = tier_label(self.members.get_tier(sender))
+            tip = ""
+            if self._is_platform_admin(sender):
+                tip = (
+                    "\n（管理员可用：会员 列表 / 会员 设置 @用户 付费 / 会员 撤销 @用户）"
+                )
+            return f"👤 你当前是「{mine}」。{tip}"
+
+        # —— 以下是管理命令：先验平台管理员 ——
+        if not self._is_platform_admin(sender):
+            return "只有平台管理员能管理会员等级。你可以发「会员」查看自己的等级。"
+
+        if body.startswith(("列表", "list", "ls")):
+            mp = self.members.get_all()
+            if not mp:
+                return "目前没有付费/创作者会员（所有人默认免费会员）。"
+            lines = [f"👥 非免费会员（{len(mp)} 人）："]
+            for uid, rec in mp.items():
+                src = rec.get("source") or "admin"
+                lines.append(f"  · {uid} —— {tier_label(rec.get('tier'))}（来源:{src}）")
+            return "\n".join(lines)
+
+        if body.startswith(("设置", "set", "授予")):
+            parts = body.split()
+            # 形如：设置 @user 付费 —— parts[0]=动词, parts[1]=@user, parts[2]=等级
+            if len(parts) < 3:
+                return "用法：会员 设置 @用户 <免费|付费|创作者>"
+            target, tier_word = parts[1], parts[2]
+            tier = self._resolve_tier_word(tier_word)
+            if not tier:
+                tiers = "/".join(t["label"] for t in MEMBER_TIERS)
+                return f"未知等级「{tier_word}」。可选：{tiers}（或 slug）。"
+            if self.members.grant(target, tier, source="admin"):
+                return f"✅ 已把 {target} 设为「{tier_label(tier)}」。"
+            return "⚠️ 设置失败（控制室不存在或写入失败），请稍后再试。"
+
+        if body.startswith(("撤销", "revoke", "取消")):
+            parts = body.split()
+            if len(parts) < 2:
+                return "用法：会员 撤销 @用户"
+            target = parts[1]
+            if self.members.revoke(target):
+                return f"✅ 已把 {target} 撤销为「免费会员」。"
+            return "⚠️ 撤销失败（控制室不存在或写入失败），请稍后再试。"
+
+        return "没听懂。发「会员」查看自己的等级；管理员发「会员 帮助」看用法。"
+
+    def grant_member_tier(
+        self, user_id: str, tier: str, source: str = "purchase"
+    ) -> bool:
+        """【预留接口】授予会员等级——给未来模块4（交易系统）支付成功后调用。
+
+        本期不接真实支付：把数据模型(控制室 cosmac.members)和这个服务端入口先立起来，
+        模块4 在支付回调里调本方法把用户提到对应等级即可。source 默认 'purchase' 以便审计
+        区分「买来的」与「管理员手动给的」。成功返回 True。
+        """
+        return self.members.grant(user_id, tier, source=source)
 
     def _is_wf_command(self, text: str) -> bool:
         """是不是「工作流」命令——纯字符串判断。"""

@@ -7,6 +7,17 @@
 
 ---
 
+## 2026-06-21 — 账号权限分层：会员等级（免费/付费/创作者）地基
+- 需求：在「服务器管理员」之外，给普通用户叠一层**会员身份**：免费 / 付费 / 创作者会员。负责人拍板的关键决策：
+  - **靠购买获得**，后台也能**手动调整**；本期先做地基 + 后台调整，**购买预留接口**（真实支付是模块4，未开工，不做假支付）。
+  - 存控制室 **state event `cosmac.members`**（与 `cosmac.ctrl.admins` 等同套路：管理员浏览器写、bot 读；权威数据、用户不可自改，付费门槛才靠得住）。
+  - **管理员身份独立于会员等级**（正交）——管理员仍走 Synapse admin 标志，会员等级是另一维。
+- 实现：
+  - 后端：新建 `cosmac/members.py`（等级枚举/标签/校验 + `MembersStore` 读写控制室 + `grant` 预留授予入口）；`config.py` 加 `MEMBERS_EVENT_TYPE`；`matrix_client.py` 加通用 `set_state_event`；`appservice_bot.py` 加「会员」命令（人人可查自己 `会员`/`我的会员`；平台管理员可 `会员 列表/设置/撤销`）+ `grant_member_tier`（**预留给模块4支付**，source=purchase）。
+  - 前端：`client.ts` 加 `MEMBER_TIERS/getMembers/setMemberTier/memberTierLabel`；`AdminView.vue` 用户表加「会员等级」列（行内下拉即时调整，乐观更新+失败回滚，付费/创作者带强调色）。
+- **已知边界**：appservice 命名空间是 `@guduu.*`，bot 无法代写普通用户 account data，故普通用户查自己等级走「DM 问 bot」而非个人主页徽章（个人主页徽章需另建读路径，按需再补）。门控（不同等级能用哪些功能）本期不做。
+- 验证：新增 `test_members.py` 15 例全过；后端全量 160 例过、ruff 干净；前端 `vue-tsc` 严格类型检查 + build 通过，preview 加载无 console 错误（管理后台交互需登录态 Synapse，未现场点测）。**需部署前端 dist**。
+
 ## 2026-06-21 — 品牌化清理（R·彻底清除 demo 人设"筱雨" + Matrix/Synapse 复查）
 - 负责人改定：**全删 筱雨 demo**。把全客户端 ~60 处硬编码"筱雨"统一脚本重命名为真实租户 **安其/安其影视工作室**（保留 demo 结构、避免删数组破坏 fallback 渲染；真实后端下这些 mock 本就不显示）：
   - `筱雨中枢 AI→安其中枢 AI`、`筱雨工作室→安其影视工作室`、`筱雨-MBP→安其-MBP`、人名 `筱雨→安其`、头像 `雨→安`。

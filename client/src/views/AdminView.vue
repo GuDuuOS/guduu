@@ -84,6 +84,7 @@
             <tr>
               <th>用户</th>
               <th>角色</th>
+              <th>会员等级</th>
               <th>状态</th>
               <th class="adm-ops-h">操作</th>
             </tr>
@@ -106,6 +107,23 @@
                 <span class="adm-tag" :class="u.admin ? 'admin' : 'member'">
                   {{ u.admin ? '管理员' : '成员' }}
                 </span>
+              </td>
+              <td>
+                <!-- 会员等级独立于"管理员"：直接下拉调整，即时写控制室 cosmac.members。
+                     中枢AI 不是会员、不显示下拉。 -->
+                <select
+                  v-if="!u.isBot"
+                  class="adm-tier"
+                  :class="memberTier(u.id)"
+                  :value="memberTier(u.id)"
+                  :disabled="tierBusy === u.id"
+                  @change="onTierChange(u, ($event.target as HTMLSelectElement).value)"
+                >
+                  <option v-for="t in MEMBER_TIERS" :key="t.slug" :value="t.slug">
+                    {{ t.label }}
+                  </option>
+                </select>
+                <span v-else class="adm-muted">—</span>
               </td>
               <td>
                 <span class="adm-tag" :class="u.deactivated ? 'off' : 'ok'">
@@ -718,6 +736,11 @@ import {
   setGlobalRules,
   getWorkflows,
   setWorkflows,
+  getMembers,
+  setMemberTier,
+  memberTierLabel,
+  MEMBER_TIERS,
+  type MemberMap,
   AI_TOOL_CATALOG,
   AI_PROVIDERS,
   type AdminUser,
@@ -743,6 +766,14 @@ const loading = ref(false)
 const users = ref<AdminUser[]>([])
 // busy 存"正在操作的用户 id"或 'create'，用于禁用对应按钮、防重复点击
 const busy = ref<string | null>(null)
+// 会员等级 map（userId→slug，只含非免费的）+ 正在调整的用户 id（禁用对应下拉防抖）
+const members = ref<MemberMap>({})
+const tierBusy = ref<string | null>(null)
+
+/** 取某用户的会员等级 slug（map 里没有即免费）。 */
+function memberTier(userId: string): string {
+  return members.value[userId] || 'free'
+}
 
 const domain = computed(() => serverName())
 
@@ -771,11 +802,38 @@ async function check() {
 async function loadUsers() {
   loading.value = true
   try {
-    users.value = await listUsers()
+    // 用户列表是主体；会员 map 并行读、失败不阻断（读不到就全员按免费显示）
+    const [list, mp] = await Promise.all([
+      listUsers(),
+      getMembers().catch(() => ({} as MemberMap)),
+    ])
+    users.value = list
+    members.value = mp
   } catch (e: any) {
     warn('加载失败', e?.message || '无法获取用户列表')
   } finally {
     loading.value = false
+  }
+}
+
+/** 下拉切换会员等级：即时写控制室 cosmac.members；失败回滚 UI。 */
+async function onTierChange(u: AdminUser, tier: string) {
+  const prev = memberTier(u.id)
+  if (tier === prev) return
+  tierBusy.value = u.id
+  // 乐观更新（select 已显示新值）；失败再回滚
+  if (tier === 'free') delete members.value[u.id]
+  else members.value = { ...members.value, [u.id]: tier }
+  try {
+    await setMemberTier(u.id, tier)
+    success('已更新会员等级', `${u.name} 现在是「${memberTierLabel(tier)}」`)
+  } catch (e: any) {
+    // 回滚
+    if (prev === 'free') delete members.value[u.id]
+    else members.value = { ...members.value, [u.id]: prev }
+    warn('设置失败', e?.message || '无法写入会员等级')
+  } finally {
+    tierBusy.value = null
   }
 }
 
@@ -1505,6 +1563,22 @@ onMounted(check)
 .adm-tag.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
 .adm-tag.off { color: var(--danger); background: #fee2e2; }
 .adm-tag.bot { color: #fff; background: var(--accent); }
+
+/* 会员等级下拉：免费=低调，付费/创作者=带强调色，一眼可辨 */
+.adm-tier {
+  font-size: 11px; padding: 3px 8px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--bg-panel); color: var(--text-2);
+}
+.adm-tier:disabled { opacity: 0.5; cursor: default; }
+.adm-tier.paid {
+  color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: var(--accent-soft);
+}
+.adm-tier.creator {
+  color: #b45309; border-color: #f59e0b;
+  background: color-mix(in srgb, #f59e0b 14%, transparent);
+}
+.adm-muted { color: var(--text-3); }
 
 .adm-ops { text-align: right; white-space: nowrap; }
 .adm-op {
