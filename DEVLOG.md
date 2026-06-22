@@ -7,6 +7,13 @@
 
 ---
 
+## 2026-06-22 — 去 Demo（第1刀）：删除死代码（演示稿 App.vue 整棵树 + 路由视图）
+- 负责人要求"代码里不能有 demo、要真实落地"。第一步**清死代码**:本应用根是 `LiveView.vue`(main.ts 直挂)、不走 `<router-view>`,所以演示稿的 `App.vue` 整棵组件树 + 路由整页视图**从不渲染=死代码**。
+- 删除 **18 个死文件**(build 验证全程绿,确认无 live 引用):`App.vue`、`AiChatPanel.vue`(demo AI 面板)、7 个路由视图(`DashboardView/SafetyView/EnergyView/OfficeView/DuuChatView/TodoView/OpsChannelView`)、及级联孤儿(`SystemAiModal/TypeOut/MessageStream/MessageItem/CardActionModal`、`useSystemAi/useDashboardDetail/useClock/useAutoHideScrollbar`)。
+- `router/index.ts`:移除死视图 import,`/` 等路由改指 `Blank`(保持 hash 合法;只有 `name:'dashboard'` 被 live 代码引用,已保留)。
+- **对用户零影响**(这些本就不渲染);纯清理代码里的 demo。build 通过(`index-Lu8l49N_.js`)。**需发 dist**(产物变小)。
+- **下一步(去 demo 第2/3刀)**:① 清 live 组件里的占位按钮(TopBar/Composer/ChannelSidebar/ProfileHome 里点了弹"(演示)"的);② 把 live 的「数据看板/任务看板」从 mock 数据(`canvas/*`+`data/*`+`useAiAgent`)接真实数据。
+
 ## 2026-06-22 — 体验：中枢 AI 对话区自动滚到底部
 - 反馈:在右侧真·中枢 AI 面板聊天时,bot 回复出现在视口下方、不自动滚动,要手动下拉才看得到。
 - 修(`LiveView.vue`):给 `.ai-body` 加 ref,`watch(aiMsgs)` 来新消息 + `watch(aiOpen)` 打开面板时 `nextTick` 滚到底。沿用 `AiChatPanel.vue` 既有同款逻辑(`.ai-body` 本就 overflow-y:auto)。
