@@ -92,7 +92,6 @@ const { openSettings } = useUserProfile()
 
 // ── 数据看板（复用 DEMO 的画布组件 + 影视公司主题数据）──
 import KpiCard from '@/components/canvas/KpiCard.vue'
-import CommandCenter from '@/components/canvas/CommandCenter.vue'
 import { getDashboard } from '@/data/dashboards'
 import { useActiveWorkspace } from '@/composables/useActiveWorkspace'
 import '@/styles/canvas.css' // 看板样式，命名空间在 .canvas/.panel 下，不与 LiveView 撞
@@ -115,6 +114,17 @@ const boardKpis = computed(() => {
     { label: '知识库文档', target: s.kb_docs, unit: '篇', delta: 'RAG 检索' },
   ]
 })
+
+// 看板"一句话下达目标"：真的交给中枢 AI（打开面板 + 复用 aiSend 发给 bot），不再 mock。
+const boardAsk = ref('')
+async function askFromBoard() {
+  const t = boardAsk.value.trim()
+  if (!t) return
+  boardAsk.value = ''
+  aiDraft.value = t
+  aiOpen.value = true   // 打开右侧中枢 AI 面板，结果显示在那
+  await aiSend()        // 真发给 bot 的 DM 房间
+}
 
 // 主区视图：board=数据看板 / tasks=任务看板 / 两者皆 false=频道（登录后默认数据看板）
 const board = ref(true)
@@ -1187,7 +1197,21 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
             <div class="canvas">
               <div class="ctitle">{{ dash.brand }}</div>
               <div class="csub">// 实时运营画布 · 由 CosMac Star 自动维护</div>
-              <CommandCenter />
+              <!-- 一句话下达目标：真的发给中枢 AI（复用 aiSend），不再是 mock 卡片 -->
+              <div class="board-ask">
+                <div class="board-ask-h">⚡ 一句话下达目标</div>
+                <div class="board-ask-row">
+                  <span class="board-ask-mark">&gt;</span>
+                  <input
+                    v-model="boardAsk"
+                    class="board-ask-input"
+                    placeholder="比如：帮我建个商单专班并拉人 · 查工作室任务状态 · 跑某个工作流"
+                    @keyup.enter="askFromBoard"
+                  />
+                  <button class="board-ask-send" :disabled="!boardAsk.trim()" @click="askFromBoard">下达</button>
+                </div>
+                <div class="board-ask-tip">交给中枢 AI 执行（建群 / 查任务 / 跑工作流…），结果在右侧中枢 AI 面板。</div>
+              </div>
               <div class="kpis">
                 <KpiCard v-for="(k, i) in boardKpis" :key="k.label" :data="k" :delay="200 + i * 80" />
               </div>
@@ -1925,6 +1949,16 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
    浏览器会把 overflow-x 也强制算成 auto——于是当内容比列略宽时整块就能被横向「拖移/平移」，
    造成用户看到的拖移 BUG。这里显式把 overflow-x 钉成 hidden，彻底禁掉横向拖动。 */
 .board-scroll { flex: 1; overflow-y: auto; overflow-x: hidden; min-height: 0; }
+/* 看板"一句话下达目标"hero（真发给中枢 AI）*/
+.board-ask { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; margin-bottom: 16px; }
+.board-ask-h { font-size: var(--fs-100); font-weight: var(--fw-bold); color: var(--text); margin-bottom: 10px; }
+.board-ask-row { display: flex; align-items: center; gap: 8px; }
+.board-ask-mark { font-family: var(--font-mono, monospace); color: var(--accent); font-weight: var(--fw-bold); }
+.board-ask-input { flex: 1; border: 1px solid var(--border); border-radius: 9px; padding: 9px 12px; font-size: var(--fs-100); color: var(--text); background: var(--bg); outline: none; }
+.board-ask-input:focus { border-color: var(--accent); }
+.board-ask-send { border: none; background: linear-gradient(90deg, var(--accent), var(--warn, #e0883a)); color: #fff; font-weight: var(--fw-bold); padding: 9px 18px; border-radius: 9px; cursor: pointer; white-space: nowrap; }
+.board-ask-send:disabled { opacity: .55; cursor: default; }
+.board-ask-tip { font-size: var(--fs-75); color: var(--text-3); margin-top: 8px; }
 .pinned-item { color: var(--text-2); }
 .board-sub { font-size: 13px; color: var(--text-3); font-family: var(--mono); }
 

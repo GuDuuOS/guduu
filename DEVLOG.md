@@ -7,6 +7,13 @@
 
 ---
 
+## 2026-06-22 — 去 Demo（第3刀·收尾）：看板"一句话下达目标"接真实中枢 AI（方案A）
+- 负责人"继续"→ 走方案 A：把看板招牌交互"一句话下达创意"从 mock(`CommandCenter`+`useAiAgent` 假卡片)改成**真的驱动中枢 AI**。
+- LiveView 新增 `askFromBoard()`:输入 → 设 `aiDraft` + 打开中枢 AI 面板 + 复用真实 `aiSend()` 发给 bot 的 DM 房间,结果在右侧面板真实显示。删 `CommandCenter`,换成简洁 hero 输入框。
+- 级联删 6 个死文件:`CommandCenter` + `useAiAgent`(大块 mock 卡片生成器) + `useAiPanel` + `data/command.ts` + `data/todos.ts` + `useLiveChannels`。
+- **数据看板至此全真实**:品牌标题 + "一句话下达目标"(真 AI) + 4 张真实 KPI 卡。build 通过(`index-Dv4_56u-.js`)。纯前端,**发 dist**。
+- 剩余 demo(独立任务,非看板):任务看板(`productionTabs` 内联 mock 剧集数据,要做需任务后端)、ProfileHome(个人主页=模块5)。业务图表如需回来再定数据源。
+
 ## 2026-06-22 — 去 Demo（第3刀·续）：移除看板影视业务假图表（方案C）
 - 负责人"继续"→ 走方案 C（只留真实平台数据）。把看板里剩下的**影视业务假图表**全部移除:播放趋势/制作量双图(grid-2)、剧集列表 UnitGrid + 饼图(grid-3)、BizPanels——这些是 CosMac 不拥有的业务数据。
 - 级联删 5 个死文件:`PanelChart/UnitGrid/BizPanels` 组件 + `useChart` + `data/charts.ts`（build 验证无 live 引用）。
