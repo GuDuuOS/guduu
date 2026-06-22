@@ -36,6 +36,9 @@
         <button class="adm-mi" :class="{ active: tab === 'gating' }" @click="switchToGating">
           <span class="adm-mi-ic">🔐</span> 会员权限
         </button>
+        <button class="adm-mi" :class="{ active: tab === 'plans' }" @click="switchToPlans">
+          <span class="adm-mi-ic">💳</span> 会员套餐
+        </button>
         <button class="adm-mi" :class="{ active: tab === 'overview' }" @click="switchToOverview">
           <span class="adm-mi-ic">📊</span> 数据概览
         </button>
@@ -647,6 +650,98 @@
         </div>
       </template>
 
+      <!-- 会员套餐面板:配置可购买的会员套餐(tier/时长/各币种价),写控制室 cosmac.plans -->
+      <template v-else-if="tab === 'plans'">
+        <header class="adm-head">
+          <div>
+            <h1 class="adm-h1">会员套餐</h1>
+            <p class="adm-hint">
+              配置用户「升级会员」时可买的套餐 · 价格按货币填(留空=该货币不售) · 保存后下单即用
+            </p>
+          </div>
+          <div class="adm-actions">
+            <button class="adm-btn ghost" :disabled="planLoading || planSaving" @click="loadPlans">
+              {{ planLoading ? '加载中…' : '重新加载' }}
+            </button>
+            <button class="adm-btn" :disabled="planLoading || planSaving || !planLoaded" @click="startAddPlan">＋ 新建套餐</button>
+          </div>
+        </header>
+
+        <div v-if="planLoading" class="adm-center"><div class="adm-spin" /> 加载套餐…</div>
+
+        <!-- 读取失败不渲染可编辑区(避免空列表误存覆盖真实套餐) -->
+        <div v-else-if="!planLoaded" class="adm-center adm-denied">
+          <div class="adm-denied-ic">⚠️</div>
+          <div class="adm-denied-t">套餐加载失败</div>
+          <div class="adm-denied-d">为避免把空列表误存、覆盖真实套餐，已暂不显示。请点「重新加载」重试。</div>
+        </div>
+
+        <div v-else class="adm-form">
+          <div v-if="planEditing" class="adm-skill-edit">
+            <label class="adm-field">
+              <span>标识 slug（英文/数字/-，全局唯一）</span>
+              <input v-model.trim="planForm.slug" :disabled="planForm._isEdit" placeholder="paid-monthly" />
+            </label>
+            <label class="adm-field">
+              <span>名称</span>
+              <input v-model.trim="planForm.name" placeholder="付费会员 · 月卡" />
+            </label>
+            <label class="adm-field">
+              <span>会员等级</span>
+              <select v-model="planForm.tier" class="cam-select">
+                <option value="paid">付费会员</option>
+                <option value="creator">创作者会员</option>
+              </select>
+            </label>
+            <label class="adm-field">
+              <span>有效期（天）</span>
+              <input v-model.number="planForm.period_days" type="number" min="1" placeholder="30" />
+            </label>
+            <div class="adm-field">
+              <span>价格（按货币填，留空=不售该货币）</span>
+              <div v-for="c in PLAN_CURRENCIES" :key="c.code" class="plan-price-row">
+                <span class="plan-price-cur">{{ c.label }}</span>
+                <input v-model.trim="planForm.priceText[c.code]" type="text" inputmode="decimal"
+                  :placeholder="c.code === 'cny' ? '如 68' : '如 9.99'" />
+              </div>
+              <em class="adm-note">填用户看到的金额（元/美元），保存自动转成最小单位(分)存储。</em>
+            </div>
+            <label class="adm-tool">
+              <input type="checkbox" v-model="planForm.enabled" />
+              <span class="adm-tool-l">上架（可购买）</span>
+            </label>
+            <div class="adm-actions">
+              <button class="adm-btn ghost" :disabled="planSaving" @click="planEditing = false">取消</button>
+              <button class="adm-btn" :disabled="planSaving || !planForm.slug" @click="savePlan">
+                {{ planSaving ? '保存中…' : '保存' }}
+              </button>
+            </div>
+          </div>
+
+          <p v-if="!plans.length" class="adm-hint">还没有套餐。点右上「新建套餐」加一个(如「付费月卡 / paid / 30天 / $9.99」)。</p>
+          <table v-else class="adm-table">
+            <thead>
+              <tr><th>标识</th><th>名称</th><th>等级</th><th>时长</th><th>价格</th><th>状态</th><th>操作</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="p in plans" :key="p.slug">
+                <td><code>{{ p.slug }}</code></td>
+                <td>{{ p.name || '—' }}</td>
+                <td>{{ p.tier === 'creator' ? '创作者' : '付费' }}</td>
+                <td>{{ p.period_days }}天</td>
+                <td class="adm-skill-desc">{{ planPriceText(p) }}</td>
+                <td><span class="adm-badge" :class="{ on: p.enabled }">{{ p.enabled ? '上架' : '下架' }}</span></td>
+                <td class="adm-row-actions">
+                  <button class="adm-btn ghost sm" :disabled="planSaving" @click="startEditPlan(p)">编辑</button>
+                  <button class="adm-btn ghost sm" :disabled="planSaving" @click="togglePlan(p)">{{ p.enabled ? '下架' : '上架' }}</button>
+                  <button class="adm-btn ghost sm danger" :disabled="planSaving" @click="removePlan(p)">删除</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
+
       <!-- 数据概览面板 -->
       <template v-else-if="tab === 'overview'">
         <header class="adm-head">
@@ -794,6 +889,10 @@ import {
   setGlobalRules,
   getWorkflows,
   setWorkflows,
+  getPlans,
+  setPlans,
+  PLAN_CURRENCIES,
+  type PlanDef,
   getMembers,
   setMemberTier,
   memberTierLabel,
@@ -821,7 +920,7 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 const { success, warn } = useToast()
 
 // 当前管理模块：用户/频道/AI配置/技能库/智能体/规则/工作流/数据概览
-const tab = ref<'users' | 'rooms' | 'ai' | 'skills' | 'agents' | 'rules' | 'workflows' | 'gating' | 'overview'>('users')
+const tab = ref<'users' | 'rooms' | 'ai' | 'skills' | 'agents' | 'rules' | 'workflows' | 'gating' | 'plans' | 'overview'>('users')
 
 // 页面状态机：checking 校验中 / denied 无权限 / ok 已是管理员
 const state = ref<'checking' | 'denied' | 'ok'>('checking')
@@ -1376,6 +1475,117 @@ async function saveGating() {
   }
 }
 
+/* —— 会员套餐（写控制室 cosmac.plans；模块4 交易系统）—— */
+const plans = ref<PlanDef[]>([])
+const planLoading = ref(false)
+const planSaving = ref(false)
+const planLoaded = ref(false)
+const planEditing = ref(false)
+// priceText：编辑态用「元」字符串(便于输入)，保存时 ×100 转「分」存进 prices。
+const planForm = reactive<{
+  slug: string; name: string; tier: string; period_days: number
+  priceText: Record<string, string>; enabled: boolean; _isEdit: boolean
+}>({ slug: '', name: '', tier: 'paid', period_days: 30, priceText: {}, enabled: true, _isEdit: false })
+
+/** 把套餐价格(分)拼成给人看的文案，如 "USD $9.99 · CNY ¥68"。 */
+function planPriceText(p: PlanDef): string {
+  const parts: string[] = []
+  for (const c of PLAN_CURRENCIES) {
+    const cents = p.prices[c.code]
+    if (cents && cents > 0) parts.push(`${c.label} ${(cents / 100).toFixed(2)}`)
+  }
+  return parts.join(' · ') || '（未定价）'
+}
+
+function switchToPlans() {
+  tab.value = 'plans'
+  if (!planLoaded.value) loadPlans()
+}
+
+async function loadPlans() {
+  planLoading.value = true
+  try {
+    plans.value = await getPlans()
+    planLoaded.value = true
+  } catch (e: any) {
+    warn('加载失败', e?.message || '无法读取套餐')
+  } finally {
+    planLoading.value = false
+  }
+}
+
+function startAddPlan() {
+  Object.assign(planForm, {
+    slug: '', name: '', tier: 'paid', period_days: 30,
+    priceText: {}, enabled: true, _isEdit: false,
+  })
+  planEditing.value = true
+}
+
+function startEditPlan(p: PlanDef) {
+  const priceText: Record<string, string> = {}
+  for (const c of PLAN_CURRENCIES) {
+    const cents = p.prices[c.code]
+    if (cents && cents > 0) priceText[c.code] = String(cents / 100)
+  }
+  Object.assign(planForm, {
+    slug: p.slug, name: p.name, tier: p.tier, period_days: p.period_days,
+    priceText, enabled: p.enabled, _isEdit: true,
+  })
+  planEditing.value = true
+}
+
+async function persistPlans(next: PlanDef[], okMsg: string) {
+  planSaving.value = true
+  try {
+    await setPlans(next)
+    plans.value = next
+    success('已保存', okMsg)
+  } catch (e: any) {
+    warn('保存失败', e?.message || '无法写入控制室')
+    throw e
+  } finally {
+    planSaving.value = false
+  }
+}
+
+async function savePlan() {
+  const slug = planForm.slug.trim()
+  if (!slug) return
+  // 元→分：每种货币 parseFloat 后 ×100 取整；非正/非法的丢弃
+  const prices: Record<string, number> = {}
+  for (const c of PLAN_CURRENCIES) {
+    const v = parseFloat((planForm.priceText[c.code] || '').trim())
+    if (Number.isFinite(v) && v > 0) prices[c.code] = Math.round(v * 100)
+  }
+  if (!Object.keys(prices).length) { warn('保存失败', '至少填一种货币的价格'); return }
+  const item: PlanDef = {
+    slug, name: planForm.name.trim() || slug,
+    tier: planForm.tier === 'creator' ? 'creator' : 'paid',
+    period_days: Math.max(1, Math.trunc(planForm.period_days) || 30),
+    prices, enabled: planForm.enabled,
+  }
+  const next = plans.value.slice()
+  const i = next.findIndex((p) => p.slug === slug)
+  if (i >= 0) next[i] = item
+  else next.push(item)
+  try {
+    await persistPlans(next, '已保存套餐')
+    planEditing.value = false
+  } catch { /* 已提示 */ }
+}
+
+async function togglePlan(p: PlanDef) {
+  const next = plans.value.map((x) => x.slug === p.slug ? { ...x, enabled: !x.enabled } : x)
+  try { await persistPlans(next, p.enabled ? '已下架' : '已上架') } catch { /* 已提示 */ }
+}
+
+async function removePlan(p: PlanDef) {
+  if (!confirm(`确认删除套餐「${p.name || p.slug}」？`)) return
+  const next = plans.value.filter((x) => x.slug !== p.slug)
+  try { await persistPlans(next, '已删除') } catch { /* 已提示 */ }
+}
+
 /* —— 工作流连接器（写控制室 state event）—— */
 const workflows = ref<WorkflowDef[]>([])
 const wfLoading = ref(false)
@@ -1749,6 +1959,9 @@ onMounted(check)
 .adm-form .adm-field input:focus,
 .adm-form .adm-field select:focus { outline: none; border-color: var(--accent); }
 .adm-note { font-size: var(--fs-75); color: var(--text-3); font-style: normal; line-height: 1.5; }
+.plan-price-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.plan-price-cur { flex: 0 0 84px; font-size: var(--fs-85); color: var(--text-2); }
+.plan-price-row input { flex: 1; }
 .adm-tools { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
 .adm-tool {
   display: flex; align-items: center; gap: 9px; cursor: pointer;

@@ -1288,6 +1288,79 @@ export async function setWorkflows(workflows: WorkflowDef[]): Promise<void> {
   await (mx as any).sendStateEvent(rid, WORKFLOWS_EVENT_TYPE, { workflows }, '')
 }
 
+/* =====================================================================
+ *  管理后台 · 会员套餐（模块4 交易系统）
+ *  存储：控制室 state event `cosmac.plans`，{ plans: [{slug,name,tier,period_days,prices,enabled}] }。
+ *  价格按货币存**最小单位整数(分/cent)**；前端编辑用元、保存时 ×100 取整。
+ * ===================================================================== */
+
+const PLANS_EVENT_TYPE = 'cosmac.plans'
+
+/** 套餐支持的货币（与后端解析一致；prices 的 key 用小写 code）。 */
+export const PLAN_CURRENCIES: { code: string; label: string }[] = [
+  { code: 'usd', label: 'USD($)' },
+  { code: 'cny', label: 'CNY(¥)' },
+  { code: 'usdt', label: 'USDT' },
+]
+
+/** 一个会员套餐（管理后台编辑）。prices：货币 code → **分**(整数)。 */
+export interface PlanDef {
+  slug: string
+  name: string
+  tier: string                 // paid | creator（不能是 free）
+  period_days: number
+  prices: Record<string, number>  // 货币 → 分(cent)
+  enabled: boolean
+}
+
+/**
+ * 读套餐列表（控制室 state event）。事件不存在(404)→[]；**瞬时读失败抛异常**——
+ * 否则管理员会在空列表上保存、把真实套餐覆盖没了（同 gating 的保护）。
+ */
+export async function getPlans(): Promise<PlanDef[]> {
+  if (!mx) return []
+  const rid = await resolveControlRoom()
+  if (!rid) return []
+  try {
+    const ev = await (mx as any).getStateEvent(rid, PLANS_EVENT_TYPE, '')
+    const arr = Array.isArray(ev?.plans) ? ev.plans : []
+    return arr.map((p: any) => {
+      const prices: Record<string, number> = {}
+      if (p?.prices && typeof p.prices === 'object') {
+        for (const [cur, cents] of Object.entries(p.prices)) {
+          const c = Math.trunc(Number(cents))
+          if (Number.isFinite(c) && c > 0) prices[String(cur).toLowerCase()] = c
+        }
+      }
+      return {
+        slug: String(p?.slug || ''),
+        name: String(p?.name || ''),
+        tier: p?.tier === 'creator' ? 'creator' : 'paid',
+        period_days: Math.max(1, Math.trunc(Number(p?.period_days) || 30)),
+        prices,
+        enabled: p?.enabled !== false,
+      }
+    }).filter((p: PlanDef) => p.slug)
+  } catch (e: any) {
+    if (e?.errcode === 'M_NOT_FOUND') return []
+    throw new Error('读取套餐失败，请重试（避免在读取失败时把空列表覆盖真实套餐）')
+  }
+}
+
+/** 整体写入套餐列表（必要时先建控制室）。只写合法项。 */
+export async function setPlans(plans: PlanDef[]): Promise<void> {
+  if (!mx) throw new Error('未登录')
+  const rid = await ensureControlRoom()
+  const clean = plans
+    .filter((p) => p.slug && (p.tier === 'paid' || p.tier === 'creator'))
+    .map((p) => ({
+      slug: p.slug, name: p.name || p.slug, tier: p.tier,
+      period_days: Math.max(1, Math.trunc(p.period_days) || 30),
+      prices: p.prices, enabled: p.enabled !== false,
+    }))
+  await (mx as any).sendStateEvent(rid, PLANS_EVENT_TYPE, { plans: clean }, '')
+}
+
 /** 读某个频道当前时间线的消息（含发送者昵称与 cosmac.card 富卡）。 */
 export function listMessages(roomId: string): LiveMsg[] {
   const room = mx?.getRoom(roomId)

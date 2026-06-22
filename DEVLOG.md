@@ -7,6 +7,13 @@
 
 ---
 
+## 2026-06-22 — 模块4 P2a：后台「会员套餐」配置页(写 cosmac.plans)
+- 负责人指出"升级会员"该和支付一起做(对)。P2 拆三块,先做 P2a：管理员能配套餐(否则没东西可买)。
+- **后台「会员套餐」页**(`AdminView.vue` 新 tab,💳)：套餐 CRUD——slug/名称/等级(付费/创作者)/有效期(天)/各币种价格/上下架。价格编辑用「元」、保存 ×100 转「分」存,展示再 /100。写控制室 `cosmac.plans` state event(bot 端 P1 的 `OrderService.list_plans` 已能读)。
+- **数据层** `client.ts`：`getPlans/setPlans` + `PlanDef` + `PLAN_CURRENCIES`(USD/CNY/USDT)。getPlans **读失败抛异常**(404→[])、后台加载失败禁用新建/不渲染可编辑区,杜绝空列表覆盖真实套餐(同 gating 保护)。
+- 架构说明(写进回复):前端是 Matrix 客户端、够不到 cosmac DB,所以购买流程(下单/支付)要走 bot 的 HTTP 端点——P2b 做(套餐列表公开读 + 下单 Matrix 鉴权 + 支付 webhook + 前端「升级会员」面板 + manual 渠道端到端),P2c 接 Stripe。
+- 验证:client build 通过(`index-BlTrGUgp.js`);纯前端(后端 P1 已能读 plans)。**需发 dist**。
+
 ## 2026-06-22 — 模块4(交易系统·会员订阅)开工：P1 地基(支付抽象+订单+会员到期)
 - 负责人拍板:主线=**会员订阅/充值**,多渠道(Stripe/PayPal/USDT/支付宝/微信)按 IP 地理路由,范围"较完整"。先落**与支付商无关的地基**(纯业务逻辑、mock 支付、单测验证,不需商户密钥):
 - **套餐定义**:控制室 `cosmac.plans` state event(后台配,同 workflows/gating 套路);`trading/plans.py` 强校验解析(免费等级/无价/非正时长/重复 slug 全丢)。价格用最小货币单位整数(分)。
