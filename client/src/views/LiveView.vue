@@ -221,6 +221,15 @@ const aiMax = ref(false)
 // 关闭面板时一并退出放大态，避免下次打开还停在放大
 watch(aiOpen, (v) => { if (!v) aiMax.value = false })
 
+// 中枢 AI 对话区：来新消息 / 打开面板时自动滚到底部（否则 bot 回复在视口下方看不到）
+const aiBodyRef = ref<HTMLElement | null>(null)
+function scrollAiToBottom() {
+  const el = aiBodyRef.value
+  if (el) el.scrollTop = el.scrollHeight
+}
+watch(aiMsgs, () => nextTick(scrollAiToBottom), { deep: true })
+watch(aiOpen, (v) => { if (v) nextTick(scrollAiToBottom) })
+
 // ── 纯界面态（折叠分组 / 下拉菜单 / 专注模式 / 收藏星）────
 const channelsOpen = ref(true)
 const dmsOpen = ref(true)
@@ -1520,7 +1529,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 
           <!-- 中栏：对话 + 输入（dock / 放大 共用）-->
           <div class="ai-center">
-            <div class="ai-body">
+            <div ref="aiBodyRef" class="ai-body">
               <div v-for="m in aiMsgs" :key="m.id" class="ai-msg" :class="{ mine: isMe(m.sender) }">
                 <div v-if="!m.card" class="ai-bubble" v-html="renderMd(m.body)"></div>
                 <div v-else class="rich info">

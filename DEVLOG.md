@@ -7,6 +7,11 @@
 
 ---
 
+## 2026-06-22 — 体验：中枢 AI 对话区自动滚到底部
+- 反馈:在右侧真·中枢 AI 面板聊天时,bot 回复出现在视口下方、不自动滚动,要手动下拉才看得到。
+- 修(`LiveView.vue`):给 `.ai-body` 加 ref,`watch(aiMsgs)` 来新消息 + `watch(aiOpen)` 打开面板时 `nextTick` 滚到底。沿用 `AiChatPanel.vue` 既有同款逻辑(`.ai-body` 本就 overflow-y:auto)。
+- 验证:build 通过(`index-BnHEoYzu.js`)。纯前端,**发 dist** 即可。
+
 ## 2026-06-22 — 关键修复：会员 state_key 不能用 @user_id（Matrix 403 "set others state"）
 - 现场实测「模拟支付」最终卡在开会员：bot 写 `cosmac.member@<room>` 403 `M_FORBIDDEN "You are not allowed to set others state"`。
 - 根因:per-user 会员事件用了 **state_key = 用户 @id**。但 **Matrix 硬规则:state_key 以 `@` 开头的事件只有该用户本人能写**——bot(@guduu)/管理员根本无权给"别人"开会员。单测的假 client 没模拟这条规则,所以一直没暴露(我的疏漏)。**注:那套"已支付但开通失败→回滚订单"的保护真生效了,没产生扣款脏数据。**
