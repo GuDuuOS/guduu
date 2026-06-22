@@ -7,6 +7,12 @@
 
 ---
 
+## 2026-06-22 — 模块4 修复：manual 回调缺 CORS 头导致前端 Failed to fetch
+- 现场实测「模拟支付成功」报 `Failed to fetch`。根因:`/cosmac/pay/callback/<provider>` 的响应**漏了 CORS 头**(给 plans/checkout/me 都加了、唯独漏这个)。manual 测试通道是**浏览器**调的,响应无 `Access-Control-Allow-Origin` → 浏览器直接拦下、连状态码都读不到。
+- 修:回调所有响应加 `cors=True`(真实渠道是服务端调用、带了也无害)。HTTP 集成测试补断言"回调响应带 CORS"防回归。
+- 验证:`test_pay_http` 5 例过、ruff 过。**后端 only → 只重启 bot,不发 dist**。
+- (注:修完后若点「模拟支付」显示"测试支付通道未开启",是 manual 默认禁用,需 `COSMAC_PAY_ALLOW_MANUAL=1`,与本 bug 无关。)
+
 ## 2026-06-22 — 模块4 P2b+：会员状态展示 + 端到端 HTTP 模拟测试（⚠️真实付款未测）
 - 负责人定：暂不接 Stripe（账号未开），**先用 mock(manual)通道**跑通业务、继续开发，并**明确记录真实付款尚未测试**。
 - **端到端 HTTP 模拟测试**（`test_pay_http.py`）：起真实 bot HTTP server，用 requests 打 `/cosmac/pay/*`，验证路由 / CORS 预检 / Authorization 头 / body 解析 / manual 回调分发全对。**证明 mock 链路 HTTP 层端到端跑通**。

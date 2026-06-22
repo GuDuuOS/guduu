@@ -1729,24 +1729,26 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(code, payload, cors=True)
             return
 
-        # 模块4：支付平台回调 /cosmac/pay/callback/<provider>（平台验签，不是浏览器）。
+        # 模块4：支付回调 /cosmac/pay/callback/<provider>。真实渠道是平台服务端验签调用；
+        # 但 manual(测试)通道是**浏览器**调的 → 响应必须带 CORS 头，否则前端报 Failed to fetch。
+        # 给真实渠道带 CORS 也无害（它们是服务端调用、忽略该头）。
         if path.startswith("/cosmac/pay/callback/"):
             provider = path.split("/cosmac/pay/callback/", 1)[1].split("/", 1)[0]
             try:
                 length = int(self.headers.get("Content-Length", 0))
             except (TypeError, ValueError):
-                self._send_json(400, {"error": "bad content-length"})
+                self._send_json(400, {"error": "bad content-length"}, cors=True)
                 return
             if length < 0 or length > _MAX_CALLBACK_BODY:
-                self._send_json(413, {"error": "bad body length"})
+                self._send_json(413, {"error": "bad body length"}, cors=True)
                 return
             raw = self._read_body(length) if length else b"{}"
             if raw is None:
-                self._send_json(408, {"error": "request timeout"})
+                self._send_json(408, {"error": "request timeout"}, cors=True)
                 return
             hdrs = {k: v for k, v in self.headers.items()}
             code = self.bot.handle_pay_callback(provider, hdrs, raw or b"{}")
-            self._send_json(code, {} if code == 200 else {"error": code})
+            self._send_json(code, {} if code == 200 else {"error": code}, cors=True)
             return
 
         # 外部工作流平台的异步回调：/cosmac/wf/callback/<run_id>?token=...

@@ -96,6 +96,8 @@ class PayHttpTests(unittest.TestCase):
         r = requests.post(self._u("/cosmac/pay/callback/manual"),
                           json={"order_no": "o1", "token": "tok"}, timeout=5)
         self.assertEqual(r.status_code, 200)
+        # manual 回调是浏览器调的 → 响应必须带 CORS，否则前端 Failed to fetch
+        self.assertEqual(r.headers.get("Access-Control-Allow-Origin"), "*")
         self.assertEqual(self.bot.granted[0], "manual")
         self.assertEqual(self.bot.granted[1]["order_no"], "o1")
 
