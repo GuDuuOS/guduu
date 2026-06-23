@@ -7,6 +7,13 @@
 
 ---
 
+## 2026-06-23 — AI 任务编排 P1：主 AI 拆任务 → 真实任务看板（Kanban + 手动改状态）
+- 负责人定的任务看板新形态(AI 任务调度中枢)开工。**P1 地基**:主 AI 拆解目标→落库→真实看板→手动改状态。派发执行/结果回填(P2)后续。
+- **后端**:`cosmac_task` 表 + `db/task_repo.py`(create/list/update)+ 主 AI 新工具 **`create_tasks`**(`ai/tools.py`,把目标拆成子任务、每条带负责人、写库)+ bot 端点 `GET /cosmac/tasks`、`POST /cosmac/tasks/update`(whoami 校验 + CORS)。
+- **前端**:任务看板从影视流水线 mock 换成**真实 Kanban**(待办/进行中/已完成三列,读 `/cosmac/tasks`)+ 卡片按钮改状态(`updateTask`);数据看板"一句话下达目标"→中枢 AI→AI 调 `create_tasks`→任务出现在看板。
+- 验证:加 任务流 用例(拆解工具→列表→改状态、done 自动补满进度、空标题丢弃、无 token 401);**195 单测过**、ruff、build 通过。需发 dist + 重启 bot。
+- **遗留**:LiveView 里旧的影视流水线 mock 脚本(productionTabs/甘特图等)已不被模板引用、但还在文件里(下一步清);P2 做派发(发频道@人/交AI/跑工作流)+结果回填。
+
 ## 2026-06-22 — 去 Demo（第3刀·收尾）：看板"一句话下达目标"接真实中枢 AI（方案A）
 - 负责人"继续"→ 走方案 A：把看板招牌交互"一句话下达创意"从 mock(`CommandCenter`+`useAiAgent` 假卡片)改成**真的驱动中枢 AI**。
 - LiveView 新增 `askFromBoard()`:输入 → 设 `aiDraft` + 打开中枢 AI 面板 + 复用真实 `aiSend()` 发给 bot 的 DM 房间,结果在右侧面板真实显示。删 `CommandCenter`,换成简洁 hero 输入框。

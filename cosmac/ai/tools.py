@@ -239,6 +239,45 @@ class Toolbox:
             fn=self._tool_run_workflow,
         )
 
+        # 6) 拆解目标 → 登记任务到任务看板（AI 任务编排 P1）
+        self._register(
+            name="create_tasks",
+            description=(
+                "把一个目标拆解成若干可执行的子任务，登记到『任务看板』，每个子任务指定一个负责人。"
+                "当用户『下达目标/让你拆解任务/安排分工/拆成几步』时调用。"
+                "负责人填人名/角色/@某人/某智能体（如『编剧』『@anqi:host』『分镜Agent』）；拿不准就填角色。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "goal": {
+                        "type": "string",
+                        "description": "总目标原文（这批子任务的来源）。",
+                    },
+                    "tasks": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title": {
+                                    "type": "string",
+                                    "description": "子任务标题（一句话说清要做什么）。",
+                                },
+                                "assignee": {
+                                    "type": "string",
+                                    "description": "负责人：人名/角色/@某人/某智能体。",
+                                },
+                            },
+                            "required": ["title"],
+                        },
+                        "description": "拆出来的子任务列表。",
+                    },
+                },
+                "required": ["goal", "tasks"],
+            },
+            fn=self._tool_create_tasks,
+        )
+
     # —— 各工具的具体执行（转发到 MatrixClient）——
 
     def _tool_create_room(self, args: Dict[str, Any], ctx: ToolContext) -> str:
@@ -372,6 +411,33 @@ class Toolbox:
         if submit_background(_work, pool=pool):
             return f"工作流「{name}」已开始，完成后我会把结果发到群里。"
         return "任务太多、系统繁忙，请稍后再让我跑。"
+
+    def _tool_create_tasks(self, args: Dict[str, Any], ctx: ToolContext) -> str:
+        """把目标拆成的子任务批量登记到任务看板（写 cosmac DB，AI 任务编排 P1）。"""
+        goal = (args.get("goal") or "").strip()
+        items = args.get("tasks") or []
+        if not isinstance(items, list) or not items:
+            return "没有可登记的子任务。"
+        try:
+            from cosmac.db import session_scope
+            from cosmac.db.task_repo import create_tasks
+
+            with session_scope() as s:
+                created = create_tasks(
+                    s, goal=goal, items=items,
+                    room_id=ctx.room_id, sender=ctx.sender,
+                )
+                n = len(created)
+                lines = [
+                    f"• {t.title}" + (f" —— {t.assignee}" if t.assignee else "")
+                    for t in created
+                ]
+        except Exception:
+            logger.exception("登记任务到看板失败")
+            return "登记任务到看板失败（数据库不可用？）。"
+        if not n:
+            return "没有有效的子任务可登记。"
+        return f"已把目标拆成 {n} 个任务、登记到「任务看板」：\n" + "\n".join(lines)
 
     def _record_workflow_run(self, slug, platform, ctx, user_input, result) -> None:
         """尽力把运行记录落库；DB 不可用就跳过（不影响已拿到的结果）。"""

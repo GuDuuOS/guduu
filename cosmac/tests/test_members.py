@@ -431,6 +431,31 @@ class PayEndpointTests(unittest.TestCase):
             self.assertIn(k, out)
         self.assertEqual(bot.handle_stats("bad")[0], 401)  # 无效 token → 401
 
+    def test_tasks_flow(self):
+        # AI 任务编排 P1：拆任务工具 → 列表 → 改状态（手动）
+        from cosmac.ai.tools import ToolContext
+
+        bot = self._paybot()
+        res = bot.toolbox._tool_create_tasks(
+            {"goal": "做个爆款视频", "tasks": [
+                {"title": "定选题", "assignee": "编剧"},
+                {"title": "拍摄", "assignee": "@anqi:host"},
+                {"title": "", "assignee": "x"},  # 空标题 → 丢弃
+            ]},
+            ToolContext(room_id="!r:host", sender=ALICE),
+        )
+        self.assertIn("2 个任务", res)  # 空标题被丢，落 2 条
+        code, out = bot.handle_tasks_list(ALICE)
+        self.assertEqual(code, 200)
+        self.assertEqual(len(out["tasks"]), 2)
+        tid = out["tasks"][0]["id"]
+        self.assertEqual(bot.handle_task_update(ALICE, {"id": tid, "status": "done"})[0], 200)
+        _c, out2 = bot.handle_tasks_list(ALICE)
+        done = next(t for t in out2["tasks"] if t["id"] == tid)
+        self.assertEqual(done["status"], "done")
+        self.assertEqual(done["progress"], 100)  # done 自动补满进度
+        self.assertEqual(bot.handle_tasks_list("bad")[0], 401)  # 无效 token
+
 
 if __name__ == "__main__":
     unittest.main()

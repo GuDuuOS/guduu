@@ -1413,6 +1413,41 @@ export async function getPlatformStats(): Promise<PlatformStats | null> {
   } catch { return null }
 }
 
+/** 任务看板的一条任务（AI 任务编排 P1）。 */
+export interface TaskItem {
+  id: number; title: string; assignee: string
+  status: string; progress: number; goal: string; result: string
+}
+
+export async function getTasks(): Promise<TaskItem[]> {
+  const token = (mx as any)?.getAccessToken?.() || ''
+  if (!token) return []
+  try {
+    const r = await fetch(`${payBase()}/cosmac/tasks`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!r.ok) return []
+    const j = await r.json()
+    return Array.isArray(j?.tasks) ? j.tasks : []
+  } catch { return [] }
+}
+
+/** 改任务状态/进度（看板手动操作）。返回是否成功。 */
+export async function updateTask(
+  id: number, patch: { status?: string; progress?: number },
+): Promise<boolean> {
+  const token = (mx as any)?.getAccessToken?.() || ''
+  if (!token) return false
+  try {
+    const r = await fetch(`${payBase()}/cosmac/tasks/update`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ id, ...patch }),
+    })
+    return r.ok
+  } catch { return false }
+}
+
 export interface CheckoutResp {
   order_no: string; amount_cents: number; currency: string
   tier: string; period_days: number

@@ -130,7 +130,24 @@ async function askFromBoard() {
 const board = ref(true)
 const tasks = ref(false)
 function openBoard() { board.value = true; tasks.value = false; currentRoom.value = '' }
-function openTasks() { tasks.value = true; board.value = false; currentRoom.value = '' }
+function openTasks() { tasks.value = true; board.value = false; currentRoom.value = ''; loadTasks() }
+
+// 任务看板（AI 任务编排 P1）：主 AI 拆解的真实任务，三列 Kanban + 手动改状态。
+import { getTasks, updateTask, type TaskItem } from '@/matrix/client'
+const taskList = ref<TaskItem[]>([])
+const TASK_COLS = [
+  { key: 'todo', label: '待办' },
+  { key: 'doing', label: '进行中' },
+  { key: 'done', label: '已完成' },
+]
+async function loadTasks() { taskList.value = await getTasks() }
+function tasksByStatus(s: string) { return taskList.value.filter((t) => t.status === s) }
+function nextStatus(s: string) { return s === 'todo' ? 'doing' : 'done' }
+function prevStatus(s: string) { return s === 'done' ? 'doing' : 'todo' }
+async function moveTask(t: TaskItem, status: string) {
+  const ok = await updateTask(t.id, { status })
+  if (ok) { t.status = status; if (status === 'done') t.progress = 100 }
+}
 
 // 任务看板：剧集 Tab（每部剧一个），点击后看那部剧的制作流水线 + 任务
 // 每部剧带：当前在制项目 + 流水线阶段(current) + 进度% + 负责人 + 排期（demo 数据，后续接真实）
@@ -1221,84 +1238,40 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
           </div>
         </template>
 
-        <!-- ===== 任务看板（待办/进行中/已完成 三列）===== -->
+        <!-- ===== 任务看板（AI 拆解 → 待办/进行中/已完成 三列 · 真实数据）===== -->
         <template v-else-if="tasks">
           <div class="ch-header">
             <div class="title">📋 任务看板</div>
-            <!-- 剧集 Tab：点哪个看哪部剧的任务 -->
-            <div class="prod-tabs">
-              <button
-                v-for="pt in productionTabs"
-                :key="pt.key"
-                class="prod-tab"
-                :class="{ active: activeShow === pt.key }"
-                @click="activeShow = pt.key"
-              >
-                <span class="prod-tab-av" :style="{ background: pt.color }">{{ pt.avatar }}</span>
-                <span>{{ pt.name }}</span>
-                <span class="prod-tab-n">{{ showCount(pt.key) }}</span>
-              </button>
-            </div>
             <div class="ch-actions">
-              <span class="board-sub">{{ activeTaskTotal }} 项 · AI 制作中</span>
-              <!-- 数据源：点开右侧「数据源」面板（展示 + 增删）-->
-              <button class="ch-ic-btn bs-srcbtn" :class="{ active: boardPanelOpen }" :title="`数据源（${sources.tasks.length}）`" @click="toggleSourcePanel('tasks')">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3" /></svg>
-                <span v-if="sources.tasks.length" class="bs-badge">{{ sources.tasks.length }}</span>
+              <span class="board-sub">{{ taskList.length }} 个任务 · 主 AI 拆解</span>
+              <button class="ch-ic-btn" title="刷新" @click="loadTasks">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6" /></svg>
               </button>
             </div>
           </div>
-          <!-- 整部剧进度 + 本集制作流水线卡 + 时间线（跟选中的剧集走）-->
-          <div class="show-band">
-            <div class="series-bar">
-              <div class="series-head">
-                <span class="series-title"><span class="series-av" :style="{ background: activeProd.color }">{{ activeProd.avatar }}</span>{{ activeProd.name }} · 整部进度</span>
-                <span class="series-meta">已完成 {{ activeProd.series.done }} / {{ activeProd.series.total }} {{ activeProd.series.unit }} · {{ activeProd.series.pct }}%</span>
-              </div>
-              <div class="series-segs">
-                <span
-                  v-for="n in activeProd.series.total"
-                  :key="n"
-                  class="series-seg"
-                  :class="{ done: n <= activeProd.series.done, current: n === activeProd.series.done + 1 }"
-                />
-              </div>
-            </div>
-            <!-- 多集同时在制：每集 = 流水线卡（点开看甘特）+ 这一集的任务，逐集往下 -->
-            <div v-for="ep in activeProd.episodes" :key="ep.name" class="ep-block">
-              <div class="prod-card clickable" title="点击查看甘特图" @click="openGantt(ep)">
-                <div class="prod-head">
-                  <span class="prod-av" :style="{ background: activeProd.color }">{{ activeProd.avatar }}</span>
-                  <span class="prod-name">{{ ep.name }}</span>
-                  <span class="prod-status">进行中 · {{ ep.percent }}%</span>
-                </div>
-                <div class="prod-pipe">
-                  <template v-for="(s, i) in mkStages(ep.current)" :key="s.name">
-                    <div class="prod-step" :class="s.state">
-                      <span class="prod-dot">{{ s.state === 'done' ? '✓' : s.state === 'current' ? '●' : i + 1 }}</span>
-                      <span class="prod-step-label">{{ s.name }}</span>
+          <div class="board-scroll">
+            <p class="kan-tip">💡 在数据看板「一句话下达目标」让中枢 AI 拆解任务，会出现在这里。用卡片上的按钮改状态。</p>
+            <div class="kanban">
+              <div v-for="col in TASK_COLS" :key="col.key" class="kan-col">
+                <div class="kan-col-h">{{ col.label }}<span class="kan-n">{{ tasksByStatus(col.key).length }}</span></div>
+                <div class="kan-cards">
+                  <div v-for="t in tasksByStatus(col.key)" :key="t.id" class="kan-card">
+                    <div class="kan-title">{{ t.title }}</div>
+                    <div class="kan-foot">
+                      <span v-if="t.assignee" class="kan-assignee">👤 {{ t.assignee }}</span>
+                      <span v-if="t.progress > 0" class="kan-prog">{{ t.progress }}%</span>
                     </div>
-                    <span v-if="i < PROD_STAGES.length - 1" class="prod-conn" :class="{ on: s.state === 'done' }" />
-                  </template>
+                    <div class="kan-btns">
+                      <button v-if="col.key !== 'todo'" class="kan-btn" @click="moveTask(t, prevStatus(col.key))">←</button>
+                      <span class="kan-spacer" />
+                      <button v-if="col.key !== 'done'" class="kan-btn primary" @click="moveTask(t, nextStatus(col.key))">{{ col.key === 'todo' ? '开始 →' : '完成 ✓' }}</button>
+                    </div>
+                  </div>
+                  <p v-if="!tasksByStatus(col.key).length" class="kan-empty">暂无</p>
                 </div>
-                <div class="prod-bar"><div class="prod-bar-fill" :style="{ width: ep.percent + '%', background: activeProd.color }" /></div>
-                <div class="prod-foot">
-                  <span class="prod-assignee"><span class="prod-a-av" :style="{ background: ep.aColor }">{{ ep.aAvatar }}</span>{{ ep.assignee }}</span>
-                  <span class="prod-date">{{ ep.dateRange }} · {{ ep.daysLeft }}</span>
-                </div>
-              </div>
-              <div class="show-tl ep-tasks">
-                <div v-for="t in epTasks(ep)" :key="t.title" class="tl-row clickable" :class="t.status" title="查看详情" @click="openTaskDetail(t)">
-                  <span class="tl-dot" />
-                  <span class="tl-name">{{ t.title }}</span>
-                  <span class="tl-meta">{{ statusLabel(t.status) }} · {{ t.assignee }} · {{ t.due }}</span>
-                  <svg class="tl-chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6" /></svg>
-                </div>
-                <p v-if="!ep.tasks.length" class="tl-empty">这一集暂无任务</p>
               </div>
             </div>
           </div>
-
         </template>
 
         <!-- ===== 频道 ===== -->
@@ -1959,6 +1932,24 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 .board-ask-send { border: none; background: linear-gradient(90deg, var(--accent), var(--warn, #e0883a)); color: #fff; font-weight: var(--fw-bold); padding: 9px 18px; border-radius: 9px; cursor: pointer; white-space: nowrap; }
 .board-ask-send:disabled { opacity: .55; cursor: default; }
 .board-ask-tip { font-size: var(--fs-75); color: var(--text-3); margin-top: 8px; }
+/* 任务看板 Kanban */
+.kan-tip { font-size: var(--fs-75); color: var(--text-3); margin: 0 0 14px; line-height: 1.5; }
+.kanban { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; align-items: start; }
+.kan-col { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 12px; padding: 10px; min-height: 120px; }
+.kan-col-h { display: flex; align-items: center; justify-content: space-between; font-size: var(--fs-85); font-weight: var(--fw-bold); color: var(--text-2); padding: 2px 4px 10px; }
+.kan-n { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 999px; padding: 0 8px; font-size: var(--fs-75); color: var(--text-3); }
+.kan-cards { display: flex; flex-direction: column; gap: 8px; }
+.kan-card { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 11px; }
+.kan-title { font-size: var(--fs-100); color: var(--text); line-height: 1.45; }
+.kan-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 7px; }
+.kan-assignee { font-size: var(--fs-75); color: var(--text-2); background: var(--bg-soft); border-radius: 8px; padding: 1px 8px; }
+.kan-prog { font-size: var(--fs-75); color: var(--accent); font-weight: var(--fw-bold); }
+.kan-btns { display: flex; align-items: center; gap: 6px; margin-top: 9px; }
+.kan-spacer { flex: 1; }
+.kan-btn { border: 1px solid var(--border); background: var(--bg-soft); color: var(--text-2); font-size: var(--fs-75); padding: 4px 10px; border-radius: 7px; cursor: pointer; }
+.kan-btn.primary { border: none; background: var(--accent); color: #fff; font-weight: var(--fw-bold); }
+.kan-btn:hover { filter: brightness(1.05); }
+.kan-empty { font-size: var(--fs-75); color: var(--text-3); text-align: center; padding: 14px 0; }
 .pinned-item { color: var(--text-2); }
 .board-sub { font-size: 13px; color: var(--text-3); font-family: var(--mono); }
 

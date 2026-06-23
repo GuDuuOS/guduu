@@ -1265,6 +1265,52 @@ class CosmacBot:
             logger.debug("统计 DB 指标失败", exc_info=True)
         return 200, out
 
+    def handle_tasks_list(self, access_token: str) -> Tuple[int, Dict[str, Any]]:
+        """任务看板：列出真实任务（AI 拆解登记的）。需登录。"""
+        if not self.client.whoami(access_token):
+            return 401, {"error": "登录已失效，请重新登录"}
+        out: List[Dict[str, Any]] = []
+        try:
+            from cosmac.db import session_scope
+            from cosmac.db.task_repo import list_tasks
+
+            with session_scope() as s:
+                for t in list_tasks(s):
+                    out.append({
+                        "id": t.id, "title": t.title, "assignee": t.assignee,
+                        "status": t.status, "progress": t.progress,
+                        "goal": t.goal, "result": t.result,
+                    })
+        except Exception:
+            logger.debug("读取任务失败", exc_info=True)
+        return 200, {"tasks": out}
+
+    def handle_task_update(
+        self, access_token: str, body: Dict[str, Any]
+    ) -> Tuple[int, Dict[str, Any]]:
+        """改任务状态/进度（看板手动拖卡）。需登录。"""
+        if not self.client.whoami(access_token):
+            return 401, {"error": "登录已失效，请重新登录"}
+        try:
+            task_id = int(body.get("id"))
+        except (TypeError, ValueError):
+            return 400, {"error": "无效任务 id"}
+        try:
+            from cosmac.db import session_scope
+            from cosmac.db.task_repo import update_task
+
+            with session_scope() as s:
+                ok = update_task(
+                    s, task_id,
+                    status=body.get("status"),
+                    progress=body.get("progress"),
+                    result=body.get("result"),
+                )
+        except Exception:
+            logger.exception("更新任务失败 id=%s", task_id)
+            return 500, {"error": "更新失败"}
+        return (200, {"ok": True}) if ok else (404, {"error": "任务不存在"})
+
     def handle_pay_me(self, access_token: str) -> Tuple[int, Dict[str, Any]]:
         """查"我当前的会员状态"（升级弹窗顶部展示）。验明身份 → 返回当前生效等级 + 到期。"""
         from cosmac.members import active_tier, tier_label
@@ -1659,7 +1705,8 @@ class _Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self) -> None:  # noqa: N802
         # 给浏览器调的端点回 CORS 预检（带 Authorization 头的请求会先发 OPTIONS）
         p = self.path.split("?", 1)[0]
-        if p.startswith("/cosmac/pay/") or p == "/cosmac/stats":
+        if (p.startswith("/cosmac/pay/") or p == "/cosmac/stats"
+                or p.startswith("/cosmac/tasks")):
             origin = os.environ.get("COSMAC_APP_ORIGIN", "") or "*"
             self.send_response(204)
             self.send_header("Access-Control-Allow-Origin", origin)
@@ -1740,6 +1787,14 @@ class _Handler(BaseHTTPRequestHandler):
             code, payload = self.bot.handle_stats(token)
             self._send_json(code, payload, cors=True)
             return
+
+        # 任务看板：列出真实任务（带本人 token）
+        if self.path.split("?", 1)[0] == "/cosmac/tasks":
+            auth = self.headers.get("Authorization", "")
+            token = auth[len("Bearer "):] if auth.startswith("Bearer ") else ""
+            code, payload = self.bot.handle_tasks_list(token)
+            self._send_json(code, payload, cors=True)
+            return
         # Synapse 查询"这个用户/别名是否归你管"，回 200 表示存在
         if "/users/" in self.path or "/rooms/" in self.path:
             if not self._check_auth():
@@ -1768,6 +1823,18 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         path = self.path.split("?", 1)[0]
+
+        # 任务看板：改任务状态/进度（带本人 token）
+        if path == "/cosmac/tasks/update":
+            auth = self.headers.get("Authorization", "")
+            token = auth[len("Bearer "):] if auth.startswith("Bearer ") else ""
+            body = self._read_json_body(_MAX_CALLBACK_BODY)
+            if body is None:
+                self._send_json(400, {"error": "请求无效"}, cors=True)
+                return
+            code, payload = self.bot.handle_task_update(token, body)
+            self._send_json(code, payload, cors=True)
+            return
 
         # 模块4：下单（前端「升级会员」调）。用用户自己的 access token 验明身份再建单。
         if path == "/cosmac/pay/checkout":

@@ -257,3 +257,31 @@ class Order(Base, TimestampMixin):
 
     def __repr__(self) -> str:
         return f"<Order {self.order_no} {self.status} {self.user_id} {self.tier}>"
+
+
+class Task(Base, TimestampMixin):
+    """AI 任务编排的一条子任务（任务看板用）。
+
+    主 AI 把一个目标拆成若干子任务、每条指定负责人，写进这张表；任务看板读它做看板展示。
+    后续(P2)再加"派发执行"(发频道/交AI/跑工作流)与"结果回填"，那时会用到 dispatch/result 字段。
+    """
+
+    __tablename__ = "cosmac_task"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # 这批子任务所属的总目标原文（便于分组/溯源"这是哪次下达拆出来的"）
+    goal: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    title: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # 负责人：P1 是自由文本（人名/角色/@某人/某智能体），AI 拆解时自己填；P2 再细化为类型化
+    assignee: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    # todo（待办）/ doing（进行中）/ done（已完成）；进度 0-100
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="todo", index=True)
+    progress: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # 执行结果/进展说明（P2 由 AI/工作流回填；P1 可人工备注）
+    result: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # 上下文：拆解发生的房间（bot DM / 频道）与下达人，便于以后派发回到正确地方
+    room_id: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    sender: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+
+    def __repr__(self) -> str:
+        return f"<Task #{self.id} {self.status} {self.title[:20]!r}>"
