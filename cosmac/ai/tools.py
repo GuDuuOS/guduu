@@ -80,7 +80,14 @@ class Toolbox:
             # 只保留确实存在的工具名
             self._enabled = {n for n in names if n in self._tools}
 
+    # 核心能力，**永远启用**、不受后台「工具开关」约束。
+    # 为什么：后台 AI 配置存的是"勾选的工具名列表"，新加的工具(如 create_tasks)不在旧配置里，
+    # 会被当成"未勾选=禁用"。这类核心、低风险工具放这里，避免旧配置一存就把它们关掉。
+    _ALWAYS_ON: Set[str] = {"create_tasks"}
+
     def _is_enabled(self, name: str) -> bool:
+        if name in self._ALWAYS_ON:
+            return True
         return self._enabled is None or name in self._enabled
 
     # —— 对外接口 ——

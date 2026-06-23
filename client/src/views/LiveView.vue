@@ -1169,22 +1169,32 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
           <div class="board-scroll">
             <p class="kan-tip">💡 在数据看板「一句话下达目标」让中枢 AI 拆解任务，会出现在这里。用卡片上的按钮改状态。</p>
             <div class="kanban">
-              <div v-for="col in TASK_COLS" :key="col.key" class="kan-col">
-                <div class="kan-col-h">{{ col.label }}<span class="kan-n">{{ tasksByStatus(col.key).length }}</span></div>
+              <div v-for="col in TASK_COLS" :key="col.key" class="kan-col" :class="'kan-' + col.key">
+                <div class="kan-col-h">
+                  <span class="kan-col-dot" />
+                  <span class="kan-col-label">{{ col.label }}</span>
+                  <span class="kan-n">{{ tasksByStatus(col.key).length }}</span>
+                </div>
                 <div class="kan-cards">
-                  <div v-for="t in tasksByStatus(col.key)" :key="t.id" class="kan-card">
+                  <div v-for="t in tasksByStatus(col.key)" :key="t.id" class="kan-card" :class="{ done: t.status === 'done' }">
                     <div class="kan-title">{{ t.title }}</div>
-                    <div class="kan-foot">
+                    <div v-if="t.assignee || t.progress > 0" class="kan-foot">
                       <span v-if="t.assignee" class="kan-assignee">👤 {{ t.assignee }}</span>
                       <span v-if="t.progress > 0" class="kan-prog">{{ t.progress }}%</span>
                     </div>
+                    <div v-if="t.progress > 0 && t.status !== 'done'" class="kan-barwrap">
+                      <div class="kan-bar" :style="{ width: t.progress + '%' }" />
+                    </div>
                     <div class="kan-btns">
-                      <button v-if="col.key !== 'todo'" class="kan-btn" @click="moveTask(t, prevStatus(col.key))">←</button>
+                      <button v-if="col.key !== 'todo'" class="kan-btn" title="退回" @click="moveTask(t, prevStatus(col.key))">←</button>
                       <span class="kan-spacer" />
                       <button v-if="col.key !== 'done'" class="kan-btn primary" @click="moveTask(t, nextStatus(col.key))">{{ col.key === 'todo' ? '开始 →' : '完成 ✓' }}</button>
                     </div>
                   </div>
-                  <p v-if="!tasksByStatus(col.key).length" class="kan-empty">暂无</p>
+                  <div v-if="!tasksByStatus(col.key).length" class="kan-empty">
+                    <span class="kan-empty-ic">{{ col.key === 'done' ? '🎉' : col.key === 'doing' ? '⚡' : '📥' }}</span>
+                    暂无任务
+                  </div>
                 </div>
               </div>
             </div>
@@ -1794,23 +1804,36 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 .board-ask-send:disabled { opacity: .55; cursor: default; }
 .board-ask-tip { font-size: var(--fs-75); color: var(--text-3); margin-top: 8px; }
 /* 任务看板 Kanban */
-.kan-tip { font-size: var(--fs-75); color: var(--text-3); margin: 0 0 14px; line-height: 1.5; }
-.kanban { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; align-items: start; }
-.kan-col { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 12px; padding: 10px; min-height: 120px; }
-.kan-col-h { display: flex; align-items: center; justify-content: space-between; font-size: var(--fs-85); font-weight: var(--fw-bold); color: var(--text-2); padding: 2px 4px 10px; }
-.kan-n { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 999px; padding: 0 8px; font-size: var(--fs-75); color: var(--text-3); }
-.kan-cards { display: flex; flex-direction: column; gap: 8px; }
-.kan-card { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 11px; }
-.kan-title { font-size: var(--fs-100); color: var(--text); line-height: 1.45; }
-.kan-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 7px; }
-.kan-assignee { font-size: var(--fs-75); color: var(--text-2); background: var(--bg-soft); border-radius: 8px; padding: 1px 8px; }
-.kan-prog { font-size: var(--fs-75); color: var(--accent); font-weight: var(--fw-bold); }
-.kan-btns { display: flex; align-items: center; gap: 6px; margin-top: 9px; }
+.kan-tip { font-size: var(--fs-75); color: var(--text-3); margin: 0 0 16px; line-height: 1.5; background: var(--bg-soft); border-radius: 9px; padding: 9px 12px; }
+.kanban { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: start; }
+.kan-col { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 14px; padding: 12px; min-height: 200px; }
+.kan-col-h { display: flex; align-items: center; gap: 8px; font-size: var(--fs-100); font-weight: var(--fw-bold); color: var(--text); padding: 2px 4px 12px; }
+.kan-col-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.kan-col-label { flex: 1; }
+.kan-n { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 999px; min-width: 22px; text-align: center; padding: 1px 7px; font-size: var(--fs-75); color: var(--text-2); }
+/* 每列主题色 */
+.kan-todo .kan-col-dot { background: #9aa0a6; }
+.kan-doing .kan-col-dot { background: var(--accent, #c96442); }
+.kan-done .kan-col-dot { background: var(--ok, #6b8e4e); }
+.kan-doing { border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); }
+.kan-cards { display: flex; flex-direction: column; gap: 9px; }
+.kan-card { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 11px; padding: 11px 12px; box-shadow: 0 1px 2px rgba(0,0,0,.04); transition: box-shadow .12s ease, transform .12s ease; }
+.kan-card:hover { box-shadow: 0 3px 10px rgba(0,0,0,.08); }
+.kan-card.done { opacity: .72; }
+.kan-card.done .kan-title { text-decoration: line-through; text-decoration-color: var(--text-3); }
+.kan-title { font-size: var(--fs-100); color: var(--text); line-height: 1.5; }
+.kan-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 9px; }
+.kan-assignee { font-size: var(--fs-75); color: var(--text-2); background: var(--bg-soft); border-radius: 999px; padding: 2px 9px; }
+.kan-prog { font-size: var(--fs-75); color: var(--accent); font-weight: var(--fw-bold); margin-left: auto; }
+.kan-barwrap { height: 4px; background: var(--bg-soft); border-radius: 3px; margin-top: 9px; overflow: hidden; }
+.kan-bar { height: 100%; background: var(--accent); border-radius: 3px; }
+.kan-btns { display: flex; align-items: center; gap: 6px; margin-top: 11px; }
 .kan-spacer { flex: 1; }
-.kan-btn { border: 1px solid var(--border); background: var(--bg-soft); color: var(--text-2); font-size: var(--fs-75); padding: 4px 10px; border-radius: 7px; cursor: pointer; }
+.kan-btn { border: 1px solid var(--border); background: var(--bg-soft); color: var(--text-2); font-size: var(--fs-75); padding: 5px 11px; border-radius: 8px; cursor: pointer; transition: filter .12s ease; }
 .kan-btn.primary { border: none; background: var(--accent); color: #fff; font-weight: var(--fw-bold); }
-.kan-btn:hover { filter: brightness(1.05); }
-.kan-empty { font-size: var(--fs-75); color: var(--text-3); text-align: center; padding: 14px 0; }
+.kan-btn:hover { filter: brightness(1.06); }
+.kan-empty { font-size: var(--fs-75); color: var(--text-3); text-align: center; padding: 26px 0; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.kan-empty-ic { font-size: 22px; opacity: .65; }
 .pinned-item { color: var(--text-2); }
 .board-sub { font-size: 13px; color: var(--text-3); font-family: var(--mono); }
 

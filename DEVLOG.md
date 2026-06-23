@@ -7,6 +7,12 @@
 
 ---
 
+## 2026-06-23 — 任务编排 P1 修复：create_tasks 没被启用 + 看板美化
+- 现场实测"让 AI 拆任务"**没反应**。根因:后台 AI 配置存的 `enabled_tools` 是"勾选的工具名列表",`create_tasks` 是新加的、不在旧配置里 → 被当成"未勾选=禁用",AI 调不了它(前端工具目录也没它)。
+- 修:`create_tasks` 列为 **always-on 核心工具**(`Toolbox._ALWAYS_ON`,不受后台工具开关约束)——这类核心、低风险工具新增后不该被旧配置一存就关掉。**无需重存配置即生效**。改了 2 个相关单测断言。
+- **看板美化**:三列加主题色圆点(待办灰/进行中橙/已完成绿)、卡片加阴影+悬停、进度条、完成卡置灰划线、空态带图标。
+- 验证:**195 单测过**、ruff、build(`index-BWIOfi5H.js`)。需发 dist + 重启 bot。重启后再让中枢 AI "拆成几个任务"应能上板。
+
 ## 2026-06-23 — AI 任务编排 P1：主 AI 拆任务 → 真实任务看板（Kanban + 手动改状态）
 - 负责人定的任务看板新形态(AI 任务调度中枢)开工。**P1 地基**:主 AI 拆解目标→落库→真实看板→手动改状态。派发执行/结果回填(P2)后续。
 - **后端**:`cosmac_task` 表 + `db/task_repo.py`(create/list/update)+ 主 AI 新工具 **`create_tasks`**(`ai/tools.py`,把目标拆成子任务、每条带负责人、写库)+ bot 端点 `GET /cosmac/tasks`、`POST /cosmac/tasks/update`(whoami 校验 + CORS)。
