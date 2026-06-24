@@ -39,6 +39,9 @@ class FakeClient:
     def get_messages(self, room_id, limit=20):
         return [{"sender": "@alice:test", "body": "历史消息一条"}]
 
+    def is_joined_member(self, room_id, user_id):
+        return room_id == "!allowed:test" and user_id == "@alice:test"
+
     # 工作流越权闸用：当作 1:1 私聊（放行），不干扰工具执行测试
     def joined_member_count(self, room_id):
         return 2
@@ -111,6 +114,27 @@ class TestAgentTools(unittest.TestCase):
         self.assertEqual(captured["name"], "群A")
         self.assertIn("@bob:test", captured["invitees"])  # 发起人被自动邀请
         self.assertIn("群A", out)
+
+    def test_cross_room_tools_require_sender_membership(self) -> None:
+        # 模型可以编造/指定 room_id，但工具必须确认发起人也是目标房成员，不能只凭 bot 高权访问。
+        client = FakeClient()
+        toolbox = Toolbox(client)
+        denied = toolbox.execute(
+            ToolCall(
+                id="x", name="get_recent_messages",
+                arguments={"room_id": "!secret:test"},
+            ),
+            ToolContext("!cur:test", "@alice:test"),
+        )
+        self.assertIn("不能替你读写", denied)
+        allowed = toolbox.execute(
+            ToolCall(
+                id="x", name="get_recent_messages",
+                arguments={"room_id": "!allowed:test", "limit": 999},
+            ),
+            ToolContext("!cur:test", "@alice:test"),
+        )
+        self.assertIn("最近聊天记录", allowed)
 
     def test_no_tool_calls_returns_text(self) -> None:
         # 模型不调工具时，直接返回文本

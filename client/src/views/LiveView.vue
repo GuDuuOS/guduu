@@ -92,20 +92,26 @@ const { openSettings } = useUserProfile()
 
 // ── 数据看板（复用 DEMO 的画布组件 + 影视公司主题数据）──
 import KpiCard from '@/components/canvas/KpiCard.vue'
+import PanelChart from '@/components/canvas/PanelChart.vue'
+import UnitGrid from '@/components/canvas/UnitGrid.vue'
 import { getDashboard } from '@/data/dashboards'
 import { useActiveWorkspace } from '@/composables/useActiveWorkspace'
 import '@/styles/canvas.css' // 看板样式，命名空间在 .canvas/.panel 下，不与 LiveView 撞
 const { activeId } = useActiveWorkspace()
 const dash = computed(() => getDashboard(activeId.value))
 
-// 数据看板 headline KPI：用平台**真实**运营指标替掉演示假数据（会员/工作流/订单/知识库）。
-// 影视业务数(播放量/集数)CosMac 不拥有,暂仍用 dash 里的占位图表,待接真实数据源。
+// 数据看板 KPI：负责人定调「社媒 + 平台运营 混排」——
+//  · 上排 = 社媒数据（播放量/粉丝/粉丝增长/互动率），演示数据来自 dash.value.kpis（待接真实社媒源）。
+//  · 下排 = 平台**真实**运营指标（会员/工作流/订单/知识库），来自后端 getPlatformStats。
 import { getPlatformStats, type PlatformStats } from '@/matrix/client'
 const stats = ref<PlatformStats | null>(null)
 async function loadStats() { stats.value = await getPlatformStats() }
-const boardKpis = computed(() => {
+// 上排：社媒数据（演示），口径与下方图表一致
+const socialKpis = computed(() => dash.value.kpis)
+// 下排：平台运营真实数据；拿不到时为空（不渲染该组，避免空屏占位）
+const opsKpis = computed(() => {
   const s = stats.value
-  if (!s) return dash.value.kpis // 还没拿到真实数据时回退占位（避免空屏）
+  if (!s) return []
   return [
     { label: '付费会员', target: s.members_paid + s.members_creator, unit: '人',
       delta: `创作者 ${s.members_creator}` },
@@ -763,8 +769,8 @@ async function aiSend() {
   setTimeout(refresh, 400)
 }
 
-function doLogout() {
-  logout()
+async function doLogout() {
+  await logout()
   loggedIn.value = false
   rooms.value = []
   msgs.value = []
@@ -1164,11 +1170,30 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
                 </div>
                 <div class="board-ask-tip">交给中枢 AI 执行（建群 / 查任务 / 跑工作流…），结果在右侧中枢 AI 面板。</div>
               </div>
+              <!-- 社媒数据（演示）：播放量 / 粉丝 / 粉丝增长 / 互动率 -->
+              <div class="board-group-h">📈 社媒数据 <span class="board-group-tag">演示</span></div>
               <div class="kpis">
-                <KpiCard v-for="(k, i) in boardKpis" :key="k.label" :data="k" :delay="200 + i * 80" />
+                <KpiCard v-for="(k, i) in socialKpis" :key="k.label" :data="k" :delay="200 + i * 80" />
               </div>
-              <!-- （原影视业务演示图表：播放趋势/剧集列表/饼图/BizPanels——CosMac 不拥有这类
-                   业务数据，已移除。待负责人定数据源(后台手填 / 外部API)后再接真实图表。）-->
+              <!-- 社媒图表：播放趋势(LIVE) / 各周新增粉丝 / 状态网格 / 各平台粉丝分布 -->
+              <div class="grid-2">
+                <PanelChart :title="dash.prod.title" :config="dash.prod.build" :live="dash.prod.live" />
+                <PanelChart :title="dash.save.title" :config="dash.save.build" />
+              </div>
+              <div class="grid-3">
+                <div class="panel" style="grid-column: span 2">
+                  <div class="pt">{{ dash.unitsTitle }}</div>
+                  <UnitGrid :units="dash.units" />
+                </div>
+                <PanelChart :title="dash.pie.title" :config="dash.pie.build" :height="dash.pie.height ?? 180" />
+              </div>
+              <!-- 平台运营（真实）：会员 / 工作流 / 订单 / 知识库；拿不到数据时整组不渲染 -->
+              <template v-if="opsKpis.length">
+                <div class="board-group-h">⚙️ 平台运营 <span class="board-group-tag real">真实</span></div>
+                <div class="kpis">
+                  <KpiCard v-for="(k, i) in opsKpis" :key="k.label" :data="k" :delay="200 + i * 80" />
+                </div>
+              </template>
             </div>
           </div>
         </template>
@@ -1834,6 +1859,10 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
    造成用户看到的拖移 BUG。这里显式把 overflow-x 钉成 hidden，彻底禁掉横向拖动。 */
 .board-scroll { flex: 1; overflow-y: auto; overflow-x: hidden; min-height: 0; }
 /* 看板"一句话下达目标"hero（真发给中枢 AI）*/
+/* 看板分组小标题：区分「社媒数据(演示)」与「平台运营(真实)」两组 KPI */
+.board-group-h { display: flex; align-items: center; gap: 8px; font-size: var(--fs-100); font-weight: var(--fw-bold); color: var(--text); margin: 18px 2px 10px; }
+.board-group-tag { font-size: var(--fs-75, 11px); font-weight: var(--fw-bold); padding: 1px 8px; border-radius: 999px; background: var(--bg); border: 1px solid var(--border); color: var(--text-dim, #888); }
+.board-group-tag.real { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
 .board-ask { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; margin-bottom: 16px; }
 .board-ask-h { font-size: var(--fs-100); font-weight: var(--fw-bold); color: var(--text); margin-bottom: 10px; }
 .board-ask-row { display: flex; align-items: center; gap: 8px; }

@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from datetime import datetime, timedelta
 
@@ -30,8 +30,18 @@ def record_run(
     sender: str,
     user_input: str,
     result: Dict[str, Any],
+    source_key: str = "",
 ) -> WorkflowRun:
     """把一次运行结果落库，返回记录对象。"""
+    if source_key:
+        old = find_by_source_key(session, source_key)
+        if old is not None:
+            old.status = "ok" if result.get("ok") else "error"
+            old.output = str(result.get("output") or "")[:_MAX_STORE]
+            old.error = str(result.get("error") or "")[:_MAX_STORE]
+            old.token = ""
+            session.flush()
+            return old
     run = WorkflowRun(
         slug=slug,
         platform=platform or "webhook",
@@ -41,6 +51,7 @@ def record_run(
         status="ok" if result.get("ok") else "error",
         output=str(result.get("output") or "")[:_MAX_STORE],
         error=str(result.get("error") or "")[:_MAX_STORE],
+        source_key=source_key or None,
     )
     session.add(run)
     session.flush()
@@ -60,16 +71,21 @@ def recent_runs(session: Session, *, slug: str = "", limit: int = 10) -> List[Wo
 
 def create_pending(
     session: Session, *, slug: str, platform: str, room_id: str,
-    sender: str, user_input: str, token: str,
+    sender: str, user_input: str, token: str, source_key: str = "",
 ) -> WorkflowRun:
     """登记一次等待本机 worker 执行的运行（status=queued + 一次性 token）。
 
     worker 真正开始外呼前由 :func:`mark_submission_started` 改成 pending。只有 queued 能
     确定尚未开始外呼，因此重启后可安全回收；pending 则保留 token 接受可能已成功的回调。
     """
+    if source_key:
+        old = find_by_source_key(session, source_key)
+        if old is not None:
+            return old
     run = WorkflowRun(
         slug=slug, platform=platform or "webhook", room_id=room_id, sender=sender,
         input=(user_input or "")[:_MAX_STORE], status="queued", token=token,
+        source_key=source_key or None,
     )
     session.add(run)
     session.flush()
@@ -135,6 +151,16 @@ def reclaim_orphans(session: Session) -> List[Tuple[int, str, str, str]]:
 def get_run(session: Session, run_id: int) -> "WorkflowRun | None":
     """按 id 取运行记录。"""
     return session.get(WorkflowRun, run_id)
+
+
+def find_by_source_key(session: Session, source_key: str) -> Optional[WorkflowRun]:
+    """按来源幂等键查运行记录；空 key 表示不可幂等，直接返回 None。"""
+    key = (source_key or "").strip()
+    if not key:
+        return None
+    return session.scalars(
+        select(WorkflowRun).where(WorkflowRun.source_key == key).limit(1)
+    ).first()
 
 
 def mark_submission_started(session: Session, run_id: int) -> bool:

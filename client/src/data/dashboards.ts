@@ -118,8 +118,8 @@ export const dashboardMap: Record<string, DashboardData> = {
     kpis: [
       { label: '今日剧集总播放', target: 1280, unit: '万次', delta: '▲ +9.2% vs 昨日' },
       { label: '全网粉丝总数', target: 386, unit: '万', delta: '▲ +18.6% 环比' },
-      { label: '本周粉丝回复', target: 3240, unit: '条', delta: '▲ AI 自动回 92%' },
-      { label: 'AI 今日制作', target: 1056, unit: '项', delta: '▲ 节省 14 小时' }
+      { label: '本周新增粉丝', target: 21, unit: '万', delta: '▲ +12.4% 环比' },
+      { label: '平均互动率', target: 7.8, unit: '%', delta: '▲ 高于行业均值' }
     ],
     units: [
       { name: '《银河谣》', status: '播放 480w · 更新中' },
@@ -140,7 +140,7 @@ export const dashboardMap: Record<string, DashboardData> = {
       ])
     },
     save: { title: '本月各周新增粉丝 (万)', build: barChart(['W1', 'W2', 'W3', 'W4'], [12, 18, 26, 21], PALETTE[1], '新增粉丝 (万)') },
-    pie: { title: 'AI 制作任务分布', height: 180, build: doughnut(['剧本', '分镜', '配音/配乐', '海报', '粉丝回复'], [286, 224, 168, 132, 246]) }
+    pie: { title: '各平台粉丝分布', height: 180, build: doughnut(['抖音', 'B站', 'YouTube', '小红书', '微博'], [210, 86, 38, 32, 20]) }
   },
 }
 

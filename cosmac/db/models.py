@@ -194,6 +194,9 @@ class WorkflowRun(Base, TimestampMixin):
     error: Mapped[str] = mapped_column(Text, nullable=False, default="")
     # 异步回调的一次性令牌：平台带它回调，bot 据此校验；queued/pending/processing 期间保留。
     token: Mapped[str] = mapped_column(String(64), nullable=False, default="", index=True)
+    # 来源事件幂等键：Matrix 同一 event/命令重放时复用同一运行记录，避免外部平台重复接单。
+    # 旧的同步运行记录没有这个键，所以允许 NULL；有值时由代码按它查重。
+    source_key: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
 
     def __repr__(self) -> str:
         return f"<WorkflowRun {self.slug} {self.status} #{self.id}>"

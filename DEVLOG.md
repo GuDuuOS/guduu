@@ -7,6 +7,13 @@
 
 ---
 
+## 2026-06-24 — 安全与可靠性复查修复：AI 工具权限 / appservice 重试 / 工作流幂等
+- 修复 AI 工具跨房间越权：模型显式传其它 `room_id` 时，先确认发起人也是目标房间 joined 成员；否则拒绝读成员/历史/代发消息。
+- appservice 事务改为“任一事件异常即不标记 done”，让 Synapse 重试，避免单事件失败被整批确认后永久丢失。
+- 工作流按 Matrix `event_id` 登记 `source_key`，提交外部平台前先 reserve；事务重放时复用已有 run，不重复提交/扣费。老 `cosmac_workflow_run` 表缺列时用非破坏性 ALTER 补 `token/source_key/status`。
+- 前端 Matrix 首次同步增加 ERROR/STOPPED/15s 超时处理；退出登录改为尽力调用服务端 `logout()` 撤销 access token，再清本地会话。
+- 验证：聚焦单测、ruff、前端 build 通过；完整单测需允许本机测试 HTTP server 绑定端口。
+
 ## 2026-06-23 — 任务看板加「项目/剧集进度」（参考演示版剧集 Tab，用真实数据）
 - 需求:任务看板要有剧集进度,参考之前演示版的剧集 Tab。
 - **零后端改动**:任务本就带 `goal`(拆解时的总目标,如"做一条爆款短视频")——这就是天然的"项目/剧集"分组维度。

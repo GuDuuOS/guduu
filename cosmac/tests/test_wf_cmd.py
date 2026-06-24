@@ -105,6 +105,21 @@ class TestWfCommand(unittest.TestCase):
             self.assertEqual(runs[0].status, "ok")
             self.assertIn("科技感蓝色", runs[0].input)
 
+    def test_same_event_workflow_command_not_submitted_twice(self) -> None:
+        # appservice 事务重放同一 Matrix event 时，外部工作流不能重复提交。
+        bot = _bot()
+        with mock.patch(
+            "cosmac.wf.run_connector",
+            return_value={"ok": True, "output": "ok"},
+        ) as m:
+            bot._run_wf_command(
+                ROOM, "@u:host", "工作流 跑 cover x", source_key="event:$same:cmd:wf"
+            )
+            bot._run_wf_command(
+                ROOM, "@u:host", "工作流 跑 cover x", source_key="event:$same:cmd:wf"
+            )
+        self.assertEqual(m.call_count, 1)
+
     def test_run_failure_records_error(self) -> None:
         bot = _bot()
         with mock.patch("cosmac.wf.run_connector",
@@ -183,6 +198,13 @@ class TestWfCommand(unittest.TestCase):
         self.assertEqual(bot2._claim_txn("txn-xyz"), "done")
         self.assertTrue(bot2.handle_transaction("txn-xyz", []))
 
+    def test_txn_event_error_is_not_marked_done(self) -> None:
+        # 单条事件异常时不能 finish_txn；否则 Synapse 不再重试，失败事件永久丢。
+        bot = _bot()
+        bot._handle_event = mock.Mock(side_effect=RuntimeError("boom"))  # type: ignore
+        self.assertFalse(bot.handle_transaction("txn-fail", [{"event_id": "$e"}]))
+        self.assertEqual(bot._claim_txn("txn-fail"), "inflight")
+
     def test_txn_claim_is_atomic(self) -> None:
         # #2：claim_txn 原子抢占——同一 txn 第一次 claimed、第二次（未过期）inflight，不会双claimed
         from cosmac.db.dedup import claim_txn
@@ -225,6 +247,37 @@ class TestWfCommand(unittest.TestCase):
         cols = {col["name"] for col in inspect(eng).get_columns("cosmac_seen_txn")}
         self.assertIn("done", cols)
         self.assertIn("claimed_at", cols)
+
+    def test_workflow_schema_adds_new_columns_without_drop(self) -> None:
+        # 老库 workflow_run 缺 token/source_key 时应补列，并保留已有历史行。
+        from sqlalchemy import inspect, text
+
+        from cosmac.db import get_engine
+        from cosmac.db.engine import _heal_business_schema
+
+        eng = get_engine()
+        with eng.begin() as c:
+            c.execute(text("DROP TABLE IF EXISTS cosmac_workflow_run"))
+            c.execute(text(
+                "CREATE TABLE cosmac_workflow_run ("
+                "id INTEGER PRIMARY KEY, slug VARCHAR(128) NOT NULL, "
+                "platform VARCHAR(32) NOT NULL, room_id VARCHAR(255) NOT NULL, "
+                "sender VARCHAR(255) NOT NULL, input TEXT NOT NULL, "
+                "output TEXT NOT NULL, error TEXT NOT NULL, "
+                "created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)"
+            ))
+            c.execute(text(
+                "INSERT INTO cosmac_workflow_run "
+                "(id, slug, platform, room_id, sender, input, output, error, created_at, updated_at) "
+                "VALUES (1, 'old', 'webhook', '!r', '@u', 'i', 'o', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+            ))
+        _heal_business_schema(eng)
+        cols = {col["name"] for col in inspect(eng).get_columns("cosmac_workflow_run")}
+        self.assertIn("token", cols)
+        self.assertIn("source_key", cols)
+        with eng.connect() as c:
+            rows = list(c.execute(text("SELECT slug FROM cosmac_workflow_run WHERE id=1")))
+        self.assertEqual(rows[0][0], "old")
 
     def test_recover_interrupted_runs(self) -> None:
         # 启动时把上次遗留的久未执行 queued 结清为 error 并通知群。

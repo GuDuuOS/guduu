@@ -353,6 +353,26 @@ class MatrixClient:
             logger.warning("查成员异常: %s", exc)
         return []
 
+    def is_joined_member(self, room_id: str, user_id: str) -> bool:
+        """判断某用户是否已加入某房间（给 AI 工具做跨房间授权）。
+
+        appservice/bot 可能加入了很多房间，但这不代表当前请求人也有权读写这些房间。工具层在
+        接受模型传入的 ``room_id`` 前，会用这个方法确认发起人确实是目标房间成员；任何查询
+        失败都按未加入处理（fail closed），避免高权限 bot 被当成越权代理。
+        """
+        url = self._url(
+            f"/_matrix/client/v3/rooms/{quote(room_id)}/state/"
+            f"m.room.member/{quote(user_id)}"
+        )
+        try:
+            resp = self._session.get(url, timeout=10)
+        except requests.RequestException as exc:
+            logger.warning("查成员身份异常: %s", exc)
+            return False
+        if resp.status_code != 200:
+            return False
+        return resp.json().get("membership") == "join"
+
     def get_messages(self, room_id: str, limit: int = 20) -> List[Dict[str, str]]:
         """查房间最近的文本消息（主 AI"读聊天记录"的能力）。
 

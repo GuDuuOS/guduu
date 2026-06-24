@@ -40,6 +40,7 @@ export interface ReactionAgg {
 }
 
 const SESSION_KEY = 'cosmac.session'
+const SYNC_PREPARED_TIMEOUT_MS = 15000
 
 // 单例：整个前端共用一个登录后的 Matrix client
 let mx: MatrixClient | null = null
@@ -74,16 +75,46 @@ async function startFrom(opts: {
   })
   await mx.startClient({ initialSyncLimit: 30 })
   // 等首次同步完成（房间列表加载好）再返回，避免后续逻辑在空列表上重复建房间
-  await new Promise<void>((resolve) => {
-    const handler = (state: string) => {
-      if (state === 'PREPARED') {
-        ;(mx as any).off('sync', handler)
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const client = mx as any
+      let timer: number | null = null
+      const cleanup = () => {
+        if (timer !== null) window.clearTimeout(timer)
+        client.off?.('sync', handler)
+      }
+      const fail = (reason: string) => {
+        cleanup()
+        reject(new Error(reason))
+      }
+      const handler = (state: string, _prev?: string, data?: any) => {
+        if (state === 'PREPARED') {
+          cleanup()
+          resolve()
+          return
+        }
+        if (state === 'ERROR' || state === 'STOPPED') {
+          fail(data?.error?.message || `Matrix sync ${state}`)
+        }
+      }
+      const currentState = client.getSyncState?.()
+      if (currentState === 'PREPARED') {
+        cleanup()
         resolve()
       }
-    }
-    if ((mx as any).getSyncState?.() === 'PREPARED') resolve()
-    else (mx as any).on('sync', handler)
-  })
+      else if (currentState === 'ERROR' || currentState === 'STOPPED') {
+        fail(`Matrix sync ${currentState}`)
+      }
+      else {
+        timer = window.setTimeout(() => fail('Matrix sync timeout'), SYNC_PREPARED_TIMEOUT_MS)
+        client.on('sync', handler)
+      }
+    })
+  } catch (e) {
+    try { mx?.stopClient() } catch { /* ignore */ }
+    mx = null
+    throw e
+  }
   return opts.userId
 }
 
@@ -121,15 +152,22 @@ export async function restoreSession(): Promise<string | null> {
   }
 }
 
-/** 退出登录、清掉记住的会话。 */
-export function logout(): void {
-  localStorage.removeItem(SESSION_KEY)
+/** 退出登录、清掉记住的会话，并尽力撤销服务端 access token。 */
+export async function logout(): Promise<void> {
+  const cur = mx
   try {
-    mx?.stopClient()
+    await (cur as any)?.logout?.()
   } catch {
     /* ignore */
+  } finally {
+    localStorage.removeItem(SESSION_KEY)
+    try {
+      cur?.stopClient()
+    } catch {
+      /* ignore */
+    }
+    if (mx === cur) mx = null
   }
-  mx = null
 }
 
 /** 注册"有更新就回调"——同步完成或来新消息时触发，UI 据此刷新。

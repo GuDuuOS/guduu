@@ -19,11 +19,11 @@ import os
 from contextlib import contextmanager
 from typing import Iterator, Optional
 
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from cosmac.db.models import Base, SeenTxn
+from cosmac.db.models import Base, SeenTxn, WorkflowRun
 
 logger = logging.getLogger("cosmac.db.engine")
 
@@ -80,6 +80,7 @@ def init_engine(url: Optional[str] = None, *, create_all: bool = True) -> Engine
     if create_all:
         Base.metadata.create_all(_engine)
         _heal_ephemeral_schema(_engine)
+        _heal_business_schema(_engine)
     return _engine
 
 
@@ -104,6 +105,38 @@ def _heal_ephemeral_schema(engine: Engine) -> None:
             SeenTxn.__table__.create(engine, checkfirst=True)
     except Exception:
         logger.warning("自愈去重缓存表失败（不致命，退回内存去重）", exc_info=True)
+
+
+def _heal_business_schema(engine: Engine) -> None:
+    """对已有业务表做**非破坏性**补列。
+
+    greenfield 阶段还没引入 alembic，``create_all`` 只能建新表，不能给旧表补新增列。业务表
+    不能像缓存表那样 DROP 重建，否则会丢运行记录/订单等审计数据；所以这里仅做兼容性补列：
+    旧生产库缺哪些新增列，就 ``ALTER TABLE ... ADD COLUMN`` 补上，已有行保留。
+    """
+    try:
+        insp = inspect(engine)
+        if not insp.has_table(WorkflowRun.__tablename__):
+            return
+        have = {c["name"] for c in insp.get_columns(WorkflowRun.__tablename__)}
+        with engine.begin() as conn:
+            if "status" not in have:
+                conn.execute(text(
+                    "ALTER TABLE cosmac_workflow_run "
+                    "ADD COLUMN status VARCHAR(16) NOT NULL DEFAULT 'ok'"
+                ))
+            if "token" not in have:
+                conn.execute(text(
+                    "ALTER TABLE cosmac_workflow_run "
+                    "ADD COLUMN token VARCHAR(64) NOT NULL DEFAULT ''"
+                ))
+            if "source_key" not in have:
+                conn.execute(text(
+                    "ALTER TABLE cosmac_workflow_run "
+                    "ADD COLUMN source_key VARCHAR(255)"
+                ))
+    except Exception:
+        logger.warning("补齐业务表列失败（不致命，相关新功能可能降级）", exc_info=True)
 
 
 def get_engine() -> Engine:

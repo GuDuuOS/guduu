@@ -32,10 +32,12 @@ class ToolContext:
 
     room_id: 当前对话所在房间（"发到这个群""查本群记录"等默认指向它）。
     sender:  发起人用户 id（建群时默认把他拉进去）。
+    source_key: 可选的来源幂等键（通常来自 Matrix event_id），给外部工作流防重放。
     """
 
     room_id: str
     sender: str
+    source_key: str = ""
 
 
 class Toolbox:
@@ -304,6 +306,9 @@ class Toolbox:
         if not text.strip():
             return "没有可发送的内容。"
         room_id = args.get("room_id") or ctx.room_id
+        denial = self._check_room_access(room_id, ctx)
+        if denial:
+            return denial
         event_id = self.client.send_text(room_id, text)
         if not event_id:
             return f"往房间 {room_id} 发消息失败。"
@@ -311,6 +316,9 @@ class Toolbox:
 
     def _tool_list_members(self, args: Dict[str, Any], ctx: ToolContext) -> str:
         room_id = args.get("room_id") or ctx.room_id
+        denial = self._check_room_access(room_id, ctx)
+        if denial:
+            return denial
         members = self.client.get_members(room_id)
         if not members:
             return f"房间 {room_id} 没查到成员（或查询失败）。"
@@ -319,12 +327,33 @@ class Toolbox:
 
     def _tool_get_messages(self, args: Dict[str, Any], ctx: ToolContext) -> str:
         room_id = args.get("room_id") or ctx.room_id
-        limit = int(args.get("limit") or 20)
+        denial = self._check_room_access(room_id, ctx)
+        if denial:
+            return denial
+        limit = max(1, min(50, int(args.get("limit") or 20)))
         msgs = self.client.get_messages(room_id, limit=limit)
         if not msgs:
             return f"房间 {room_id} 没查到聊天记录（或查询失败）。"
         # 用 JSON 回灌，模型读起来结构清晰
         return "最近聊天记录（旧→新）：\n" + json.dumps(msgs, ensure_ascii=False)
+
+    def _check_room_access(self, room_id: str, ctx: ToolContext) -> str:
+        """跨房间工具调用的权限检查；返回空串表示放行。
+
+        当前房间天然来自用户发消息的上下文，可直接放行。若模型显式传了其它 ``room_id``，
+        必须确认发起人也是目标房间成员；否则高权限 bot 会变成“帮用户越权读写其它群”的代理。
+        """
+        if room_id == ctx.room_id:
+            return ""
+        checker = getattr(self.client, "is_joined_member", None)
+        if not checker:
+            return "无法确认你是否有权访问该房间，已拒绝跨房间操作。"
+        try:
+            if checker(room_id, ctx.sender):
+                return ""
+        except Exception:
+            logger.warning("检查跨房间权限失败 room=%s sender=%s", room_id, ctx.sender)
+        return f"你不是房间 {room_id} 的已加入成员，我不能替你读写这个房间。"
 
     # —— 工作流连接器 ——
 
@@ -391,7 +420,9 @@ class Toolbox:
         # 协议；dify/coze/comfyui 没有回调通道，即便误存 async=true 也按后台同步跑（不挂 pending）。
         from cosmac.wf import supports_async_callback
         if conn.get("async") and self.dispatch_async and supports_async_callback(platform):
-            return self.dispatch_async(conn, user_input, ctx.room_id, ctx.sender, name)
+            return self.dispatch_async(
+                conn, user_input, ctx.room_id, ctx.sender, name, ctx.source_key
+            )
 
         # #1/#4/#5：**其余所有连接器**都放有界后台池跑、立即给 Agent 一个"已开始"让它继续——
         # webhook/dify/coze(≤30s) 也会卡住 Agent + appservice 事务，ComfyUI 更甚(120s)。
@@ -415,6 +446,10 @@ class Toolbox:
                 logger.exception("后台工作流执行出错：%s", name)
 
         pool = "slow" if platform == "comfyui" else "fast"  # ComfyUI 走慢池(#5)
+        if ctx.source_key and not self._reserve_workflow_source(
+            ctx.source_key, slug, platform, ctx, user_input
+        ):
+            return f"工作流「{name}」已经由这条消息触发过，我不会重复提交。"
         if submit_background(_work, pool=pool):
             return f"工作流「{name}」已开始，完成后我会把结果发到群里。"
         return "任务太多、系统繁忙，请稍后再让我跑。"
@@ -456,6 +491,28 @@ class Toolbox:
                 record_run(
                     s, slug=slug, platform=platform, room_id=ctx.room_id,
                     sender=ctx.sender, user_input=user_input, result=result,
+                    source_key=ctx.source_key,
                 )
         except Exception:
             pass
+
+    def _reserve_workflow_source(
+        self, source_key: str, slug: str, platform: str, ctx: ToolContext, user_input: str
+    ) -> bool:
+        """提交外部工作流前先登记来源事件；新登记返回 True，已存在返回 False。"""
+        try:
+            from cosmac.db import session_scope
+            from cosmac.db.wf_repo import create_pending, find_by_source_key
+
+            with session_scope() as s:
+                if find_by_source_key(s, source_key) is not None:
+                    return False
+                create_pending(
+                    s, slug=slug, platform=platform, room_id=ctx.room_id,
+                    sender=ctx.sender, user_input=user_input, token="",
+                    source_key=source_key,
+                )
+                return True
+        except Exception:
+            # DB 不可用时宁可继续执行（保持旧可用性），只失去重放幂等。
+            return True

@@ -170,11 +170,17 @@ class CosmacBot:
             return False
 
         # status == "claimed"（抢到）或 None（无 DB，退回内存去重）：占住并处理
+        had_error = False
         for event in events:
             try:
                 self._handle_event(event)
-            except Exception:  # 单条事件出错不应拖垮整批（也不触发整批重投）
+            except Exception:
                 logger.exception("处理事件出错: %s", event.get("event_id"))
+                had_error = True
+        if had_error:
+            # 任一事件失败都不能把整个 txn 标记 done；否则 Synapse 会认为已成功投递，
+            # 失败事件永久丢失。这里返回 False 让上游重试（成功事件需靠各自幂等保护）。
+            return False
         # #1：**处理成功后**才标记 done + 记内存。绝不能在处理前就写内存——否则处理途中
         # Synapse 超时重试会命中内存快路直接回 200，原处理若随后崩溃，DB 的 processing
         # 再没机会被重抢（Synapse 已不再重试）→ 整批永久丢。
@@ -251,6 +257,7 @@ class CosmacBot:
     def _handle_event(self, event: Dict[str, Any]) -> None:
         """处理单条事件。"""
         sender = event.get("sender", "")
+        event_id = event.get("event_id", "")
         event_type = event.get("type", "")
         room_id = event.get("room_id", "")
 
@@ -296,7 +303,7 @@ class CosmacBot:
 
             # 2a) 确定性命令快路（建专班等）。命中就执行动作、不再走 Agent。
             #     保留它做"一句话直接出富卡派单"的演示；自然语言走下面的 Agent。
-            if self._try_handle_command(room_id, sender, text):
+            if self._try_handle_command(room_id, sender, text, event_id=event_id):
                 return
 
             # 2b) 否则交给会"动手"的 Agent。但先过「基础 AI 对话」门控：低于门槛的用户
@@ -322,7 +329,10 @@ class CosmacBot:
             agent = self._agent_for_model(gctx.get("model", ""))
             reply = agent.run(
                 text or user_text,
-                ToolContext(room_id=room_id, sender=sender),
+                ToolContext(
+                    room_id=room_id, sender=sender,
+                    source_key=f"event:{event_id}:ai" if event_id else "",
+                ),
                 extra_system=extra_system,
                 history=history,
             )
@@ -802,7 +812,9 @@ class CosmacBot:
     # 第一步用确定性的斜杠命令验证"建群+拉人+发富卡"全链路；
     # 第二步会换成 LLM 工具调用，让自然语言自动触发这些动作。
 
-    def _try_handle_command(self, room_id: str, sender: str, text: str) -> bool:
+    def _try_handle_command(
+        self, room_id: str, sender: str, text: str, event_id: str = ""
+    ) -> bool:
         """识别并执行 IM 控制命令。命中返回 True，否则 False（交回对话处理）。
 
         目前支持（注意不要用 / 开头，否则会被 Element 当成它自己的客户端命令拦截）：
@@ -830,7 +842,11 @@ class CosmacBot:
             return True
         # 工作流连接器命令（列表/跑外部 n8n/Make 等）
         if self._is_wf_command(text):
-            self.client.send_text(room_id, self._run_wf_command(room_id, sender, text))
+            source_key = f"event:{event_id}:cmd:wf" if event_id else ""
+            self.client.send_text(
+                room_id,
+                self._run_wf_command(room_id, sender, text, source_key=source_key),
+            )
             return True
         # 会员等级命令（自查 / 管理员设置）
         if self._is_member_command(text):
@@ -973,7 +989,9 @@ class CosmacBot:
             logger.debug("读取工作流连接器失败（忽略）：%s", e)
             return []
 
-    def _run_wf_command(self, room_id: str, sender: str, text: str) -> str:
+    def _run_wf_command(
+        self, room_id: str, sender: str, text: str, source_key: str = ""
+    ) -> str:
         """执行工作流命令：`工作流 列表` / `工作流 跑 <slug> <输入>`。
 
         连接器定义读控制室 state event；运行同步调外部 webhook；结果尽力落库(DB 可用时)。
@@ -1026,16 +1044,22 @@ class CosmacBot:
             from cosmac.wf import supports_async_callback
             if (conn.get("async") and self.config.public_url
                     and supports_async_callback(conn.get("platform"))):
-                return self._dispatch_async(conn, user_input, room_id, sender, name)
+                return self._dispatch_async(
+                    conn, user_input, room_id, sender, name, source_key
+                )
             # #4/#5：**所有同步连接器**都放有界后台池跑、立即返回——webhook/dify/coze 也可能
             # 等到 30s、ComfyUI 更到 120s，同步执行会卡住 appservice 事务响应（Synapse 超时重试）。
             # 后台跑完把结果发回本群。池满则提示繁忙。
-            if self._run_wf_in_background(conn, user_input, room_id, sender, name):
+            if self._run_wf_in_background(
+                conn, user_input, room_id, sender, name, source_key
+            ):
                 return f"⏳ 工作流「{name}」已开始，完成后结果会自动发到本群。"
             return "⚠️ 任务太多、系统繁忙，请稍后再试。"
         return f"没听懂「{body}」。发「工作流 帮助」看用法。"
 
-    def _run_wf_in_background(self, conn, user_input, room_id, sender, name) -> bool:
+    def _run_wf_in_background(
+        self, conn, user_input, room_id, sender, name, source_key: str = ""
+    ) -> bool:
         """把同步连接器放**有界**后台线程池跑，避免阻塞 appservice 事务（#4/#5）。
 
         ComfyUI 成功时已自行把图发回房间（不再补文字）；其它平台返回文本→后台发回群。
@@ -1043,12 +1067,19 @@ class CosmacBot:
         """
         from cosmac.wf import run_connector, submit_background
 
+        if source_key and not self._reserve_wf_source(
+            source_key, conn, user_input, room_id, sender
+        ):
+            return True
+
         def work() -> None:
             try:
                 result = run_connector(
                     conn, user_input, client=self.client, room_id=room_id
                 )
-                self._record_wf_run(room_id, sender, conn, user_input, result)
+                self._record_wf_run(
+                    room_id, sender, conn, user_input, result, source_key=source_key
+                )
                 if not result.get("ok"):
                     self.client.send_text(
                         room_id, f"⚠️ 工作流「{name}」执行失败：{result.get('error')}"
@@ -1063,7 +1094,9 @@ class CosmacBot:
         pool = "slow" if conn.get("platform") == "comfyui" else "fast"
         return submit_background(work, pool=pool)
 
-    def _dispatch_async(self, conn, user_input, room_id, sender, name) -> str:
+    def _dispatch_async(
+        self, conn, user_input, room_id, sender, name, source_key: str = ""
+    ) -> str:
         """异步连接器：建 pending 运行(带一次性 token)+ 回调 URL，提交给平台后即返回。
 
         平台跑完反向 POST 到 {public_url}/cosmac/wf/callback/<run_id>（URL **不含 token**）。
@@ -1077,15 +1110,23 @@ class CosmacBot:
         try:
             from cosmac.db import session_scope
             from cosmac.db.wf_repo import (
-                complete_run, create_pending, get_run, mark_submission_started,
+                complete_run, create_pending, find_by_source_key, get_run,
+                mark_submission_started,
             )
 
             token = secrets.token_urlsafe(16)
             with session_scope() as s:
+                if source_key:
+                    old = find_by_source_key(s, source_key)
+                    if old is not None:
+                        if old.status in ("queued", "pending", "processing"):
+                            return f"⏳ 工作流「{name}」已由这条消息提交过（#{old.id}），我不会重复提交。"
+                        return f"工作流「{name}」已由这条消息处理过（#{old.id}），不会重复提交。"
                 run = create_pending(
                     s, slug=conn.get("slug", ""), platform=conn.get("platform", "webhook"),
                     room_id=room_id, sender=sender, user_input=user_input,
                     token=_token_hash(token),  # #4：DB 只存 token 哈希，不存明文
+                    source_key=source_key,
                 )
                 run_id = run.id
             # #2：回调 URL **不含 token**（路径也会进 nginx 日志）。token 放进我们 POST 给
@@ -1386,7 +1427,33 @@ class CosmacBot:
             return 500
         return 200
 
-    def _record_wf_run(self, room_id, sender, conn, user_input, result) -> None:
+    def _reserve_wf_source(self, source_key, conn, user_input, room_id, sender) -> bool:
+        """外呼前登记工作流来源事件；新登记返回 True，已存在返回 False。
+
+        这一步放在提交后台池之前，是为了堵住 appservice txn 还没标记 done 时进程崩溃、
+        Synapse 重放同一事件导致外部平台重复接单/扣费的窗口。DB 不可用时保持旧行为继续跑。
+        """
+        try:
+            from cosmac.db import session_scope
+            from cosmac.db.wf_repo import create_pending, find_by_source_key
+
+            with session_scope() as s:
+                if find_by_source_key(s, source_key) is not None:
+                    return False
+                create_pending(
+                    s, slug=conn.get("slug", ""),
+                    platform=conn.get("platform", "webhook"),
+                    room_id=room_id, sender=sender, user_input=user_input,
+                    token="", source_key=source_key,
+                )
+                return True
+        except Exception as e:
+            logger.debug("工作流来源幂等登记失败（降级继续执行）：%s", e)
+            return True
+
+    def _record_wf_run(
+        self, room_id, sender, conn, user_input, result, source_key: str = ""
+    ) -> None:
         """尽力把运行记录落库；DB 不可用就跳过（不影响已拿到的结果）。"""
         try:
             from cosmac.db import session_scope
@@ -1396,6 +1463,7 @@ class CosmacBot:
                 record_run(
                     s, slug=conn.get("slug", ""), platform=conn.get("platform", "webhook"),
                     room_id=room_id, sender=sender, user_input=user_input, result=result,
+                    source_key=source_key,
                 )
         except Exception as e:
             logger.debug("工作流运行记录入库失败（忽略）：%s", e)
