@@ -75,6 +75,10 @@
   grid-template-columns: 1fr 1fr 1fr;
   gap: 14px;
 }
+/* chart.js 的 canvas 有固有宽度，grid 子项默认 min-width:auto 会被顶宽撑破容器、
+   导致右侧溢出。钉成 0 让轨道可收缩到分配的 fr 宽度（canvas responsive 会自适应）。 */
+.grid-2 > *,
+.grid-3 > * { min-width: 0; }
 
 .panel {
   background: var(--bg-panel);
