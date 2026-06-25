@@ -17,6 +17,7 @@ import { ref, computed, reactive, watch, onMounted, onBeforeUnmount, nextTick } 
 import { useRoute, useRouter } from 'vue-router'
 import {
   login,
+  loginWithEmail,
   registerRequestCode,
   registerVerify,
   resetRequestCode,
@@ -198,6 +199,7 @@ const emailCode = ref('')               // 邮箱验证码
 const codeCooldown = ref(0)             // 「发送验证码」倒计时（秒），>0 时按钮禁用
 const sendingCode = ref(false)
 const authMode = ref<'login' | 'register' | 'reset'>('login') // 鉴权页：登录 / 注册 / 找回密码
+const loginBy = ref<'account' | 'email'>('account') // 登录方式：账号 / 邮箱（二选一）
 const loggedIn = ref(false)
 const me = ref('')
 const error = ref('')
@@ -695,7 +697,12 @@ async function doLogin() {
   error.value = ''
   loading.value = true
   try {
-    await afterLogin(await login(HS, user.value.trim(), password.value))
+    // 账号登录走 Synapse 标准登录；邮箱登录走 cosmac 后端（反查账号后再登）
+    if (loginBy.value === 'email') {
+      await afterLogin(await loginWithEmail(HS, email.value.trim(), password.value))
+    } else {
+      await afterLogin(await login(HS, user.value.trim(), password.value))
+    }
   } catch (e: any) {
     error.value = e?.message || String(e)
   } finally {
@@ -1087,9 +1094,20 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 
       <!-- 中部：表单字段（三段式分布，让内容填满高框、不浮在中间）-->
       <div class="auth-fields">
-        <!-- 注册 / 找回密码：邮箱 + 发送验证码 + 验证码 -->
+        <!-- ===== 登录：账号 / 邮箱 二选一 ===== -->
+        <template v-if="authMode === 'login'">
+          <div class="auth-subtabs">
+            <button class="auth-subtab" :class="{ active: loginBy === 'account' }" @click="loginBy = 'account'">账号登录</button>
+            <button class="auth-subtab" :class="{ active: loginBy === 'email' }" @click="loginBy = 'email'">邮箱登录</button>
+          </div>
+          <input v-if="loginBy === 'account'" v-model="user" name="login-username" autocomplete="username" placeholder="用户名" @keyup.enter="doLogin" />
+          <input v-else v-model="email" type="email" name="login-email" autocomplete="email" placeholder="邮箱" @keyup.enter="doLogin" />
+          <input v-model="password" type="password" autocomplete="current-password" placeholder="密码" @keyup.enter="doLogin" />
+        </template>
+
+        <!-- ===== 注册 / 找回密码 ===== -->
         <!-- autocomplete 语义化防浏览器自动填充串味：邮箱=email，验证码=one-time-code -->
-        <template v-if="authMode !== 'login'">
+        <template v-else>
           <div class="auth-code-row">
             <input v-model="email" type="email" name="reg-email" autocomplete="email" placeholder="邮箱" />
             <button class="auth-code-btn" :disabled="codeCooldown > 0 || sendingCode || !email.trim()" @click="sendCode">
@@ -1099,17 +1117,15 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
           <input v-model="emailCode" name="reg-otp" autocomplete="one-time-code" inputmode="numeric" maxlength="6"
                  placeholder="6 位验证码（填邮件里的数字）"
                  @keyup.enter="authMode === 'reset' ? doResetPassword() : doRegister()" />
+          <!-- 用户名：仅注册需要（找回密码靠邮箱定位账号，不填用户名）-->
+          <input v-if="authMode === 'register'" v-model="user" name="reg-username" autocomplete="username" placeholder="用户名" />
+          <input v-model="password" type="password" autocomplete="new-password"
+                 :placeholder="authMode === 'reset' ? '新密码（至少 8 位）' : '密码（至少 8 位）'"
+                 @keyup.enter="authMode === 'reset' ? doResetPassword() : doRegister()" />
+          <input v-model="password2" type="password" autocomplete="new-password"
+                 :placeholder="authMode === 'reset' ? '确认新密码' : '确认密码'"
+                 @keyup.enter="authMode === 'reset' ? doResetPassword() : doRegister()" />
         </template>
-        <!-- 用户名：仅登录/注册需要（找回密码靠邮箱定位账号，不填用户名）-->
-        <input v-if="authMode !== 'reset'" v-model="user" name="reg-username" autocomplete="username" placeholder="用户名" />
-        <input v-model="password" type="password"
-               :placeholder="authMode === 'login' ? '密码' : (authMode === 'reset' ? '新密码（至少 8 位）' : '密码（至少 8 位）')"
-               :autocomplete="authMode === 'login' ? 'current-password' : 'new-password'"
-               @keyup.enter="authMode === 'login' ? doLogin() : (authMode === 'reset' ? doResetPassword() : doRegister())" />
-        <!-- 注册 / 找回密码多一个确认密码 -->
-        <input v-if="authMode !== 'login'" v-model="password2" type="password" autocomplete="new-password"
-               :placeholder="authMode === 'reset' ? '确认新密码' : '确认密码'"
-               @keyup.enter="authMode === 'reset' ? doResetPassword() : doRegister()" />
       </div>
 
       <!-- 底部：提交按钮 + 错误 + 切换链接 -->
@@ -1945,6 +1961,10 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 .auth-tabs { display: flex; gap: 4px; padding: 4px; background: var(--bg, #f1efe9); border: 1px solid var(--border); border-radius: 10px; }
 .auth-tab { flex: 1; padding: 10px; border: 0; background: transparent; color: var(--text-3); font-size: 15px; font-weight: 600; border-radius: 8px; cursor: pointer; }
 .auth-tab.active { background: #fff; color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+/* 登录方式子切换：账号 / 邮箱（比主 tab 轻量）*/
+.auth-subtabs { display: flex; gap: 18px; padding: 0 2px; }
+.auth-subtab { border: 0; background: transparent; color: var(--text-3); font-size: 14px; font-weight: 600; padding: 2px 0 6px; cursor: pointer; border-bottom: 2px solid transparent; }
+.auth-subtab.active { color: var(--accent); border-bottom-color: var(--accent); }
 /* 注册：邮箱 + 发送验证码 一行 */
 .auth-code-row { display: flex; gap: 8px; }
 .auth-code-row input { flex: 1; min-width: 0; }

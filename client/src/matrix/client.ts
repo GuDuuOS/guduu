@@ -142,6 +142,33 @@ export async function login(
 // 注：注册不走 Matrix 原生开放注册（那只能发验证链接、且要服务端开放注册）。
 // CosMac 用「自建邮箱验证码」注册：见下方 registerRequestCode/registerVerify（调 cosmac 后端）。
 
+/**
+ * 邮箱+密码登录：走 cosmac 后端（/cosmac/login/email），它按邮箱反查账号后登 Synapse，
+ * 返回登录响应；前端据此存会话、启动客户端（与 login() 相同的后半程）。
+ * 登录前 mx 还没建，故由调用方传入 homeserver 基址。
+ */
+export async function loginWithEmail(
+  baseUrl: string,
+  email: string,
+  password: string,
+): Promise<string> {
+  const base = baseUrl.replace(/\/$/, '')
+  const r = await fetch(`${base}/cosmac/login/email`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok || !j?.access_token) throw new Error(j?.error || '登录失败')
+  saveSession(baseUrl, j)
+  return startFrom({
+    baseUrl,
+    accessToken: j.access_token,
+    userId: j.user_id,
+    deviceId: j.device_id,
+  })
+}
+
 /** 尝试用上次记住的会话恢复登录；没有/失效返回 null。 */
 export async function restoreSession(): Promise<string | null> {
   const raw = localStorage.getItem(SESSION_KEY)

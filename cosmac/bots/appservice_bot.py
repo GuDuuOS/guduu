@@ -1392,6 +1392,14 @@ class CosmacBot:
             hs_url=self.config.homeserver_url, server_name=self.config.server_name,
         )
 
+    def handle_login_email(self, body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
+        """邮箱登录：反查用户名 → 登 Synapse → 返回登录响应（公开端点）。"""
+        from cosmac import registration
+        b = body or {}
+        return registration.login_email(
+            b.get("email", ""), b.get("password", ""), hs_url=self.config.homeserver_url,
+        )
+
     def handle_pay_checkout(
         self, access_token: str, body: Dict[str, Any]
     ) -> Tuple[int, Dict[str, Any]]:
@@ -1804,7 +1812,8 @@ class _Handler(BaseHTTPRequestHandler):
         if (p.startswith("/cosmac/pay/") or p == "/cosmac/stats"
                 or p.startswith("/cosmac/tasks")
                 or p.startswith("/cosmac/register/")
-                or p.startswith("/cosmac/reset/")):
+                or p.startswith("/cosmac/reset/")
+                or p.startswith("/cosmac/login/")):
             origin = os.environ.get("COSMAC_APP_ORIGIN", "") or "*"
             self.send_response(204)
             self.send_header("Access-Control-Allow-Origin", origin)
@@ -1971,6 +1980,16 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(400, {"error": "请求无效"}, cors=True)
                 return
             code, payload = self.bot.handle_reset_verify(body)
+            self._send_json(code, payload, cors=True)
+            return
+
+        # 邮箱登录（公开、浏览器调，需 CORS）。
+        if path == "/cosmac/login/email":
+            body = self._read_json_body(_MAX_CALLBACK_BODY)
+            if body is None:
+                self._send_json(400, {"error": "请求无效"}, cors=True)
+                return
+            code, payload = self.bot.handle_login_email(body)
             self._send_json(code, payload, cors=True)
             return
 

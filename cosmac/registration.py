@@ -367,6 +367,39 @@ def _lookup_username(email: str) -> Optional[str]:
         return None
 
 
+def login_email(email: str, password: str, *, hs_url: str) -> Tuple[int, Dict[str, Any]]:
+    """邮箱+密码登录：按邮箱反查用户名 → 用账号密码登 Synapse → 原样返回 Synapse 登录响应
+    （含 access_token/user_id/device_id，前端据此存会话）。
+
+    失败一律回通用「邮箱或密码错误」——不区分"邮箱没注册"和"密码错"，避免邮箱枚举。
+    只对**注册时存过邮箱映射**的账号有效（老账号没存→当作邮箱或密码错误）。
+    """
+    email = (email or "").strip().lower()
+    if not _EMAIL_RE.match(email) or not password:
+        return 403, {"error": "邮箱或密码错误"}
+    username = _lookup_username(email)
+    if not username:
+        return 403, {"error": "邮箱或密码错误"}
+    base = hs_url.rstrip("/")
+    try:
+        r = requests.post(
+            f"{base}/_matrix/client/v3/login",
+            json={
+                "type": "m.login.password",
+                "identifier": {"type": "m.id.user", "user": username},
+                "password": password,
+                "initial_device_display_name": "CosMac Web",
+            },
+            timeout=_HS_TIMEOUT,
+        )
+        if r.status_code == 200:
+            return 200, r.json()
+        return 403, {"error": "邮箱或密码错误"}
+    except requests.RequestException:
+        logger.exception("邮箱登录调用 Synapse 失败")
+        return 502, {"error": "登录服务暂不可用，请稍后重试"}
+
+
 def _admin_reset_password(hs_url: str, user_id: str, new_password: str) -> Tuple[int, Dict[str, Any]]:
     """用管理员令牌调 Synapse 重置某账号密码（并登出其所有设备）。
 

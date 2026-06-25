@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-06-25 — 登录加「邮箱登录」（账号/邮箱二选一）
+- 登录模式加子切换「账号登录 / 邮箱登录」，丰富界面。
+- 后端 `registration.login_email`（端点 `/cosmac/login/email`）：按邮箱反查用户名(复用 email_repo)→ 用账号密码登 Synapse → 原样回登录响应；失败统一回「邮箱或密码错误」防枚举。**无需管理员令牌**(普通登录)。
+- 前端 `loginWithEmail()`(拿后端登录响应→saveSession+startFrom，复用 login 后半程)；`loginBy` ref 切换，doLogin 分支。
+- 注意：邮箱登录只对**有邮箱映射的账号**(注册时存的)有效，老账号用账号登录。
+- 验证：ruff + 13 单测过；build(`index-Dmc7Ql88.js`)+ preview 切换字段确认。
+- 部署：发 dist + 重启 bot。
+
 ## 2026-06-25 — 登录卡片内容三段式分布 + 放大控件
 - 上一版等高用 justify-content:center → 登录内容挤成一团浮中间、上下大白边。改三段式:模板拆 `.auth-top`(品牌+tab)/`.auth-fields`(字段)/`.auth-bottom`(按钮+链接),卡片 `justify-content:space-between` 把多余高度分配到段间,内容均匀填满。
 - 控件放大适配宽卡片:输入框 padding 13×15、字号 15;按钮 padding 14、字号 15 加粗;tab 加大。
