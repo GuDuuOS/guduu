@@ -1,0 +1,267 @@
+"""自建「邮箱验证码」注册。
+
+为什么自建（而不是用 Synapse 原生邮箱注册）：
+  Synapse 原生的邮箱注册发的是**验证链接**（点链接验证 3pid）；负责人要的是**验证码**体验
+  （邮件里给 6 位码、用户在 app 里输）。Synapse 不原生支持验证码，故自建这一层：
+    1) 前端填邮箱 → POST /cosmac/register/request-code → 这里生成 6 位码、用 SMTP（Lark）发信。
+    2) 前端填用户名+密码+码 → POST /cosmac/register/verify → 这里验码 → 用
+       registration_shared_secret 向 Synapse `/_synapse/admin/v1/register` 建号
+       （该端点是给程序化建号用的，**不受 enable_registration 开关影响**——所以建完号后
+        服务端应把开放注册关掉，强制所有注册都走我们的邮箱验证）。
+
+安全 / 健壮（单实例「够用即止」，与 wf 同口径）：
+  · 验证码存**内存**（带 TTL + 线程锁）——单 bot 实例足够；将来多实例再迁 DB。
+  · 限频：同邮箱发码有冷却 + 每小时上限；验码有尝试次数上限（防爆破）。
+  · 真密钥（SMTP 密码 / registration_shared_secret）只从**服务端 env** 读，绝不进代码/前端/Matrix。
+
+涉及的 env（生产用 systemd Environment / Secret Manager 注入；本地不配则注册不可用、优雅报错）：
+  COSMAC_SMTP_HOST / COSMAC_SMTP_PORT(默认465) / COSMAC_SMTP_USER / COSMAC_SMTP_PASSWORD /
+  COSMAC_SMTP_FROM(发件地址，如 noreply@guduu.co) / COSMAC_SMTP_FROM_NAME(可选，显示名) /
+  COSMAC_REGISTRATION_SHARED_SECRET(= homeserver.yaml 里的 registration_shared_secret)
+"""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+import logging
+import re
+import smtplib
+import ssl
+import threading
+import time
+from email.message import EmailMessage
+from email.utils import formataddr
+from typing import Any, Dict, Optional, Tuple
+
+import requests
+
+from cosmac.config import _env
+
+logger = logging.getLogger("cosmac.registration")
+
+# ── 可调参数（够用即止，不做成配置项）────────────────────────────
+_CODE_TTL = 10 * 60          # 验证码有效期（秒）
+_RESEND_COOLDOWN = 60        # 同邮箱两次发码的最小间隔（秒）
+_MAX_SENDS_PER_HOUR = 5      # 同邮箱每小时最多发码次数（防刷爆 Lark 配额）
+_MAX_VERIFY_ATTEMPTS = 5     # 单个码最多验错几次（防爆破）
+_HS_TIMEOUT = 15            # 调 Synapse 的超时（秒）
+
+# 邮箱 / 用户名 / 密码 的基本校验
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_USERNAME_RE = re.compile(r"^[a-z0-9._=\-/+]+$")  # Matrix localpart 允许的安全子集（小写）
+
+
+class _PendingCode:
+    """某邮箱待验证的码 + 限频计数（仅内存）。"""
+
+    __slots__ = ("code", "expires", "attempts", "last_sent", "sent_times")
+
+    def __init__(self) -> None:
+        self.code: str = ""
+        self.expires: float = 0.0
+        self.attempts: int = 0
+        self.last_sent: float = 0.0
+        self.sent_times: list[float] = []  # 最近一小时的发码时间戳（滑窗限频）
+
+
+# 邮箱(小写) → _PendingCode；多线程 HTTP server，必须加锁
+_store: Dict[str, _PendingCode] = {}
+_lock = threading.Lock()
+
+
+def _gen_code() -> str:
+    """生成 6 位数字验证码（用密码学安全随机，避免可预测）。"""
+    import secrets
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+
+def _smtp_conf() -> Optional[Dict[str, Any]]:
+    """读 SMTP 配置；缺关键项则返回 None（注册功能视为未启用）。"""
+    host = _env("SMTP_HOST")
+    user = _env("SMTP_USER")
+    password = _env("SMTP_PASSWORD")
+    sender = _env("SMTP_FROM") or user
+    if not (host and user and password and sender):
+        return None
+    try:
+        port = int(_env("SMTP_PORT", "465"))
+    except ValueError:
+        port = 465
+    return {
+        "host": host,
+        "port": port,
+        "user": user,
+        "password": password,
+        "from": sender,
+        "from_name": _env("SMTP_FROM_NAME", "CosMac Star"),
+    }
+
+
+def registration_enabled() -> bool:
+    """SMTP 与共享密钥都配齐才算「自建注册」可用。"""
+    return _smtp_conf() is not None and bool(_env("REGISTRATION_SHARED_SECRET"))
+
+
+def _send_email(to_addr: str, code: str) -> None:
+    """用 SMTP（SSL/465 优先）发验证码邮件；失败抛异常由调用方兜底。"""
+    conf = _smtp_conf()
+    if not conf:
+        raise RuntimeError("SMTP 未配置")
+    msg = EmailMessage()
+    msg["Subject"] = f"CosMac Star 注册验证码：{code}"
+    msg["From"] = formataddr((conf["from_name"], conf["from"]))
+    msg["To"] = to_addr
+    msg.set_content(
+        f"你正在注册 CosMac Star。\n\n"
+        f"验证码：{code}\n\n"
+        f"{_CODE_TTL // 60} 分钟内有效。如果不是你本人操作，请忽略本邮件。"
+    )
+    ctx = ssl.create_default_context()
+    # 465=SSL 直连；587=STARTTLS。Lark 两个都给，这里按端口择一。
+    if conf["port"] == 587:
+        with smtplib.SMTP(conf["host"], conf["port"], timeout=20) as s:
+            s.starttls(context=ctx)
+            s.login(conf["user"], conf["password"])
+            s.send_message(msg)
+    else:
+        with smtplib.SMTP_SSL(conf["host"], conf["port"], context=ctx, timeout=20) as s:
+            s.login(conf["user"], conf["password"])
+            s.send_message(msg)
+
+
+def request_code(email: str) -> Tuple[int, Dict[str, Any]]:
+    """发验证码到邮箱。返回 (http状态, 响应体)。限频在这里强制。"""
+    if not registration_enabled():
+        return 503, {"error": "服务器未开启邮箱注册"}
+    email = (email or "").strip().lower()
+    if not _EMAIL_RE.match(email):
+        return 400, {"error": "邮箱格式不正确"}
+
+    now = time.time()
+    with _lock:
+        pc = _store.get(email) or _PendingCode()
+        # 滑窗：清掉一小时前的发码记录，再判每小时上限
+        pc.sent_times = [t for t in pc.sent_times if now - t < 3600]
+        if pc.last_sent and now - pc.last_sent < _RESEND_COOLDOWN:
+            wait = int(_RESEND_COOLDOWN - (now - pc.last_sent))
+            return 429, {"error": f"发送太频繁，请 {wait} 秒后再试", "cooldown": wait}
+        if len(pc.sent_times) >= _MAX_SENDS_PER_HOUR:
+            return 429, {"error": "今日该邮箱验证码请求过多，请稍后再试"}
+        code = _gen_code()
+        pc.code = code
+        pc.expires = now + _CODE_TTL
+        pc.attempts = 0
+        pc.last_sent = now
+        pc.sent_times.append(now)
+        _store[email] = pc
+
+    # 发信放锁外（网络 IO 可能慢，别占着锁）
+    try:
+        _send_email(email, code)
+    except Exception:
+        logger.exception("发送验证码邮件失败: %s", email)
+        # 发失败就把这次的码作废，避免用户拿不到码却被限频
+        with _lock:
+            cur = _store.get(email)
+            if cur and cur.code == code:
+                cur.code = ""
+                if cur.sent_times:
+                    cur.sent_times.pop()
+                cur.last_sent = 0.0
+        return 502, {"error": "验证码邮件发送失败，请稍后重试"}
+
+    return 200, {"ok": True, "cooldown": _RESEND_COOLDOWN}
+
+
+def _check_code(email: str, code: str) -> Tuple[bool, Optional[str]]:
+    """校验邮箱+码；通过返回 (True, None)，否则 (False, 错误文案)。通过即作废该码。"""
+    code = (code or "").strip()
+    with _lock:
+        pc = _store.get(email)
+        if not pc or not pc.code:
+            return False, "请先获取验证码"
+        if time.time() > pc.expires:
+            pc.code = ""
+            return False, "验证码已过期，请重新获取"
+        if pc.attempts >= _MAX_VERIFY_ATTEMPTS:
+            pc.code = ""
+            return False, "验证码错误次数过多，请重新获取"
+        if not hmac.compare_digest(pc.code, code):
+            pc.attempts += 1
+            return False, "验证码不正确"
+        # 验过即作废（一次性）
+        pc.code = ""
+        return True, None
+
+
+def _synapse_register(hs_url: str, username: str, password: str) -> Tuple[int, Dict[str, Any]]:
+    """用 registration_shared_secret 向 Synapse 建号（HMAC nonce 流程）。
+
+    /_synapse/admin/v1/register：先 GET 拿 nonce，再用 HMAC-SHA1 算 mac 后 POST。
+    该端点不受 enable_registration 影响，专供程序化建号。
+    """
+    secret = _env("REGISTRATION_SHARED_SECRET")
+    if not secret:
+        return 503, {"error": "服务器未配置注册密钥"}
+    base = hs_url.rstrip("/")
+    url = f"{base}/_synapse/admin/v1/register"
+    try:
+        r = requests.get(url, timeout=_HS_TIMEOUT)
+        nonce = r.json().get("nonce")
+        if not nonce:
+            return 502, {"error": "注册服务暂不可用"}
+        # mac = HMAC_SHA1(secret, nonce \0 user \0 password \0 notadmin)
+        mac = hmac.new(secret.encode("utf-8"), digestmod=hashlib.sha1)
+        mac.update(b"\x00".join([
+            nonce.encode("utf-8"),
+            username.encode("utf-8"),
+            password.encode("utf-8"),
+            b"notadmin",
+        ]))
+        body = {
+            "nonce": nonce,
+            "username": username,
+            "password": password,
+            "admin": False,
+            "mac": mac.hexdigest(),
+        }
+        rr = requests.post(url, json=body, timeout=_HS_TIMEOUT)
+        if rr.status_code == 200:
+            return 200, rr.json()
+        # Synapse 把"用户名已占用"等错误放在 body.error
+        err = ""
+        try:
+            err = rr.json().get("error", "")
+        except Exception:
+            pass
+        if "in use" in err.lower() or rr.status_code == 400 and "exist" in err.lower():
+            return 409, {"error": "该用户名已被占用，请换一个"}
+        return rr.status_code if rr.status_code >= 400 else 502, {"error": err or "注册失败"}
+    except requests.RequestException:
+        logger.exception("调用 Synapse 共享密钥注册失败")
+        return 502, {"error": "注册服务暂不可用，请稍后重试"}
+
+
+def verify_and_register(
+    email: str, code: str, username: str, password: str, *, hs_url: str
+) -> Tuple[int, Dict[str, Any]]:
+    """验码 → 建号。成功返回 (200, {user_id, access_token...})。"""
+    if not registration_enabled():
+        return 503, {"error": "服务器未开启邮箱注册"}
+    email = (email or "").strip().lower()
+    username = (username or "").strip().lower()
+    if not _EMAIL_RE.match(email):
+        return 400, {"error": "邮箱格式不正确"}
+    if not username or not _USERNAME_RE.match(username):
+        return 400, {"error": "用户名只能用小写字母/数字/._-=+/"}
+    if len(password or "") < 8:
+        return 400, {"error": "密码至少 8 位"}
+
+    ok, msg = _check_code(email, code)
+    if not ok:
+        return 400, {"error": msg}
+
+    status, payload = _synapse_register(hs_url, username, password)
+    # 建号失败时不还原码（已一次性作废）——让用户重新走流程，避免码被复用
+    return status, payload

@@ -1364,6 +1364,20 @@ class CosmacBot:
         exp = int(rec.get("expires_ts") or 0) if rec else 0
         return 200, {"tier": tier, "tier_label": tier_label(tier), "expires_ts": exp}
 
+    def handle_register_request_code(self, body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
+        """自建邮箱注册：给邮箱发验证码（公开端点，无 token——用户还没账号）。限频在 registration 内强制。"""
+        from cosmac import registration
+        return registration.request_code((body or {}).get("email", ""))
+
+    def handle_register_verify(self, body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
+        """自建邮箱注册：验码 + 用共享密钥建号（公开端点）。成功回 {user_id, access_token...}。"""
+        from cosmac import registration
+        b = body or {}
+        return registration.verify_and_register(
+            b.get("email", ""), b.get("code", ""), b.get("username", ""), b.get("password", ""),
+            hs_url=self.config.homeserver_url,
+        )
+
     def handle_pay_checkout(
         self, access_token: str, body: Dict[str, Any]
     ) -> Tuple[int, Dict[str, Any]]:
@@ -1774,7 +1788,8 @@ class _Handler(BaseHTTPRequestHandler):
         # 给浏览器调的端点回 CORS 预检（带 Authorization 头的请求会先发 OPTIONS）
         p = self.path.split("?", 1)[0]
         if (p.startswith("/cosmac/pay/") or p == "/cosmac/stats"
-                or p.startswith("/cosmac/tasks")):
+                or p.startswith("/cosmac/tasks")
+                or p.startswith("/cosmac/register/")):
             origin = os.environ.get("COSMAC_APP_ORIGIN", "") or "*"
             self.send_response(204)
             self.send_header("Access-Control-Allow-Origin", origin)
@@ -1901,6 +1916,26 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(400, {"error": "请求无效"}, cors=True)
                 return
             code, payload = self.bot.handle_task_update(token, body)
+            self._send_json(code, payload, cors=True)
+            return
+
+        # 自建邮箱注册：发验证码（公开、浏览器调，需 CORS）。无 token——用户还没账号。
+        if path == "/cosmac/register/request-code":
+            body = self._read_json_body(_MAX_CALLBACK_BODY)
+            if body is None:
+                self._send_json(400, {"error": "请求无效"}, cors=True)
+                return
+            code, payload = self.bot.handle_register_request_code(body)
+            self._send_json(code, payload, cors=True)
+            return
+
+        # 自建邮箱注册：验码 + 建号（公开、浏览器调，需 CORS）。
+        if path == "/cosmac/register/verify":
+            body = self._read_json_body(_MAX_CALLBACK_BODY)
+            if body is None:
+                self._send_json(400, {"error": "请求无效"}, cors=True)
+                return
+            code, payload = self.bot.handle_register_verify(body)
             self._send_json(code, payload, cors=True)
             return
 

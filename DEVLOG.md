@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-06-25 — 自建「邮箱验证码」注册（前端 + cosmac 后端）
+- 需求(负责人定):注册走邮箱验证码(非链接)。Synapse 原生只发验证链接,故自建。
+- 后端 `cosmac/registration.py`:发码→验码→用 registration_shared_secret 调 Synapse `/_synapse/admin/v1/register` 建号(该端点不受 enable_registration 影响)。码存内存(TTL+锁)、限频(同邮箱冷却60s/每小时5次)、验码尝试上限5、一次性作废。SMTP 走 smtplib(SSL465/STARTTLS587),密钥全从 env 读。
+- bot 加端点 `/cosmac/register/request-code` + `/cosmac/register/verify`(公开+CORS,复用现有 /cosmac/ 那套;nginx 已代理无需改)。前端 client.ts `registerRequestCode/registerVerify`(登录前 mx 还没建,显式传 HS 基址)。
+- 前端注册页:邮箱+发送验证码(60s倒计时)+验证码+用户名+密码(≥8)+确认密码;注册成功即用同账号 login→触发首次引导。删掉旧的 Matrix dummy `register()`(已废)。
+- 测试:`cosmac/tests/test_registration.py` 7 用例(happy/错码/一次性/冷却/坏邮箱/弱密码/坏用户名)全过;ruff 过;前端 build(`index-L8bn7JHY.js`)+ preview 截图确认注册页字段正确。
+- ⚠️ 部署依赖(见下条说明):bot 需配 env(COSMAC_SMTP_* + COSMAC_REGISTRATION_SHARED_SECRET)并重启;且应把 Synapse 开放注册**关掉**(enable_registration:false),强制注册都走邮箱验证。密钥细节进 DEPLOY.md。
+
 ## 2026-06-25 — 登录/注册去掉默认 admin
 - 用户名输入框默认值从 `'admin'` 改空,占位文案「用户名（如 admin）」改「用户名」。避免新用户/注册时误带 admin。
 - 验证:build(`index-DihDBZx8.js`)+ 本地 preview 确认输入框空。纯前端,**发 dist**。

@@ -17,7 +17,8 @@ import { ref, computed, reactive, watch, onMounted, onBeforeUnmount, nextTick } 
 import { useRoute, useRouter } from 'vue-router'
 import {
   login,
-  register,
+  registerRequestCode,
+  registerVerify,
   restoreSession,
   logout,
   onUpdate,
@@ -190,6 +191,10 @@ const HS = 'https://hs.cosmac.cc'
 const user = ref('')
 const password = ref('')
 const password2 = ref('')               // 注册时的「确认密码」
+const email = ref('')                   // 注册邮箱
+const emailCode = ref('')               // 邮箱验证码
+const codeCooldown = ref(0)             // 「发送验证码」倒计时（秒），>0 时按钮禁用
+const sendingCode = ref(false)
 const authMode = ref<'login' | 'register'>('login') // 鉴权页：登录 / 注册
 const loggedIn = ref(false)
 const me = ref('')
@@ -696,27 +701,58 @@ async function doLogin() {
   }
 }
 
-/** 注册新账号：校验两次密码一致 → 调 register → 注册即登录（随后会自动触发首次引导）。 */
+/** 发送邮箱验证码（带 60s 倒计时防连点）。 */
+async function sendCode() {
+  error.value = ''
+  const e = email.value.trim()
+  if (!e) { error.value = '请先填邮箱'; return }
+  if (codeCooldown.value > 0 || sendingCode.value) return
+  sendingCode.value = true
+  try {
+    await registerRequestCode(HS, e)
+    toast('验证码已发送', `请查收 ${e}（含垃圾箱）`)
+    // 启动 60s 倒计时
+    codeCooldown.value = 60
+    const t = setInterval(() => {
+      codeCooldown.value -= 1
+      if (codeCooldown.value <= 0) clearInterval(t)
+    }, 1000)
+  } catch (err: any) {
+    error.value = err?.message || '发送验证码失败'
+  } finally {
+    sendingCode.value = false
+  }
+}
+
+/** 注册：校验 → 验码建号 → 用同一套用户名/密码登录（随后自动触发首次引导）。 */
 async function doRegister() {
   error.value = ''
   const u = user.value.trim()
+  const e = email.value.trim()
+  if (!e) { error.value = '请填邮箱'; return }
+  if (!emailCode.value.trim()) { error.value = '请填邮箱验证码'; return }
   if (!u || !password.value) { error.value = '请填用户名和密码'; return }
+  if (password.value.length < 8) { error.value = '密码至少 8 位'; return }
   if (password.value !== password2.value) { error.value = '两次输入的密码不一致'; return }
   loading.value = true
   try {
-    await afterLogin(await register(HS, u, password.value))
-  } catch (e: any) {
-    error.value = e?.message || String(e)
+    // 1) 验码 + 建号（走 cosmac 后端）
+    await registerVerify(HS, { email: e, code: emailCode.value.trim(), username: u, password: password.value })
+    // 2) 用刚注册的账号登录，建立会话（复用正常登录流程 → 触发首次引导）
+    await afterLogin(await login(HS, u, password.value))
+  } catch (err: any) {
+    error.value = err?.message || String(err)
   } finally {
     loading.value = false
   }
 }
 
-/** 切换登录/注册，清掉上次的错误和确认密码 */
+/** 切换登录/注册，清掉上次的错误和注册相关字段 */
 function switchAuthMode(m: 'login' | 'register') {
   authMode.value = m
   error.value = ''
   password2.value = ''
+  emailCode.value = ''
 }
 
 // ── Discord 化：反应 / 回复 / 消息分组 ──
@@ -1019,8 +1055,18 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
         <button class="auth-tab" :class="{ active: authMode === 'login' }" @click="switchAuthMode('login')">登录</button>
         <button class="auth-tab" :class="{ active: authMode === 'register' }" @click="switchAuthMode('register')">注册</button>
       </div>
+      <!-- 注册时：邮箱 + 发送验证码 + 验证码 -->
+      <template v-if="authMode === 'register'">
+        <div class="auth-code-row">
+          <input v-model="email" type="email" placeholder="邮箱" />
+          <button class="auth-code-btn" :disabled="codeCooldown > 0 || sendingCode || !email.trim()" @click="sendCode">
+            {{ codeCooldown > 0 ? `${codeCooldown}s` : (sendingCode ? '发送中…' : '发送验证码') }}
+          </button>
+        </div>
+        <input v-model="emailCode" placeholder="邮箱验证码" @keyup.enter="doRegister" />
+      </template>
       <input v-model="user" placeholder="用户名" />
-      <input v-model="password" type="password" placeholder="密码"
+      <input v-model="password" type="password" :placeholder="authMode === 'register' ? '密码（至少 8 位）' : '密码'"
              @keyup.enter="authMode === 'login' ? doLogin() : doRegister()" />
       <!-- 注册时多一个确认密码 -->
       <input v-if="authMode === 'register'" v-model="password2" type="password" placeholder="确认密码"
@@ -1848,6 +1894,11 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 .auth-tabs { display: flex; gap: 4px; padding: 3px; background: var(--bg, #f1efe9); border: 1px solid var(--border); border-radius: 10px; }
 .auth-tab { flex: 1; padding: 8px; border: 0; background: transparent; color: var(--text-3); font-size: 14px; font-weight: 600; border-radius: 8px; cursor: pointer; }
 .auth-tab.active { background: #fff; color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+/* 注册：邮箱 + 发送验证码 一行 */
+.auth-code-row { display: flex; gap: 8px; }
+.auth-code-row input { flex: 1; min-width: 0; }
+.auth-code-btn { flex-shrink: 0; padding: 0 12px; border: 1px solid var(--border); background: var(--bg-panel, #fff); color: var(--accent); font-size: 13px; font-weight: 600; border-radius: 10px; cursor: pointer; white-space: nowrap; }
+.auth-code-btn:disabled { opacity: .5; cursor: default; color: var(--text-3); }
 .auth-switch { color: var(--text-3); font-size: 13px; text-align: center; margin: 0; }
 .auth-switch a { color: var(--accent); cursor: pointer; font-weight: 600; }
 .auth-switch a:hover { text-decoration: underline; }
