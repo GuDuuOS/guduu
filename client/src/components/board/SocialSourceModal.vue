@@ -31,7 +31,7 @@
               <label class="ssm-sw">
                 <input type="checkbox" v-model="s.enabled" /> 启用
               </label>
-              <span v-if="s.mode === 'api' && s.credName" class="ssm-meta">凭据名 {{ s.credName }}</span>
+              <span v-if="s.mode === 'api' && paramsSummary(s)" class="ssm-meta">{{ paramsSummary(s) }}</span>
               <span v-if="s.mode === 'crawl' && s.workflow" class="ssm-meta">工作流 {{ s.workflow }}</span>
               <span class="ssm-meta">每 {{ s.intervalH ?? 6 }}h</span>
               <span class="ssm-spacer" />
@@ -53,36 +53,71 @@
               </select>
             </label>
             <label class="ssm-field">
-              <span>账号 / 主页 URL / UID</span>
-              <input v-model="nAccount" placeholder="如 @anqistudio 或主页链接" @keyup.enter="doAdd" />
+              <span>备注名（人看的标签）</span>
+              <input v-model="nAccount" placeholder="如 安其影视 · YouTube" @keyup.enter="doAdd" />
             </label>
             <label class="ssm-field">
               <span>取数模式</span>
               <select v-model="nMode">
-                <option value="api">官方 API</option>
-                <option value="crawl">AI 爬取（工作流）</option>
+                <option value="api" :disabled="!spec.supported">官方 API{{ spec.supported ? '' : '（本平台不可用）' }}</option>
+                <option value="crawl">AI 爬取（N8N / Coze 工作流）</option>
               </select>
-            </label>
-            <label v-if="nMode === 'api'" class="ssm-field">
-              <span>凭据名（服务端 env）</span>
-              <input v-model="nCred" placeholder="如 YOUTUBE_API（只填名，不填 key）" @keyup.enter="doAdd" />
-            </label>
-            <label v-else class="ssm-field">
-              <span>工作流连接器 slug（N8N / Coze）</span>
-              <input v-model="nWorkflow" placeholder="管理后台·工作流面板里建好的连接器 slug" @keyup.enter="doAdd" />
             </label>
             <label class="ssm-field">
               <span>同步间隔（小时）</span>
               <input v-model.number="nInterval" type="number" min="1" max="168" />
             </label>
           </div>
-          <button class="ssm-addbtn" :disabled="!nAccount.trim()" @click="doAdd">添加数据源</button>
+
+          <!-- 官方 API 模式：按所选平台显示**对应**的认证要求（每个平台都不同）-->
+          <template v-if="nMode === 'api'">
+            <div v-if="!spec.supported" class="ssm-warn">
+              ⚠️ <b>{{ platformLabel(nPlatform) }}</b> 没有可用的官方公开指标 API。{{ spec.note }}
+              请把「取数模式」切到 <b>AI 爬取</b>。
+            </div>
+            <div v-else class="ssm-spec">
+              <div class="ssm-spec-h">🔑 {{ platformLabel(nPlatform) }} 官方 API · 接入要求</div>
+              <div class="ssm-spec-diff">门槛：{{ spec.difficulty }}<span v-if="spec.note"> · {{ spec.note }}</span></div>
+              <!-- 1) 服务端密钥：只提示该配哪个 env 名，前端不填值 -->
+              <div class="ssm-spec-block">
+                <div class="ssm-spec-cap">① 服务端 env 配密钥（运维做，前端不碰真值）</div>
+                <div v-for="ev in spec.envVars" :key="ev.name" class="ssm-env">
+                  <code>{{ ev.name }}</code><span class="ssm-env-lbl">{{ ev.label }}</span>
+                </div>
+              </div>
+              <!-- 2) 非密参数：因平台而异，存进配置 -->
+              <div class="ssm-spec-block">
+                <div class="ssm-spec-cap">② 账号定位参数（存配置）</div>
+                <label v-for="f in spec.params" :key="f.key" class="ssm-field">
+                  <span>{{ f.label }}</span>
+                  <input v-model="nParams[f.key]" :placeholder="f.placeholder" @keyup.enter="doAdd" />
+                </label>
+              </div>
+              <a v-if="spec.docUrl" class="ssm-doc" :href="spec.docUrl" target="_blank" rel="noopener">📖 官方文档</a>
+            </div>
+          </template>
+
+          <!-- AI 爬取模式：引用工作流连接器 slug -->
+          <template v-else>
+            <div class="ssm-spec">
+              <label class="ssm-field">
+                <span>工作流连接器 slug（N8N / Coze）</span>
+                <input v-model="nWorkflow" placeholder="管理后台·工作流面板里建好的连接器 slug" @keyup.enter="doAdd" />
+              </label>
+              <div class="ssm-spec-diff">
+                先在 <b>管理后台 · 工作流面板</b> 建连接器（N8N 选 Webhook、Coze 选 Coze；URL+密钥进 env），这里填它的 slug。
+              </div>
+            </div>
+          </template>
+
+          <button class="ssm-addbtn" :disabled="!canAdd" @click="doAdd">添加数据源</button>
         </div>
 
         <div class="ssm-foot">
           <span class="ssm-save" :class="saveState">{{ saveHint }}</span>
           <span class="ssm-note">
-            凭据 key/token 永不存这里——只填凭据名，真值放服务端 env <code>COSMAC_SOCIAL_*</code>。真实采集为后端 P2 项。
+            密钥 key/token 永不存这里——官方 API 的密钥按平台固定的 env 名配在服务端 <code>COSMAC_SOCIAL_*</code>，
+            爬取的 URL/密钥进工作流面板。真实采集为后端 P2 项。
           </span>
         </div>
       </div>
@@ -91,12 +126,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, reactive, computed, watch } from 'vue'
 import {
   useSocialSources,
   SOCIAL_PLATFORMS,
   platformLabel,
   platformIcon,
+  apiSpecOf,
   type SocialMode,
   type SocialSource,
 } from '@/composables/useSocialSources'
@@ -109,23 +145,53 @@ const {
 const nPlatform = ref(SOCIAL_PLATFORMS[0].key)
 const nAccount = ref('')
 const nMode = ref<SocialMode>('api')
-const nCred = ref('')
 const nWorkflow = ref('')
 const nInterval = ref(6)
+// 官方 API 模式的各平台「非密参数」临时输入（键 = spec.params[].key，因平台而异）
+const nParams = reactive<Record<string, string>>({})
+
+// 当前所选平台的 API 规格（决定显示哪些字段 / 是否可用官方 API）
+const spec = computed(() => apiSpecOf(nPlatform.value))
+
+// 切平台/切模式时清空残留的参数输入，避免上一个平台的字段串味
+watch([nPlatform, nMode], () => { for (const k of Object.keys(nParams)) delete nParams[k] })
+// 平台不支持官方 API 时，自动把模式切到爬取（避免停在不可用状态）
+watch(spec, (s) => { if (nMode.value === 'api' && !s.supported) nMode.value = 'crawl' })
+
+// 能否添加：要有备注名；API 模式平台须支持；爬取模式须填了连接器 slug
+const canAdd = computed(() => {
+  if (!nAccount.value.trim()) return false
+  if (nMode.value === 'api') return spec.value.supported
+  return !!nWorkflow.value.trim()
+})
 
 function doAdd() {
-  if (!nAccount.value.trim()) return
+  if (!canAdd.value) return
+  const apiParams: Record<string, string> = {}
+  if (nMode.value === 'api') {
+    for (const f of spec.value.params) {
+      const v = (nParams[f.key] || '').trim()
+      if (v) apiParams[f.key] = v
+    }
+  }
   addSource({
     platform: nPlatform.value,
     account: nAccount.value,
     mode: nMode.value,
-    credName: nMode.value === 'api' ? nCred.value : undefined,
+    apiParams: nMode.value === 'api' ? apiParams : undefined,
     workflow: nMode.value === 'crawl' ? nWorkflow.value : undefined,
     intervalH: nInterval.value,
   })
   nAccount.value = ''
-  nCred.value = ''
   nWorkflow.value = ''
+  for (const k of Object.keys(nParams)) delete nParams[k]
+}
+
+/** 列表行：把 api 参数压成一行摘要（如 channelId=UCxxx · username=foo）*/
+function paramsSummary(s: SocialSource): string {
+  const p = s.apiParams || {}
+  const parts = Object.entries(p).map(([k, v]) => `${k}=${v}`)
+  return parts.join(' · ')
 }
 
 // P1：采集器未接，点「立即同步」先提示。P2 改成调后端触发一次采集。
@@ -188,6 +254,20 @@ const saveHint = computed(() => ({
 .ssm-field > span { font-size: 11px; color: var(--text-3); }
 .ssm-field input, .ssm-field select { width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-input, var(--bg-panel)); color: var(--text); font-size: 13px; }
 .ssm-field input:focus, .ssm-field select:focus { outline: none; border-color: var(--accent); }
+/* 官方 API 规格区 / 爬取区 */
+.ssm-spec { margin-top: 12px; border: 1px solid var(--border); border-radius: 9px; padding: 11px 12px; background: var(--bg-panel); }
+.ssm-spec-h { font-size: 12px; font-weight: var(--fw-bold); color: var(--text); margin-bottom: 4px; }
+.ssm-spec-diff { font-size: 11px; color: var(--text-3); line-height: 1.6; margin-bottom: 8px; }
+.ssm-spec-block { margin-top: 8px; }
+.ssm-spec-cap { font-size: 11px; color: var(--text-2); font-weight: var(--fw-bold); margin-bottom: 6px; }
+.ssm-spec-block .ssm-field { margin-top: 8px; }
+.ssm-env { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap; }
+.ssm-env code { font-family: var(--font-mono, monospace); font-size: 11px; background: var(--bg-hover); border: 1px solid var(--border); padding: 1px 6px; border-radius: 5px; color: var(--text); }
+.ssm-env-lbl { font-size: 11px; color: var(--text-3); }
+.ssm-doc { display: inline-block; margin-top: 8px; font-size: 11px; color: var(--accent); text-decoration: none; }
+.ssm-doc:hover { text-decoration: underline; }
+/* 平台无官方 API 的警示 */
+.ssm-warn { margin-top: 12px; border: 1px solid color-mix(in srgb, #b58932 45%, transparent); background: color-mix(in srgb, #b58932 10%, transparent); border-radius: 9px; padding: 10px 12px; font-size: 12px; color: var(--text-2); line-height: 1.6; }
 .ssm-addbtn { width: 100%; margin-top: 12px; padding: 9px; border: none; border-radius: 8px; background: var(--accent); color: #fff; font-size: 13px; font-weight: var(--fw-bold); cursor: pointer; }
 .ssm-addbtn:disabled { opacity: .5; cursor: not-allowed; }
 

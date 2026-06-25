@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-06-25 — 社媒数据源「官方 API」按平台分别认证（修一刀切）
+- 负责人指出:官方 API 不能用一个笼统「凭据名」字段——每个平台认证/要填的东西都不同。属实,之前是占位错误。
+- 重做:加 `SOCIAL_API_SPECS` 准确规格表(每平台:是否真有可用公开指标 API / 申请门槛 / 该配哪些服务端 env 密钥 / 哪些非密定位参数 / 官方文档)。
+  - YouTube=API Key+频道ID(门槛低);X=Bearer Token(付费)+用户名;Instagram=Graph长期令牌+商业号UserID(高门槛,个人号无API);Facebook=主页令牌+PageID;Threads=令牌+UserID。
+  - TikTok/抖音/B站/微博/小红书=**无可用官方公开指标 API**→标记 supported:false,弹窗提示「请用爬取」,并自动把模式切到爬取。
+- 弹窗按所选平台**动态渲染**:支持的平台显示「①服务端 env 配哪个密钥(前端不碰真值)+②非密参数输入」;不支持的显示警示。schema 把 `credName` 换成 `apiParams`(各平台非密参数)。
+- 验证:`npm run build`(产物 `index-I78If7ok.js`)。纯前端,**发 dist**。
+
 ## 2026-06-25 — 社媒数据源 P1 微调：海外平台 + N8N/Coze 接法说明
 - 平台列表海外优先:加 Instagram/TikTok/Facebook/Threads(YouTube/X 已有),国内(抖音/B站/小红书/微博)保留在后。
 - 负责人要用 N8N/Coze 对接爬取。安全决策:**不在 social_sources 里直接粘 webhook URL**(URL/密钥含 token,会泄进 Matrix state event)——按铁律走「管理后台·工作流面板」建 N8N(webhook 类型)/Coze 连接器(URL+密钥进服务端 env),这里爬取模式只引用连接器 slug。弹窗加了指向工作流面板的醒目说明 + 字段改「连接器 slug」。
