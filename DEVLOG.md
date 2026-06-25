@@ -7,6 +7,13 @@
 
 ---
 
+## 2026-06-25 — 入驻模板 P2：引导接后台模板 + 人设真生效
+- 引导从写死模板改成**读后台** `cosmac.onboarding_templates`（getOnboardingTemplates，过滤已上架）；后台没配则回退内置 ONBOARDING_TEMPLATES。模板卡显示「付费」角标(tier≠free)。
+- **修人设没生效**：创建时不再写全局 setAiConfig(管理员级、普通用户静默失败)，改成给**每个频道**写 `channel_config.persona.prompt`(=人设+RULE)。bot 的 `_group_context` 读它→在该工作区以此人设回应，**房间级、用户自己有权限写→普通用户真生效**。
+- 已知机制(探明)：bot `_group_context(room_id)` 读 `cosmac.channel_config.persona`，agentSlug 绑全局智能体(人设+技能+模型) 或 prompt 自定义人设。我们走 prompt 路径(人设+RULE)。
+- **留 P2b**：模板的模型/技能/知识库/默认工作流绑定（要写 cosmac DB 或建全局智能体）;tier 门控强制(现在只显示角标不拦截)。
+- 验证:`npm run build`(产物 `index-BYejdJSy.js`)+ 隔离测试页确认模板加载/选择/流程正常。引导真建需新号眼验。纯前端,**发 dist**。
+
 ## 2026-06-25 — 入驻模板体系 P1：后台「入驻模板」管理页 + 存储
 - 方向(负责人定):后台 Admin 定义一组「入驻模板/方案」,前台注册引导让用户选一个再微调。每个模板打包:模型/AI人设/基础RULE/技能(从技能库选)/预置知识库文档/初始频道/默认工作流/**所需会员等级**(免费/付费,接现有会员+门控)。
 - **P1(本次)**:Admin 加「入驻模板」页(增删改查,照智能体页套路),全字段表单(含技能/工作流多选、知识库文档增删、tier 下拉);存控制室 state event `cosmac.onboarding_templates`(client.ts get/setOnboardingTemplates)。CLAUDE.md 存储表已登记。

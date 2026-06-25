@@ -22,10 +22,10 @@
       <footer class="onb-foot">
         <!-- ① 行业模板 -->
         <div v-if="step === 'template'" class="onb-tpls">
-          <button v-for="t in ONBOARDING_TEMPLATES" :key="t.key" class="onb-tpl" @click="pickTemplate(t.key)">
+          <button v-for="t in templates" :key="t.key" class="onb-tpl" @click="pickTemplate(t.key)">
             <span class="onb-tpl-ic">{{ t.icon }}</span>
             <span class="onb-tpl-main">
-              <span class="onb-tpl-label">{{ t.label }}</span>
+              <span class="onb-tpl-label">{{ t.label }}<span v-if="t.paid" class="onb-tpl-paid">付费</span></span>
               <span class="onb-tpl-desc">{{ t.desc }}</span>
             </span>
           </button>
@@ -33,7 +33,7 @@
 
         <!-- ② 工作区名 -->
         <form v-else-if="step === 'name'" class="onb-row" @submit.prevent="onName">
-          <input v-model="nameInput" class="onb-input" :placeholder="tpl.workspacePlaceholder" autofocus />
+          <input v-model="nameInput" class="onb-input" placeholder="给工作区起个名字" autofocus />
           <button class="onb-send" :disabled="!nameInput.trim()">下一步 →</button>
         </form>
 
@@ -80,19 +80,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, watch } from 'vue'
+import { ref, nextTick, watch } from 'vue'
 import { useOnboarding } from '@/composables/useOnboarding'
-import { ONBOARDING_TEMPLATES, templateOf } from '@/data/onboardingTemplates'
 
 const emit = defineEmits<{ (e: 'done', spaceId: string): void; (e: 'skip'): void }>()
 
 const {
-  visible, step, messages, busy, error, answers,
+  visible, step, messages, busy, error, answers, templates,
   pickTemplate: pick, submitName, addChannel, removeChannel, confirmChannels,
   submitPersona, goStep, runCreate, skip,
 } = useOnboarding()
-
-const tpl = computed(() => templateOf(answers.templateKey))
 
 // 各步骤输入
 const nameInput = ref('')
@@ -162,6 +159,7 @@ watch(messages, () => { nextTick(() => { if (scroll.value) scroll.value.scrollTo
 .onb-tpl-ic { font-size: 20px; }
 .onb-tpl-main { display: flex; flex-direction: column; min-width: 0; }
 .onb-tpl-label { font-size: 13px; font-weight: 700; color: var(--text); }
+.onb-tpl-paid { margin-left: 6px; font-size: 10px; font-weight: 700; color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 0 6px; vertical-align: middle; }
 .onb-tpl-desc { font-size: 11px; color: var(--text-3); }
 
 .onb-chans { display: flex; flex-direction: column; gap: 10px; }
