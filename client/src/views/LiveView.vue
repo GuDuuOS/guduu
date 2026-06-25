@@ -667,8 +667,14 @@ function refresh() {
 }
 
 /** 引导完成：刷新工作区列表 + 切到新建的工作区 + 回到数据看板。 */
-function onOnboardingDone(spaceId: string) {
-  refresh()
+async function onOnboardingDone(spaceId: string) {
+  // 新建的 Space 可能还没 sync 进本地房间列表；轮询刷新几次直到它出现，否则
+  // activeSpaceName 会回退到租户默认名（"安其影视"），界面看着像没改成自己的工作区。
+  for (let i = 0; i < 12; i++) {
+    refresh()
+    if (!spaceId || spaces.value.some((s) => s.id === spaceId)) break
+    await new Promise((r) => setTimeout(r, 300))
+  }
   if (spaceId) { activeSpace.value = spaceId; spaceChildIds.value = roomIdsInSpace(spaceId) }
   openBoard()
   toast('工作台已就绪', '欢迎使用 CosMac Star')
@@ -1154,7 +1160,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
             <circle cx="3" cy="15" r="1.6" /><circle cx="9" cy="15" r="1.6" /><circle cx="15" cy="15" r="1.6" />
           </svg>
           <img :src="logoUrl" alt="" class="logo" />
-          <span class="product-name">CosMac Star<span class="product-x">X</span>{{ tenant.topbarSuffix }}</span>
+          <span class="product-name">CosMac Star<span class="product-x">X</span>{{ activeSpaceName }}</span>
         </button>
         <div v-if="appMenuOpen" class="tas-pop" @click.stop>
           <button class="tas-item active"><span class="tas-ic accent">▣</span><span class="tas-label">Channels</span><span class="tas-check">✓</span></button>
@@ -1357,7 +1363,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
           </div>
           <div class="board-scroll">
             <div class="canvas">
-              <div class="ctitle">{{ dash.brand }}</div>
+              <div class="ctitle">{{ activeSpaceName }}</div>
               <div class="csub">// 实时运营画布 · 由 CosMac Star 自动维护</div>
               <!-- 一句话下达目标：真的发给中枢 AI（复用 aiSend），不再是 mock 卡片 -->
               <div class="board-ask">
@@ -1704,7 +1710,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
             </div>
             <div class="ai-cw-sec">
               <div class="ai-cw-proj-h">
-                <span class="ai-cw-proj-nm">安其影视 · 本周专班</span>
+                <span class="ai-cw-proj-nm">{{ activeSpaceName }} · 本周专班</span>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" /></svg>
               </div>
               <ul class="ai-cw-files">
