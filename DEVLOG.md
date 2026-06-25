@@ -7,6 +7,11 @@
 
 ---
 
+## 2026-06-25 — 社媒数据源 P1 微调：海外平台 + N8N/Coze 接法说明
+- 平台列表海外优先:加 Instagram/TikTok/Facebook/Threads(YouTube/X 已有),国内(抖音/B站/小红书/微博)保留在后。
+- 负责人要用 N8N/Coze 对接爬取。安全决策:**不在 social_sources 里直接粘 webhook URL**(URL/密钥含 token,会泄进 Matrix state event)——按铁律走「管理后台·工作流面板」建 N8N(webhook 类型)/Coze 连接器(URL+密钥进服务端 env),这里爬取模式只引用连接器 slug。弹窗加了指向工作流面板的醒目说明 + 字段改「连接器 slug」。
+- 验证:`npm run build`(产物 `index-CCs2fl5d.js`)。纯前端,**发 dist**。
+
 ## 2026-06-25 — 数据看板「接入社媒数据源」P1（前端配置 UI）
 - 需求:看板社媒数据要接真实源——配各平台账号 API,或挂 AI Agent 爬。要按钮 + 逻辑设计。
 - **设计**(写进 CLAUDE.md 存储表):两种取数模式 api(官方平台 API)/crawl(AI Agent 走模块3 工作流爬公开主页);与工作流连接器同构——定义存控制室·按工作区 state event `cosmac.social_sources`,凭据只放「名」、真值进服务端 env `COSMAC_SOCIAL_*`;取回指标进 cosmac DB `cosmac_social_metric`。数据流:配置+env凭据 → bot 采集器(定时/手动) → API直调 或 run_workflow → 归一化写 DB → 新 REST 端点回看板。

@@ -11,7 +11,11 @@
       <div class="ssm-body">
         <p class="ssm-intro">
           配置各平台账号后，中枢 AI 采集器会按设定周期取「粉丝 / 播放 / 互动」回填到数据看板。
-          <b>官方 API</b> 准确稳定（需平台开发者资质）；<b>AI 爬取</b> 走工作流抓公开主页（无需授权，稳定性较弱）。
+          <b>官方 API</b> 准确稳定（需平台开发者资质）；<b>AI 爬取</b> 走 N8N / Coze 工作流抓公开主页（无需授权，稳定性较弱）。
+        </p>
+        <p class="ssm-intro ssm-intro-tip">
+          🔗 <b>用 N8N / Coze 对接爬取</b>：先去 <b>管理后台 · 工作流面板</b> 新建连接器（N8N 选「Webhook」类型、填 webhook URL；Coze 选「Coze」），
+          URL 和密钥都存在服务端、安全。回到这里「AI 爬取」模式只需填那个连接器的 <b>slug</b> 即可。
         </p>
 
         <!-- 已配置列表 -->
@@ -64,8 +68,8 @@
               <input v-model="nCred" placeholder="如 YOUTUBE_API（只填名，不填 key）" @keyup.enter="doAdd" />
             </label>
             <label v-else class="ssm-field">
-              <span>抓取工作流名</span>
-              <input v-model="nWorkflow" placeholder="cosmac.workflows 里的连接器名" @keyup.enter="doAdd" />
+              <span>工作流连接器 slug（N8N / Coze）</span>
+              <input v-model="nWorkflow" placeholder="管理后台·工作流面板里建好的连接器 slug" @keyup.enter="doAdd" />
             </label>
             <label class="ssm-field">
               <span>同步间隔（小时）</span>
@@ -155,7 +159,8 @@ const saveHint = computed(() => ({
 .ssm-x { margin-left: auto; border: none; background: transparent; color: var(--text-3); font-size: 22px; line-height: 1; cursor: pointer; border-radius: 6px; width: 28px; height: 28px; }
 .ssm-x:hover { background: var(--bg-hover); color: var(--text); }
 .ssm-body { padding: 16px 18px; overflow-y: auto; }
-.ssm-intro { font-size: 12px; color: var(--text-2); line-height: 1.7; margin: 0 0 14px; }
+.ssm-intro { font-size: 12px; color: var(--text-2); line-height: 1.7; margin: 0 0 10px; }
+.ssm-intro-tip { background: var(--bg); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 8px; padding: 9px 11px; margin-bottom: 14px; }
 
 .ssm-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
 .ssm-row { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--bg); }

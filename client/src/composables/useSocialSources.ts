@@ -22,7 +22,7 @@ export interface SocialSource {
   account: string         // 账号名 / 主页 URL / UID（用于定位要抓哪个号）
   mode: SocialMode        // 取数模式：官方 API / AI 爬取
   credName?: string       // 'api' 模式：服务端 env 里的凭据名（如 YOUTUBE_API），只放名不放值
-  workflow?: string       // 'crawl' 模式：用哪个工作流连接器去抓（对应 cosmac.workflows 里的 name）
+  workflow?: string       // 'crawl' 模式：抓取走哪个工作流连接器的 slug（在管理后台·工作流面板配 N8N(webhook)/Coze，URL+密钥进 env，这里只引用 slug）
   intervalH?: number      // 轮询间隔（小时），后端采集器按此定时
   enabled: boolean        // 是否启用采集
   // ↓ 运行态：后端回写，前端只读（P2 起才有值）
@@ -31,14 +31,21 @@ export interface SocialSource {
   lastError?: string
 }
 
-/** 支持的平台目录（前端展示用；后端适配器按 key 实现）。新增平台前后端各加一条。 */
+/** 支持的平台目录（前端展示用；后端适配器按 key 实现）。新增平台前后端各加一条。
+ *  海外版以国际平台为主，排前面；国内平台保留在后。 */
 export const SOCIAL_PLATFORMS: { key: string; label: string; icon: string }[] = [
+  // —— 国际平台（海外主力）——
+  { key: 'youtube', label: 'YouTube', icon: '▶️' },
+  { key: 'x', label: 'X / Twitter', icon: '✖️' },
+  { key: 'instagram', label: 'Instagram', icon: '📸' },
+  { key: 'tiktok', label: 'TikTok', icon: '🎶' },
+  { key: 'facebook', label: 'Facebook', icon: '👍' },
+  { key: 'threads', label: 'Threads', icon: '🧵' },
+  // —— 国内平台 ——
   { key: 'douyin', label: '抖音', icon: '🎵' },
   { key: 'bilibili', label: 'B站', icon: '📺' },
-  { key: 'youtube', label: 'YouTube', icon: '▶️' },
   { key: 'xiaohongshu', label: '小红书', icon: '📕' },
   { key: 'weibo', label: '微博', icon: '🔶' },
-  { key: 'x', label: 'X / Twitter', icon: '✖️' },
 ]
 export function platformLabel(key: string): string {
   return SOCIAL_PLATFORMS.find((p) => p.key === key)?.label || key
