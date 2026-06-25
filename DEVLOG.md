@@ -7,9 +7,10 @@
 
 ---
 
-## 2026-06-25 — 登录/注册卡片加宽一倍
-- 鉴权卡片 `.login-card` 宽 320→640px（+ max-width:92vw 防小屏溢出，padding 略增）。纯 CSS。
-- 验证：build(`index-CHaDi6jG.js`)+ preview 截图。纯前端，**发 dist**。
+## 2026-06-25 — 登录/注册卡片加宽一倍 + 三模式等高
+- 鉴权卡片 `.login-card` 宽 320→640px（+ max-width:92vw 防小屏溢出，padding 略增）。
+- 三模式等高：加 `min-height:502px`(以最高的注册为准) + `justify-content:center`(内容垂直居中) + box-sizing。登录/注册/找回切换时卡片不再跳高（实测都 502px）。纯 CSS。
+- 验证：build(`index-BQjwQXvV.js`)+ preview 量高度三模式一致。纯前端，**发 dist**。
 
 ## 2026-06-25 — 找回密码（忘记密码）
 - 需求:登录页加「忘记密码」→ 发邮箱验证码 → 验码后输新密码(带确认)。
