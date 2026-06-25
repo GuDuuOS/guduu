@@ -7,6 +7,11 @@
 
 ---
 
+## 2026-06-26 — 代码审查·收尾（引导诚实反馈 + 脏数据校验）
+- **引导不再"假装搭好了"**:useOnboarding.runCreate 里频道是逐个建、失败被吞的;原来无论建成几个都提示"🎉搭好了"。改成按实际结果反馈——全建失败→明确告知"频道没建上、进去手动补",部分失败→报"建成 X/N 个"。工作区本身建成才进入。
+- **useCustomAssets 加载逐项校验**:localStorage 可被手改/旧版遗留,sanitizeAsset 规范化每条(cat 白名单/字段强转字符串/补 id),脏记录不再渗进 UI。
+- 验证:前端 build 通过 + preview 登录页正常渲染。纯前端,**发 dist**。
+
 ## 2026-06-26 — 代码审查·第三批（登出状态泄露/竞态/并发守卫）
 - **登出单例状态泄露(systemic·共享浏览器)**:很多 composable 用模块级单例(CLI 历史/频道配置/插件/自定义资产)，doLogout 原来只清几个 ref、不 reload → 换人登录能看到上个人的数据。改成 doLogout 清掉 customAssets 本机存储(`clearCustomAssetsStorage`)再**整页 reload**，一次全清(含未来新增的任何单例)。
 - **debounce 换工作区数据串台**:useSocialSources/useBoardSources 的 setSpace 切 space 前没取消在途防抖保存，persist 用执行时的 spaceId → 旧 space 内容被写进新 space。setSpace 顶部 clearTimeout 修掉。

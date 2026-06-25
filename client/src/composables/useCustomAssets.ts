@@ -70,6 +70,9 @@ export const assetCatMeta = (cat: AssetCat) =>
 /* ===== 持久化 ===== */
 const STORE_KEY = 'guduu.customAssets.v1'
 
+// 自增 id 序列（放在 load() 之前声明：load 在模块初始化时就会跑，引用 seq 不能落在 TDZ 里）。
+let seq = 0
+
 const SEED: CustomAsset[] = [
   {
     id: 'seed-agent-1',
@@ -99,13 +102,32 @@ const SEED: CustomAsset[] = [
   }
 ]
 
+const VALID_CATS: AssetCat[] = ['agent', 'skill', 'prompt', 'workflow']
+
+/** 把一条可能脏（localStorage 可被手改/旧版本遗留）的记录规范成合法 CustomAsset；非法返回 null。 */
+function sanitizeAsset(a: any): CustomAsset | null {
+  if (!a || typeof a !== 'object') return null
+  const cat: AssetCat = VALID_CATS.includes(a.cat) ? a.cat : 'prompt'
+  const id = typeof a.id === 'string' && a.id ? a.id : `${cat}-${Date.now()}-${++seq}`
+  return {
+    id,
+    cat,
+    name: String(a.name ?? ''),
+    desc: String(a.desc ?? ''),
+    body: String(a.body ?? ''),
+    tag: typeof a.tag === 'string' ? a.tag : undefined,
+    enabled: a.enabled !== false,
+  }
+}
+
 function load(): CustomAsset[] {
   try {
     const raw = localStorage.getItem(STORE_KEY)
     if (!raw) return SEED.map((a) => ({ ...a }))
-    const parsed = JSON.parse(raw) as CustomAsset[]
+    const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return SEED.map((a) => ({ ...a }))
-    return parsed
+    // 逐项校验+规范化：脏记录（字段类型错/缺 id）不会渗进 UI 导致渲染异常。
+    return parsed.map(sanitizeAsset).filter((a): a is CustomAsset => a !== null)
   } catch {
     return SEED.map((a) => ({ ...a }))
   }
@@ -126,7 +148,6 @@ watch(
   { deep: true }
 )
 
-let seq = 0
 const newId = (cat: AssetCat) => `${cat}-${Date.now()}-${++seq}`
 
 /**

@@ -261,7 +261,16 @@ export function useOnboarding() {
         // 5) 标记已引导
         try { await setOnboarded(true) } catch { /* 标记失败也无妨，下次最多再问一次 */ }
         step.value = 'done'
-        ai('🎉 搭好了！正在把你带进新工作区…')
+        // 如实反馈：用户要了 N 个频道但一个都没建成时，别假装"搭好了"。工作区已建好(sid 有效)，
+        // 故仍进入工作区，只是把频道没建上的实情说清楚，引导用户进去手动补。
+        const wantCh = answers.channels.length
+        if (wantCh > 0 && channelIds.length === 0) {
+          ai('⚠️ 工作区已创建，但频道没能建上（可能是网络或权限问题）。先带你进去，可在里面手动新建频道。')
+        } else if (channelIds.length < wantCh) {
+          ai(`✅ 工作区搭好了！${wantCh} 个频道建成了 ${channelIds.length} 个，其余可进去手动补。正在带你进入…`)
+        } else {
+          ai('🎉 搭好了！正在把你带进新工作区…')
+        }
         return sid
       } catch (e: any) {
         error.value = e?.message || '创建失败，请重试'
