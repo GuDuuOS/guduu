@@ -1416,6 +1416,68 @@ export async function setWorkflows(workflows: WorkflowDef[]): Promise<void> {
 }
 
 /* =====================================================================
+ *  管理后台 · 入驻模板（注册引导可选的「方案」）
+ *  管理员在后台定义一组模板，每个打包：模型/人设/RULE/技能/知识库/频道/工作流/所需会员等级。
+ *  前台首次引导读它、用户选一个 → 实例化成工作区（P2 做）。存控制室 state event
+ *  `cosmac.onboarding_templates`（管理员写、引导读，同 skills/agents/workflows 套路）。
+ * ===================================================================== */
+const ONBOARDING_TEMPLATES_EVENT_TYPE = 'cosmac.onboarding_templates'
+
+/** 入驻模板定义（后台配置）。 */
+export interface OnboardingTemplateDef {
+  key: string            // 稳定标识（程序引用，建后不改）
+  label: string          // 展示名（如「影视 / 内容工作室」）
+  icon: string           // emoji 图标
+  desc: string           // 一句话说明
+  model: string          // 模型 id（空 = 跟随全局 AI 配置）
+  persona: string        // AI 人设（system prompt）
+  rules: string          // 基础 RULE（平台硬约束，多行文本）
+  skillSlugs: string[]   // 绑定的技能 slug（从技能库选）
+  kbDocs: { title: string; content: string }[] // 预置知识库文档
+  channels: string[]     // 初始频道名
+  workflowSlugs: string[] // 默认工作流 slug
+  tier: string           // 所需最低会员等级 slug（free/paid/creator）
+  enabled: boolean       // 是否上架（可在引导里被选）
+}
+
+/** 读后台入驻模板列表；控制室/未配置时返回 []。 */
+export async function getOnboardingTemplates(): Promise<OnboardingTemplateDef[]> {
+  if (!mx) return []
+  const rid = await resolveControlRoom()
+  if (!rid) return []
+  try {
+    const ev = await (mx as any).getStateEvent(rid, ONBOARDING_TEMPLATES_EVENT_TYPE, '')
+    const arr = Array.isArray(ev?.templates) ? ev.templates : []
+    return arr.map((t: any) => ({
+      key: String(t?.key || ''),
+      label: String(t?.label || ''),
+      icon: String(t?.icon || '🧩'),
+      desc: String(t?.desc || ''),
+      model: String(t?.model || ''),
+      persona: String(t?.persona || ''),
+      rules: String(t?.rules || ''),
+      skillSlugs: Array.isArray(t?.skillSlugs) ? t.skillSlugs.map(String) : [],
+      kbDocs: Array.isArray(t?.kbDocs)
+        ? t.kbDocs.map((d: any) => ({ title: String(d?.title || ''), content: String(d?.content || '') }))
+        : [],
+      channels: Array.isArray(t?.channels) ? t.channels.map(String) : [],
+      workflowSlugs: Array.isArray(t?.workflowSlugs) ? t.workflowSlugs.map(String) : [],
+      tier: String(t?.tier || 'free'),
+      enabled: t?.enabled !== false,
+    })).filter((t: OnboardingTemplateDef) => t.key && t.label)
+  } catch {
+    return []
+  }
+}
+
+/** 写后台入驻模板列表（整体覆盖；需管理员）。 */
+export async function setOnboardingTemplates(templates: OnboardingTemplateDef[]): Promise<void> {
+  if (!mx) throw new Error('未登录')
+  const rid = await ensureControlRoom()
+  await (mx as any).sendStateEvent(rid, ONBOARDING_TEMPLATES_EVENT_TYPE, { templates }, '')
+}
+
+/* =====================================================================
  *  管理后台 · 会员套餐（模块4 交易系统）
  *  存储：控制室 state event `cosmac.plans`，{ plans: [{slug,name,tier,period_days,prices,enabled}] }。
  *  价格按货币存**最小单位整数(分/cent)**；前端编辑用元、保存时 ×100 取整。

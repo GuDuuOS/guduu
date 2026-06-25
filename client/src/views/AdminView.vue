@@ -27,6 +27,9 @@
         <button class="adm-mi" :class="{ active: tab === 'agents' }" @click="switchToAgents">
           <span class="adm-mi-ic">🧑‍🚀</span> 智能体
         </button>
+        <button class="adm-mi" :class="{ active: tab === 'templates' }" @click="switchToTemplates">
+          <span class="adm-mi-ic">🧰</span> 入驻模板
+        </button>
         <button class="adm-mi" :class="{ active: tab === 'rules' }" @click="switchToRules">
           <span class="adm-mi-ic">⚖️</span> 规则
         </button>
@@ -437,6 +440,136 @@
                   <button class="adm-btn ghost sm" :disabled="agSaving" @click="startEditAgent(a)">编辑</button>
                   <button class="adm-btn ghost sm" :disabled="agSaving" @click="toggleAgent(a)">{{ a.enabled ? '停用' : '启用' }}</button>
                   <button class="adm-btn ghost sm danger" :disabled="agSaving" @click="removeAgent(a)">删除</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
+
+      <!-- 入驻模板面板:管理员定义注册引导可选的「方案」(模型/人设/RULE/技能/知识库/频道/工作流/会员等级) -->
+      <template v-else-if="tab === 'templates'">
+        <header class="adm-head">
+          <div>
+            <h1 class="adm-h1">入驻模板</h1>
+            <p class="adm-hint">
+              定义注册引导里可选的「方案」· 每个打包 模型/人设/RULE/技能/知识库/初始频道/默认工作流/所需会员等级 · 前台注册时用户选一个再微调（P2 接入）
+            </p>
+          </div>
+          <div class="adm-actions">
+            <button class="adm-btn ghost" :disabled="tpLoading || tpSaving" @click="loadTemplates">
+              {{ tpLoading ? '加载中…' : '重新加载' }}
+            </button>
+            <button class="adm-btn" :disabled="tpLoading || tpSaving" @click="startAddTemplate">＋ 新建模板</button>
+          </div>
+        </header>
+
+        <div v-if="tpLoading" class="adm-center"><div class="adm-spin" /> 加载模板…</div>
+
+        <div v-else class="adm-form">
+          <!-- 编辑/新建表单 -->
+          <div v-if="tpEditing" class="adm-skill-edit">
+            <div class="adm-grid2">
+              <label class="adm-field">
+                <span>标识 key（英文/数字/-，唯一，建后不改）</span>
+                <input v-model.trim="tpForm.key" :disabled="tpForm._isEdit" placeholder="film" />
+              </label>
+              <label class="adm-field">
+                <span>所需会员等级（低于此等级的用户选不了）</span>
+                <select v-model="tpForm.tier">
+                  <option v-for="t in MEMBER_TIERS" :key="t.slug" :value="t.slug">{{ t.label }}</option>
+                </select>
+              </label>
+              <label class="adm-field">
+                <span>展示名</span>
+                <input v-model.trim="tpForm.label" placeholder="影视 / 内容工作室" />
+              </label>
+              <label class="adm-field">
+                <span>图标 emoji</span>
+                <input v-model.trim="tpForm.icon" placeholder="🎬" />
+              </label>
+            </div>
+            <label class="adm-field">
+              <span>一句话说明</span>
+              <input v-model.trim="tpForm.desc" placeholder="剧集/短视频制作、虚拟明星、粉丝运营" />
+            </label>
+            <label class="adm-field">
+              <span>模型（留空 = 跟随全局 AI 配置）</span>
+              <input v-model.trim="tpForm.model" placeholder="如 claude-opus-4-8（可留空）" />
+            </label>
+            <label class="adm-field">
+              <span>AI 人设（system prompt）</span>
+              <textarea v-model="tpForm.persona" rows="3" placeholder="你是这家影视工作室的制作中枢助手…" />
+            </label>
+            <label class="adm-field">
+              <span>基础 RULE（平台硬约束，多行）</span>
+              <textarea v-model="tpForm.rules" rows="3" placeholder="如：不得泄露内部报价；输出需符合平台规范…" />
+            </label>
+            <label class="adm-field">
+              <span>初始频道（一行一个）</span>
+              <textarea v-model="tpChannelsText" rows="3" placeholder="制作中心&#10;分镜与脚本&#10;粉丝社区" />
+            </label>
+            <div class="adm-field">
+              <span>绑定技能（勾选技能库里的技能）</span>
+              <div v-if="!skills.length" class="adm-note">技能库为空，可先去「技能库」建技能。</div>
+              <div v-else class="adm-tools">
+                <label v-for="s in skills" :key="s.slug" class="adm-tool">
+                  <input type="checkbox" :checked="tpForm.skillSlugs.includes(s.slug)"
+                    @change="toggleTplSkill(s.slug, ($event.target as HTMLInputElement).checked)" />
+                  <span class="adm-tool-l">{{ s.name || s.slug }}</span><code>{{ s.slug }}</code>
+                </label>
+              </div>
+            </div>
+            <div class="adm-field">
+              <span>默认工作流（勾选工作流连接器）</span>
+              <div v-if="!workflows.length" class="adm-note">还没有工作流连接器，可先去「工作流」建。</div>
+              <div v-else class="adm-tools">
+                <label v-for="w in workflows" :key="w.slug" class="adm-tool">
+                  <input type="checkbox" :checked="tpForm.workflowSlugs.includes(w.slug)"
+                    @change="toggleTplWorkflow(w.slug, ($event.target as HTMLInputElement).checked)" />
+                  <span class="adm-tool-l">{{ w.name || w.slug }}</span><code>{{ w.slug }}</code>
+                </label>
+              </div>
+            </div>
+            <div class="adm-field">
+              <span>预置知识库文档（每个模板的 AI 知识不同）</span>
+              <div v-for="(d, i) in tpForm.kbDocs" :key="i" class="adm-kbdoc">
+                <input v-model.trim="d.title" class="adm-kbdoc-t" placeholder="文档标题（如 平台规则与避雷）" />
+                <textarea v-model="d.content" rows="2" placeholder="文档内容…" />
+                <button class="adm-btn ghost sm danger" @click="removeTplDoc(i)">删除</button>
+              </div>
+              <button class="adm-btn ghost sm" @click="addTplDoc">＋ 加一篇文档</button>
+            </div>
+            <label class="adm-tool">
+              <input type="checkbox" v-model="tpForm.enabled" />
+              <span class="adm-tool-l">上架（注册引导里可被选）</span>
+            </label>
+            <div class="adm-actions">
+              <button class="adm-btn ghost" :disabled="tpSaving" @click="tpEditing = false">取消</button>
+              <button class="adm-btn" :disabled="tpSaving || !tpForm.key || !tpForm.label" @click="saveTemplate">
+                {{ tpSaving ? '保存中…' : '保存' }}
+              </button>
+            </div>
+          </div>
+
+          <!-- 模板列表 -->
+          <p v-if="!templates.length" class="adm-hint">还没有入驻模板。点右上「新建模板」加一个。</p>
+          <table v-else class="adm-table">
+            <thead>
+              <tr><th>标识</th><th>展示名</th><th>会员等级</th><th>模型</th><th>频道/技能</th><th>状态</th><th>操作</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="t in templates" :key="t.key">
+                <td><code>{{ t.key }}</code></td>
+                <td>{{ t.icon }} {{ t.label }}</td>
+                <td>{{ memberTierLabel(t.tier) }}</td>
+                <td>{{ t.model || '默认' }}</td>
+                <td class="adm-skill-desc">{{ t.channels.length }} 频道 · {{ t.skillSlugs.length }} 技能 · {{ t.kbDocs.length }} 文档</td>
+                <td><span class="adm-badge" :class="{ on: t.enabled }">{{ t.enabled ? '上架' : '下架' }}</span></td>
+                <td class="adm-row-actions">
+                  <button class="adm-btn ghost sm" :disabled="tpSaving" @click="startEditTemplate(t)">编辑</button>
+                  <button class="adm-btn ghost sm" :disabled="tpSaving" @click="toggleTemplate(t)">{{ t.enabled ? '下架' : '上架' }}</button>
+                  <button class="adm-btn ghost sm danger" :disabled="tpSaving" @click="removeTemplate(t)">删除</button>
                 </td>
               </tr>
             </tbody>
@@ -889,6 +1022,9 @@ import {
   setGlobalRules,
   getWorkflows,
   setWorkflows,
+  getOnboardingTemplates,
+  setOnboardingTemplates,
+  type OnboardingTemplateDef,
   getPlans,
   setPlans,
   PLAN_CURRENCIES,
@@ -920,7 +1056,7 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 const { success, warn } = useToast()
 
 // 当前管理模块：用户/频道/AI配置/技能库/智能体/规则/工作流/数据概览
-const tab = ref<'users' | 'rooms' | 'ai' | 'skills' | 'agents' | 'rules' | 'workflows' | 'gating' | 'plans' | 'overview'>('users')
+const tab = ref<'users' | 'rooms' | 'ai' | 'skills' | 'agents' | 'templates' | 'rules' | 'workflows' | 'gating' | 'plans' | 'overview'>('users')
 
 // 页面状态机：checking 校验中 / denied 无权限 / ok 已是管理员
 const state = ref<'checking' | 'denied' | 'ok'>('checking')
@@ -1400,6 +1536,129 @@ async function removeAgent(a: GlobalAgent) {
   try { await persistAgents(next, '已删除') } catch { /* 已提示 */ }
 }
 
+/* —— 入驻模板（管理员定义注册引导可选的「方案」，写控制室 state event）—— */
+const templates = ref<OnboardingTemplateDef[]>([])
+const tpLoading = ref(false)
+const tpSaving = ref(false)
+const tpEditing = ref(false)
+const tpLoaded = ref(false)
+const tpChannelsText = ref('') // 频道编辑用文本（一行一个），保存时拆成数组
+function tplDefaults(): OnboardingTemplateDef & { _isEdit: boolean } {
+  return {
+    key: '', label: '', icon: '🧩', desc: '', model: '', persona: '', rules: '',
+    skillSlugs: [], kbDocs: [], channels: [], workflowSlugs: [], tier: 'free', enabled: true, _isEdit: false,
+  }
+}
+const tpForm = reactive<OnboardingTemplateDef & { _isEdit: boolean }>(tplDefaults())
+
+function switchToTemplates() {
+  tab.value = 'templates'
+  if (!tpLoaded.value) loadTemplates()
+  if (!skLoaded.value) loadSkills()       // 技能勾选列表
+  if (!wfLoaded.value) loadWorkflows()    // 工作流勾选列表
+}
+
+async function loadTemplates() {
+  tpLoading.value = true
+  try {
+    templates.value = await getOnboardingTemplates()
+    tpLoaded.value = true
+  } catch (e: any) {
+    warn('加载失败', e?.message || '无法读取入驻模板')
+  } finally {
+    tpLoading.value = false
+  }
+}
+
+function startAddTemplate() {
+  Object.assign(tpForm, tplDefaults())
+  tpChannelsText.value = ''
+  tpEditing.value = true
+}
+
+function startEditTemplate(t: OnboardingTemplateDef) {
+  Object.assign(tpForm, {
+    ...t,
+    skillSlugs: [...t.skillSlugs],
+    workflowSlugs: [...t.workflowSlugs],
+    channels: [...t.channels],
+    kbDocs: t.kbDocs.map((d) => ({ ...d })),
+    _isEdit: true,
+  })
+  tpChannelsText.value = t.channels.join('\n')
+  tpEditing.value = true
+}
+
+function toggleTplSkill(slug: string, on: boolean) {
+  const i = tpForm.skillSlugs.indexOf(slug)
+  if (on && i < 0) tpForm.skillSlugs.push(slug)
+  else if (!on && i >= 0) tpForm.skillSlugs.splice(i, 1)
+}
+function toggleTplWorkflow(slug: string, on: boolean) {
+  const i = tpForm.workflowSlugs.indexOf(slug)
+  if (on && i < 0) tpForm.workflowSlugs.push(slug)
+  else if (!on && i >= 0) tpForm.workflowSlugs.splice(i, 1)
+}
+function addTplDoc() { tpForm.kbDocs.push({ title: '', content: '' }) }
+function removeTplDoc(i: number) { tpForm.kbDocs.splice(i, 1) }
+
+async function persistTemplates(next: OnboardingTemplateDef[], okMsg: string) {
+  tpSaving.value = true
+  try {
+    await setOnboardingTemplates(next)
+    templates.value = next
+    success('已保存', okMsg)
+  } catch (e: any) {
+    warn('保存失败', e?.message || '无法写入控制室')
+    throw e
+  } finally {
+    tpSaving.value = false
+  }
+}
+
+async function saveTemplate() {
+  const key = tpForm.key.trim()
+  if (!key || !tpForm.label.trim()) return
+  const channels = tpChannelsText.value.split('\n').map((s) => s.trim()).filter(Boolean)
+  const kbDocs = tpForm.kbDocs
+    .map((d) => ({ title: d.title.trim(), content: d.content }))
+    .filter((d) => d.title)
+  const item: OnboardingTemplateDef = {
+    key,
+    label: tpForm.label.trim(),
+    icon: tpForm.icon.trim() || '🧩',
+    desc: tpForm.desc.trim(),
+    model: tpForm.model.trim(),
+    persona: tpForm.persona,
+    rules: tpForm.rules,
+    skillSlugs: [...tpForm.skillSlugs],
+    kbDocs,
+    channels,
+    workflowSlugs: [...tpForm.workflowSlugs],
+    tier: tpForm.tier,
+    enabled: tpForm.enabled,
+  }
+  const next = templates.value.slice()
+  const i = next.findIndex((t) => t.key === key)
+  if (i >= 0) next[i] = item
+  else next.push(item)
+  try {
+    await persistTemplates(next, '已保存模板')
+    tpEditing.value = false
+  } catch { /* 已提示 */ }
+}
+
+async function toggleTemplate(t: OnboardingTemplateDef) {
+  const next = templates.value.map((x) => (x.key === t.key ? { ...x, enabled: !x.enabled } : x))
+  try { await persistTemplates(next, t.enabled ? '已下架' : '已上架') } catch { /* 已提示 */ }
+}
+
+async function removeTemplate(t: OnboardingTemplateDef) {
+  if (!confirm(`确认删除模板「${t.label || t.key}」？`)) return
+  const next = templates.value.filter((x) => x.key !== t.key)
+  try { await persistTemplates(next, '已删除') } catch { /* 已提示 */ }
+}
+
 /* —— 规则（全局硬约束，写控制室 state event）—— */
 const rules = ref<GlobalRule[]>([])
 const ruLoading = ref(false)
@@ -1821,6 +2080,10 @@ onMounted(check)
 .adm-rule-text { flex: 1; resize: vertical; }
 .adm-rule-row .adm-btn { flex-shrink: 0; margin-top: 4px; }
 .adm-skill-desc { color: var(--text-2); max-width: 320px; }
+/* 入驻模板表单：两列网格 + 知识库文档行 */
+.adm-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.adm-kbdoc { display: grid; grid-template-columns: 1fr; gap: 6px; padding: 10px; margin-bottom: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-panel, #fff); }
+.adm-kbdoc .adm-kbdoc-t { font-weight: 600; }
 .adm-skill-edit {
   border: 1px solid var(--border);
   border-radius: 12px;
