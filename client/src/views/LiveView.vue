@@ -684,12 +684,16 @@ async function onOnboardingDone(spaceId: string) {
 }
 function onOnboardingSkip() { /* 跳过即可，已标记 onboarded */ }
 
+// 持有 onUpdate 的解绑函数：登出/卸载时调用，避免重复登录累积监听器、同一更新触发多次。
+let stopUpdates: (() => void) | null = null
+
 async function afterLogin(uid: string) {
   me.value = uid
   loggedIn.value = true
   board.value = true // 登录后第一屏 = 数据看板
   tasks.value = false
-  onUpdate(refresh)
+  if (stopUpdates) stopUpdates()   // 若是重新登录，先解绑上一次的
+  stopUpdates = onUpdate(refresh)
   try {
     aiRoom.value = await ensureBotDm()
   } catch (e) {
@@ -1083,7 +1087,10 @@ onMounted(async () => {
     loading.value = false
   }
 })
-onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onDocClick)
+  if (stopUpdates) { stopUpdates(); stopUpdates = null }
+})
 </script>
 
 <template>

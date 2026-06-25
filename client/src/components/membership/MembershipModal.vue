@@ -40,13 +40,17 @@ const currencies = computed(() => {
   return [...set]
 })
 
-/** 当前货币下、有定价的套餐。 */
+/** 当前货币下、有定价的套餐。价格做数值守卫：服务端若回字符串/null，Number() 兜底避免 NaN 比较。 */
 const shownPlans = computed(() =>
-  plans.value.filter((p) => p.prices && p.prices[currency.value] > 0))
+  plans.value.filter((p) => {
+    const cents = Number(p.prices?.[currency.value])
+    return Number.isFinite(cents) && cents > 0
+  }))
 
 function priceText(p: PayPlan): string {
-  const cents = p.prices?.[currency.value] || 0
-  return `${CUR_LABEL[currency.value] || ''}${(cents / 100).toFixed(2)}`
+  const cents = Number(p.prices?.[currency.value])
+  const safe = Number.isFinite(cents) ? cents : 0
+  return `${CUR_LABEL[currency.value] || ''}${(safe / 100).toFixed(2)}`
 }
 
 function periodText(days: number): string {

@@ -20,7 +20,7 @@
         <div class="ph">👥 人员 · 频道成员 ({{ members.length }})</div>
         <div class="members-list">
           <div v-for="m in members" :key="m.name" class="m">
-            <div class="a" :class="{ bot: m.bot }" :style="m.color ? `background:${m.color}` : undefined">
+            <div class="a" :class="{ bot: m.bot }" :style="m.color ? { background: m.color } : undefined">
               {{ m.avatar }}
             </div>
             <div v-if="m.online" class="presence" />

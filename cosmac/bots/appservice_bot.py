@@ -2283,6 +2283,13 @@ def run(config: CosmacConfig) -> None:
     bot.recover_interrupted_runs()
     # #3：预热门控策略缓存——避免"首读失败→暂用默认→付费门控被绕过"的窗口（best-effort）
     bot.gating.warm()
+    # 生产红线：manual(测试/线下确认)支付通道一旦开启，浏览器即可触发开通会员。启动时大声告警，
+    # 避免误把 COSMAC_PAY_ALLOW_MANUAL 带上生产（上线前必须关）。
+    if os.environ.get("COSMAC_PAY_ALLOW_MANUAL", "").lower() in ("1", "true", "yes"):
+        logger.warning(
+            "⚠️ COSMAC_PAY_ALLOW_MANUAL 已开启：manual 支付通道可被浏览器触发开通会员，"
+            "仅供测试！生产环境务必关闭此开关。"
+        )
 
     # 把 bot 和 hs_token 注入到 Handler 类上（http.server 用类、不便传参，用 partial 构造）
     handler_cls = partial(_make_handler, bot=bot, hs_token=config.hs_token)

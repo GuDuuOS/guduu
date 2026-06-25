@@ -9,7 +9,7 @@
       <div class="pinned">
         <div class="ph">🗄 数据源（{{ list.length }}）</div>
         <div class="info-list">
-          <div v-for="(s, i) in list" :key="i" class="bsp-row">
+          <div v-for="(s, i) in list" :key="rowKey(s)" class="bsp-row">
             <div class="info-main">
               <span class="info-label">{{ s.name }}<span class="info-tag">{{ s.type }}</span></span>
               <div v-if="s.note" class="info-desc">{{ s.note }}</div>
@@ -38,6 +38,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { rowKey } from '@/utils/rowKey'
 // 复用「关于此频道」右面板那套 .right / .pinned / .info-* 样式
 import '@/styles/right.css'
 import {

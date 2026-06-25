@@ -169,12 +169,38 @@ export async function loginWithEmail(
   })
 }
 
-/** 尝试用上次记住的会话恢复登录；没有/失效返回 null。 */
+// 允许的 homeserver host 白名单：localStorage 可被同源脚本/扩展篡改，若不校验 baseUrl，
+// 被改成攻击者主机后，恢复会话时会把 Authorization: Bearer <token> 发往该主机 → token 泄露。
+const ALLOWED_HS_HOSTS = ['hs.cosmac.cc', 'localhost', '127.0.0.1']
+
+function isValidBaseUrl(u: unknown): u is string {
+  if (typeof u !== 'string' || !u) return false
+  try {
+    const url = new URL(u)
+    // 生产强制 https；仅本地开发允许 http（localhost/127.0.0.1）。
+    const isLocal = url.hostname === 'localhost' || url.hostname === '127.0.0.1'
+    if (url.protocol !== 'https:' && !isLocal) return false
+    return ALLOWED_HS_HOSTS.includes(url.hostname)
+  } catch {
+    return false
+  }
+}
+
+/** 尝试用上次记住的会话恢复登录；没有/失效/被篡改返回 null。 */
 export async function restoreSession(): Promise<string | null> {
   const raw = localStorage.getItem(SESSION_KEY)
   if (!raw) return null
   try {
     const s = JSON.parse(raw)
+    // 校验形状 + baseUrl 白名单：任何不合预期就丢弃会话，绝不拿不可信的 baseUrl 启动客户端。
+    if (
+      !isValidBaseUrl(s?.baseUrl) ||
+      typeof s?.accessToken !== 'string' || !s.accessToken ||
+      typeof s?.userId !== 'string' || !s.userId
+    ) {
+      localStorage.removeItem(SESSION_KEY)
+      return null
+    }
     return await startFrom(s)
   } catch {
     localStorage.removeItem(SESSION_KEY)
@@ -206,17 +232,25 @@ export async function logout(): Promise<void> {
  * 因此密集触发；若每条都立刻 refresh，历史消息就会"一条一条蹦出来"。这里做个
  * 80ms 短防抖：把这一**批**密集事件合并成**一次**渲染——历史整批瞬间出现；
  * 而真正的新消息（彼此间隔远大于 80ms）仍各自触发一次，逐条自然出现。 */
-export function onUpdate(cb: () => void): void {
-  if (!mx) return
+export function onUpdate(cb: () => void): () => void {
+  if (!mx) return () => {}
   let timer: number | null = null
   const fire = () => {
     if (timer !== null) clearTimeout(timer)
     timer = window.setTimeout(() => { timer = null; cb() }, 80)
   }
-  ;(mx as any).on('sync', (state: string) => {
+  const onSync = (state: string) => {
     if (state === 'PREPARED' || state === 'SYNCING') fire()
-  })
-  ;(mx as any).on('Room.timeline', () => fire())
+  }
+  const onTimeline = () => fire()
+  ;(mx as any).on('sync', onSync)
+  ;(mx as any).on('Room.timeline', onTimeline)
+  // 返回解绑函数：调用方在 onBeforeUnmount/登出时调用，否则反复挂载会累积监听、同一更新触发多次。
+  return () => {
+    if (timer !== null) { clearTimeout(timer); timer = null }
+    try { (mx as any)?.off?.('sync', onSync) } catch { /* mx 可能已销毁 */ }
+    try { (mx as any)?.off?.('Room.timeline', onTimeline) } catch { /* ignore */ }
+  }
 }
 
 /** 列出我加入的群频道（排除 Space 空间本身、"中枢 AI"私聊和无名 DM；按名称排序）。 */

@@ -118,9 +118,11 @@ class Toolbox:
         try:
             logger.info("执行工具 %s 参数=%s", call.name, call.arguments)
             return entry["fn"](call.arguments, ctx)
-        except Exception as exc:  # 工具出错也要回文本，别让 Agent 循环崩掉
+        except Exception:  # 工具出错也要回文本，别让 Agent 循环崩掉
+            # 详情只进服务端日志；回给模型(进而可能回进群)的文案泛化——异常文本可能含内部
+            # 路径/SQL 片段/room_id 等，原样回灌是信息泄露。
             logger.exception("工具 %s 执行异常", call.name)
-            return f"工具 {call.name} 执行出错：{exc}"
+            return f"工具 {call.name} 执行出错了，请稍后重试。"
 
     # —— 工具注册 ——
 
@@ -494,7 +496,8 @@ class Toolbox:
                     source_key=ctx.source_key,
                 )
         except Exception:
-            pass
+            # 运行记录丢失不影响已拿到的结果，但要留痕，否则"为什么没有运行记录"无从排查。
+            logger.debug("登记工作流运行记录失败（忽略）", exc_info=True)
 
     def _reserve_workflow_source(
         self, source_key: str, slug: str, platform: str, ctx: ToolContext, user_input: str

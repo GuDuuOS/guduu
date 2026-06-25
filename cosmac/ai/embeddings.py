@@ -13,10 +13,13 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 import os
 import re
 from typing import List, Optional, Sequence
+
+logger = logging.getLogger("cosmac.ai.embeddings")
 
 
 def _l2_normalize(vec: List[float]) -> List[float]:
@@ -28,10 +31,17 @@ def _l2_normalize(vec: List[float]) -> List[float]:
 
 
 def cosine(a: Sequence[float], b: Sequence[float]) -> float:
-    """两个向量的余弦相似度。约定传入的已 L2 归一化，但这里仍按通式算、稳妥。"""
+    """两个向量的余弦相似度。约定传入的已 L2 归一化，但这里仍按通式算、稳妥。
+
+    维度不一致说明拿了不同模型/不同 embed_tag 的向量来比，结果无意义——直接返回 0.0 并告警，
+    不再 min(len) 截断算出一个看似合理实则错误的相似度（靠上层 embed_tag 过滤兜底之外的纵深防御）。
+    """
     if not a or not b:
         return 0.0
-    n = min(len(a), len(b))
+    if len(a) != len(b):
+        logger.warning("cosine 维度不一致 (%d vs %d)，按不相关处理", len(a), len(b))
+        return 0.0
+    n = len(a)
     dot = sum(a[i] * b[i] for i in range(n))
     na = math.sqrt(sum(x * x for x in a))
     nb = math.sqrt(sum(x * x for x in b))

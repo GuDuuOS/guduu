@@ -533,7 +533,7 @@
             </div>
             <div class="adm-field">
               <span>预置知识库文档（每个模板的 AI 知识不同）</span>
-              <div v-for="(d, i) in tpForm.kbDocs" :key="i" class="adm-kbdoc">
+              <div v-for="(d, i) in tpForm.kbDocs" :key="rowKey(d)" class="adm-kbdoc">
                 <input v-model.trim="d.title" class="adm-kbdoc-t" placeholder="文档标题（如 平台规则与避雷）" />
                 <textarea v-model="d.content" rows="2" placeholder="文档内容…" />
                 <button class="adm-btn ghost sm danger" @click="removeTplDoc(i)">删除</button>
@@ -600,7 +600,7 @@
 
         <div v-else class="adm-form">
           <p class="adm-hint">每条一行规则;停用的不注入。例:「对外报价/发布等动作必须先经负责人确认」「不得编造数据,引用须标注来源」。</p>
-          <div v-for="(r, i) in rules" :key="i" class="adm-rule-row">
+          <div v-for="(r, i) in rules" :key="rowKey(r)" class="adm-rule-row">
             <input type="checkbox" v-model="r.enabled" title="启用" />
             <textarea v-model="r.text" rows="2" class="adm-rule-text" placeholder="写一条主 AI 必须遵守的规则…" />
             <button class="adm-btn ghost sm danger" @click="rules.splice(i, 1)">删除</button>
@@ -964,7 +964,7 @@
         </label>
         <label class="adm-field">
           <span>初始密码</span>
-          <input v-model="form.password" type="text" placeholder="至少 8 位" />
+          <input v-model="form.password" type="password" autocomplete="new-password" placeholder="至少 8 位" />
         </label>
         <div class="adm-modal-f">
           <button class="adm-btn ghost" @click="showCreate = false">取消</button>
@@ -999,6 +999,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { rowKey } from '@/utils/rowKey'
 import {
   isServerAdmin,
   listUsers,

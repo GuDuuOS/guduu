@@ -20,7 +20,7 @@
 
         <!-- 已配置列表 -->
         <div v-if="sources.length" class="ssm-list">
-          <div v-for="(s, i) in sources" :key="i" class="ssm-row">
+          <div v-for="(s, i) in sources" :key="rowKey(s)" class="ssm-row">
             <div class="ssm-row-main">
               <span class="ssm-plat">{{ platformIcon(s.platform) }} {{ platformLabel(s.platform) }}</span>
               <span class="ssm-acc">{{ s.account || '—' }}</span>
@@ -127,6 +127,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, watch } from 'vue'
+import { rowKey } from '@/utils/rowKey'
 import {
   useSocialSources,
   SOCIAL_PLATFORMS,

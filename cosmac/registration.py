@@ -393,17 +393,34 @@ def verify_and_register(
         return 400, {"error": msg}
 
     status, payload = _synapse_register(hs_url, username, password)
-    # 建号成功 → 登记「邮箱→用户名」映射，供以后找回密码按邮箱定位账号。失败不阻断注册。
+    # 建号成功 → 登记「邮箱→用户名」映射，供以后找回密码/邮箱登录按邮箱定位账号。
+    # 账号此刻已在 Synapse 建好、无法回滚，所以映射失败不阻断注册；但它失败意味着该用户
+    # **以后无法用邮箱登录或找回密码**（二者都依赖此映射），属隐性损坏 → 提到 error 级 + 重试一次。
     if status == 200:
+        if not _try_set_email(email, username):
+            logger.error(
+                "注册成功但邮箱映射写入失败 email=%s username=%s："
+                "该用户将无法用邮箱登录/找回密码，需人工补登记",
+                email, username,
+            )
+    # 建号失败时不还原码（已一次性作废）——让用户重新走流程，避免码被复用
+    return status, payload
+
+
+def _try_set_email(email: str, username: str, attempts: int = 2) -> bool:
+    """尽力把「邮箱→用户名」映射写库；成功返回 True。重试 attempts 次抵御瞬时 DB 抖动。"""
+    for i in range(attempts):
         try:
             from cosmac.db import session_scope
             from cosmac.db.email_repo import set_email
             with session_scope() as s:
                 set_email(s, email=email, username=username)
+            return True
         except Exception:
-            logger.warning("登记邮箱→用户名映射失败（不影响注册）", exc_info=True)
-    # 建号失败时不还原码（已一次性作废）——让用户重新走流程，避免码被复用
-    return status, payload
+            logger.warning(
+                "登记邮箱→用户名映射失败（第 %d/%d 次）", i + 1, attempts, exc_info=True
+            )
+    return False
 
 
 def _lookup_username(email: str) -> Optional[str]:

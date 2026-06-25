@@ -85,7 +85,7 @@
         <template v-else-if="tab === 'members'">
           <div v-for="(m, i) in state.members" :key="'m' + i" class="cam-member">
             <div class="cam-row" :class="{ clickable: m.data.length }" @click="m.data.length && toggleExpand(i)">
-              <div class="cam-ava" :class="{ bot: m.bot }" :style="m.color ? `background:${m.color}` : undefined">{{ m.avatar }}</div>
+              <div class="cam-ava" :class="{ bot: m.bot }" :style="m.color ? { background: m.color } : undefined">{{ m.avatar }}</div>
               <div class="cam-row-main">
                 <div class="cam-row-label">{{ m.name }}</div>
                 <div class="cam-row-desc">{{ m.role }}<template v-if="m.data.length"> · 可调取 {{ pickedCount(m) }}/{{ m.data.length }}</template></div>

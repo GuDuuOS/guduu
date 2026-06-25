@@ -7,6 +7,13 @@
 
 ---
 
+## 2026-06-26 — 代码审查·第二批（中低危健壮性/泄露/内存泄漏）
+- 接着上一批继续清剩余项:
+  - **后端**:工具异常文本不再原样回灌模型(信息泄露)、best-effort 落库 except 补 debug 日志;`cosine` 维度不一致返回 0.0+告警(不再 min(len) 算错值);邮箱映射 `set_email` 加 SAVEPOINT 抗并发唯一约束撞车、注册成功但映射失败提到 error 级+重试一次(否则用户无法邮箱登录/找回);bot 启动时若 `COSMAC_PAY_ALLOW_MANUAL` 开着就大声告警(生产红线)。
+  - **前端**:`onUpdate` 返回解绑函数、LiveView 在 onBeforeUnmount/重登时解绑(防监听器累积重复触发);`restoreSession` 校验 localStorage 的 baseUrl(https+host 白名单)防被篡改把 token 发往攻击者主机;新建用户密码框 `type=text→password`;内联 `:style` 的 `m.color` 改对象式(防 CSS 注入);MembershipModal 价格 `Number.isFinite` 守卫;可删列表 `:key` 用 WeakMap 稳定行 key(`utils/rowKey.ts`)替下标(防删中间行 v-model 错位)。
+- 测试:全量 216 通过、ruff 全绿、前端 build + preview 加载无 console 报错。
+- **部署**:前端发 dist + **重启 bot**(后端也变了)。
+
 ## 2026-06-26 — 全量代码审查 + 按优先级修一批安全/健壮性问题
 - 起因:负责人要求「整体代码检查」。5 个领域并行审(认证/支付/工作流/AI·DB/前端),逐条裏取り后按优先级修。
 - **高危(已修)**:
