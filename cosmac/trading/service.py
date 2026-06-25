@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+import threading
 import time
 from typing import Any, Dict, List, Optional
 
@@ -65,6 +66,19 @@ class OrderService:
         self._client = client
         self._alias = control_room_alias
         self._providers = providers or build_default_providers()
+        # 按 user_id 的串行锁：同一用户的多笔订单回调并发时，避免各自从相同旧到期日顺延
+        # 导致续期叠加错误（用户付两次却只续一次 / grant 互相覆盖）。
+        self._user_locks: Dict[str, threading.Lock] = {}
+        self._user_locks_guard = threading.Lock()
+
+    def _user_lock(self, user_id: str) -> threading.Lock:
+        """取（或惰性建）某 user 的串行锁。单实例进程内有效——多实例 fencing 是已知边界、本期不做。"""
+        with self._user_locks_guard:
+            lk = self._user_locks.get(user_id)
+            if lk is None:
+                lk = threading.Lock()
+                self._user_locks[user_id] = lk
+            return lk
 
     def get_provider(self, name: str) -> Optional[PaymentProvider]:
         """按名取支付渠道 adapter；未注册返回 None。"""
@@ -131,13 +145,18 @@ class OrderService:
     # —— 支付成功（平台回调归一化后调这里）——
 
     def on_payment_success(
-        self, order_no: str, *, provider_ref: str = "", now_ts: Optional[int] = None
+        self, order_no: str, *, provider_ref: str = "",
+        paid_amount_cents: Optional[int] = None, paid_currency: str = "",
+        now_ts: Optional[int] = None,
     ) -> Dict[str, Any]:
         """支付成功：**幂等地**置订单 paid 并开/续会员。
 
         返回 {ok, order_no, ...}；``already=True`` 表示重复回调（已处理过、本次不重复开通）。
+        - 金额校验：平台回传了实收金额(paid_amount_cents)就必须与下单金额一致，否则拒绝开通
+          （防"少付/改币种拿全权益"——支付系统经典资损漏洞）。adapter 取不到金额时传 None 跳过。
         - 续费：若用户当前正持同档会员，从其**原到期日顺延**（不是从现在重新算），不亏天数。
         - 先原子置 paid（恰好一次闸）→ 再开会员；开会员失败回滚订单待重试。
+        - 同一 user 的并发回调用 _user_lock 串行化，避免续期叠加错乱。
         """
         now = int(now_ts if now_ts is not None else time.time())
         with session_scope() as s:
@@ -147,34 +166,52 @@ class OrderService:
             if order.status == "paid":
                 return {"ok": True, "already": True, "order_no": order_no}
             tier, period, user_id = order.tier, order.period_days, order.user_id
+            order_amount = int(order.amount_cents or 0)
+            order_currency = (order.currency or "").lower()
 
-        # 算到期：续费从原到期日顺延，否则从现在起算
-        base = now
-        rec = self._members.get_record(user_id)
-        if rec and active_tier(rec, now) == tier:
-            cur_exp = int(rec.get("expires_ts") or 0)
-            if cur_exp > now:
-                base = cur_exp
-        new_exp = base + period * _DAY_SECONDS
-
-        # 原子置 paid（恰好一次）——只有第一笔回调拿到 first=True
-        with session_scope() as s:
-            first = order_repo.mark_paid(
-                s, order_no, provider_ref=provider_ref, granted_expires_ts=new_exp,
+        # 金额/货币二次校验：平台回传了就强制比对，不符绝不开通（先于一切开通逻辑）。
+        if paid_amount_cents is not None and int(paid_amount_cents) != order_amount:
+            logger.error(
+                "订单 %s 金额不符：下单 %s 实收 %s，拒绝开通",
+                order_no, order_amount, paid_amount_cents,
             )
-        if not first:
-            return {"ok": True, "already": True, "order_no": order_no}
+            raise OrderError("支付金额与订单不符")
+        if paid_currency and paid_currency.lower() != order_currency:
+            logger.error(
+                "订单 %s 货币不符：下单 %s 实收 %s，拒绝开通",
+                order_no, order_currency, paid_currency,
+            )
+            raise OrderError("支付货币与订单不符")
 
-        # 开/续会员
-        ok = self._members.grant(
-            user_id, tier, source="purchase", now_ts=now, expires_ts=new_exp
-        )
-        if not ok:
-            # 收了钱却没开成会员 → 回滚订单，留给平台/人工重试回调
+        # 同一用户串行：读旧到期日 + 算 new_exp + 置 paid + grant 整体不被另一笔回调插队。
+        with self._user_lock(user_id):
+            # 算到期：续费从原到期日顺延，否则从现在起算
+            base = now
+            rec = self._members.get_record(user_id)
+            if rec and active_tier(rec, now) == tier:
+                cur_exp = int(rec.get("expires_ts") or 0)
+                if cur_exp > now:
+                    base = cur_exp
+            new_exp = base + period * _DAY_SECONDS
+
+            # 原子置 paid（恰好一次）——只有第一笔回调拿到 first=True
             with session_scope() as s:
-                order_repo.revert_to_created(s, order_no)
-            logger.error("订单 %s 已支付但开通会员失败，已回滚待重试", order_no)
-            raise OrderError("开通会员失败，请稍后重试")
+                first = order_repo.mark_paid(
+                    s, order_no, provider_ref=provider_ref, granted_expires_ts=new_exp,
+                )
+            if not first:
+                return {"ok": True, "already": True, "order_no": order_no}
+
+            # 开/续会员
+            ok = self._members.grant(
+                user_id, tier, source="purchase", now_ts=now, expires_ts=new_exp
+            )
+            if not ok:
+                # 收了钱却没开成会员 → 回滚订单，留给平台/人工重试回调
+                with session_scope() as s:
+                    order_repo.revert_to_created(s, order_no)
+                logger.error("订单 %s 已支付但开通会员失败，已回滚待重试", order_no)
+                raise OrderError("开通会员失败，请稍后重试")
         logger.info(
             "订单 %s 支付成功：%s 开通 %s 至 %s", order_no, user_id, tier, new_exp
         )

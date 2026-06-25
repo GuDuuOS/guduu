@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 import unittest
 from typing import Any, Dict, Optional
 
@@ -20,6 +21,11 @@ from cosmac.trading.service import OrderError, OrderService
 CTRL = "!ctrl:guduu.local"
 ALICE = "@alice:guduu.local"
 DAY = 86400
+
+
+def setUpModule() -> None:
+    # manual 渠道现在 fail-closed：没配密钥就不可用。给测试配一个，才能验签跑通业务链。
+    os.environ["COSMAC_PAY_MANUAL_SECRET"] = "test-manual-secret"
 
 PLANS = {"plans": [
     {"slug": "paid-monthly", "name": "付费月卡", "tier": "paid",
@@ -147,6 +153,37 @@ class OrderServiceTests(unittest.TestCase):
         self.assertEqual(
             int(self.svc._members.get_record(ALICE)["expires_ts"]), t0 + 30 * DAY
         )
+
+    def test_underpay_rejected(self):
+        # 平台回传的实收金额 < 下单金额 → 拒绝开通（防"少付拿全权益"），且不开会员。
+        t0 = 1_700_000_000
+        out = self.svc.create_order(user_id=ALICE, plan_slug="paid-monthly", currency="usd")
+        with self.assertRaises(OrderError):
+            self.svc.on_payment_success(
+                out["order_no"], paid_amount_cents=1, paid_currency="usd", now_ts=t0
+            )
+        self.assertEqual(active_tier(self.svc._members.get_record(ALICE), t0), "free")
+        with session_scope() as s:
+            self.assertEqual(get_by_order_no(s, out["order_no"]).status, "created")
+
+    def test_wrong_currency_rejected(self):
+        t0 = 1_700_000_000
+        out = self.svc.create_order(user_id=ALICE, plan_slug="paid-monthly", currency="usd")
+        with self.assertRaises(OrderError):
+            self.svc.on_payment_success(
+                out["order_no"], paid_amount_cents=999, paid_currency="cny", now_ts=t0
+            )
+        self.assertEqual(active_tier(self.svc._members.get_record(ALICE), t0), "free")
+
+    def test_matching_amount_grants(self):
+        # 金额一致 → 正常开通（确认校验没误伤正常单）。
+        t0 = 1_700_000_000
+        out = self.svc.create_order(user_id=ALICE, plan_slug="paid-monthly", currency="usd")
+        res = self.svc.on_payment_success(
+            out["order_no"], paid_amount_cents=999, paid_currency="usd", now_ts=t0
+        )
+        self.assertTrue(res["ok"])
+        self.assertEqual(active_tier(self.svc._members.get_record(ALICE), t0), "paid")
 
     def test_renewal_extends_from_current_expiry(self):
         t0 = 1_700_000_000

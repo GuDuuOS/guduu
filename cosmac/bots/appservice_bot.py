@@ -1271,13 +1271,19 @@ class CosmacBot:
         return out
 
     def handle_stats(self, access_token: str) -> Tuple[int, Dict[str, Any]]:
-        """平台**真实运营指标**（给数据看板用，替掉演示假数据）。需登录。
+        """平台**真实运营指标**（给数据看板用，替掉演示假数据）。**仅平台管理员**可读。
 
         只统计 CosMac 真正拥有的数据：会员（控制室）+ 工作流运行/订单/知识库（cosmac DB）。
         影视业务数据（播放量/集数等）CosMac 不拥有，不在此处编造。每项独立兜底，缺 DB 不报错。
+
+        权限：这些是**全平台**聚合（总付费会员数/总订单数等），属运营敏感数据，普通登录用户
+        不该看到。故限平台管理员；非管理员回 403，前端据此回退占位（不报错）。
         """
-        if not self.client.whoami(access_token):
+        user_id = self.client.whoami(access_token)
+        if not user_id:
             return 401, {"error": "登录已失效，请重新登录"}
+        if not self._is_platform_admin(user_id):
+            return 403, {"error": "仅平台管理员可查看平台运营指标"}
         out: Dict[str, Any] = {
             "members_paid": 0, "members_creator": 0,
             "workflow_runs": 0, "orders_paid": 0, "kb_docs": 0,
@@ -1313,17 +1319,56 @@ class CosmacBot:
             logger.debug("统计 DB 指标失败", exc_info=True)
         return 200, out
 
+    def _can_access_task(self, user_id: str, task: Any) -> bool:
+        """判断 user_id 是否有权读/改这条任务。
+
+        授权规则（任一成立即可）：① 平台管理员；② 任务由本人下达（task.sender）；
+        ③ 本人是任务所属房间(task.room_id)的成员。任何不确定一律拒绝（fail-closed），
+        防止任意登录用户靠遍历 id 越权读写别人工作区的任务看板。
+        """
+        if not user_id:
+            return False
+        if task.sender and task.sender == user_id:
+            return True
+        if self._is_platform_admin(user_id):
+            return True
+        room_id = task.room_id or ""
+        # is_joined_member 自身 fail-closed（查不到/异常都返回 False）。
+        return bool(room_id) and self.client.is_joined_member(room_id, user_id)
+
     def handle_tasks_list(self, access_token: str) -> Tuple[int, Dict[str, Any]]:
-        """任务看板：列出真实任务（AI 拆解登记的）。需登录。"""
-        if not self.client.whoami(access_token):
+        """任务看板：列出真实任务（AI 拆解登记的）。需登录，且只返回本人有权看的任务。"""
+        user_id = self.client.whoami(access_token)
+        if not user_id:
             return 401, {"error": "登录已失效，请重新登录"}
         out: List[Dict[str, Any]] = []
         try:
             from cosmac.db import session_scope
             from cosmac.db.task_repo import list_tasks
 
+            is_admin = self._is_platform_admin(user_id)
             with session_scope() as s:
-                for t in list_tasks(s):
+                # 管理员看全部；普通用户从全量里只挑「本人下达」或「本人所在房间」的。
+                candidates = list_tasks(s)
+                if is_admin:
+                    visible = candidates
+                else:
+                    visible = []
+                    joined_cache: Dict[str, bool] = {}  # 同一房间只查一次成员身份
+                    for t in candidates:
+                        if t.sender and t.sender == user_id:
+                            visible.append(t)
+                            continue
+                        rid = t.room_id or ""
+                        if not rid:
+                            continue
+                        ok = joined_cache.get(rid)
+                        if ok is None:
+                            ok = self.client.is_joined_member(rid, user_id)
+                            joined_cache[rid] = ok
+                        if ok:
+                            visible.append(t)
+                for t in visible:
                     out.append({
                         "id": t.id, "title": t.title, "assignee": t.assignee,
                         "status": t.status, "progress": t.progress,
@@ -1336,8 +1381,9 @@ class CosmacBot:
     def handle_task_update(
         self, access_token: str, body: Dict[str, Any]
     ) -> Tuple[int, Dict[str, Any]]:
-        """改任务状态/进度（看板手动拖卡）。需登录。"""
-        if not self.client.whoami(access_token):
+        """改任务状态/进度（看板手动拖卡）。需登录，且只能改本人有权的任务。"""
+        user_id = self.client.whoami(access_token)
+        if not user_id:
             return 401, {"error": "登录已失效，请重新登录"}
         try:
             task_id = int(body.get("id"))
@@ -1345,9 +1391,15 @@ class CosmacBot:
             return 400, {"error": "无效任务 id"}
         try:
             from cosmac.db import session_scope
-            from cosmac.db.task_repo import update_task
+            from cosmac.db.task_repo import get_task, update_task
 
             with session_scope() as s:
+                task = get_task(s, task_id)
+                if task is None:
+                    return 404, {"error": "任务不存在"}
+                # 先校验归属再改，堵住「遍历 id 篡改全平台任务」。
+                if not self._can_access_task(user_id, task):
+                    return 403, {"error": "无权操作此任务"}
                 ok = update_task(
                     s, task_id,
                     status=body.get("status"),
@@ -1371,40 +1423,54 @@ class CosmacBot:
         exp = int(rec.get("expires_ts") or 0) if rec else 0
         return 200, {"tier": tier, "tier_label": tier_label(tier), "expires_ts": exp}
 
-    def handle_register_request_code(self, body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
+    def handle_register_request_code(
+        self, body: Dict[str, Any], client_ip: str = ""
+    ) -> Tuple[int, Dict[str, Any]]:
         """自建邮箱注册：给邮箱发验证码（公开端点，无 token——用户还没账号）。限频在 registration 内强制。"""
         from cosmac import registration
-        return registration.request_code((body or {}).get("email", ""))
+        return registration.request_code((body or {}).get("email", ""), client_ip=client_ip)
 
-    def handle_register_verify(self, body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
+    def handle_register_verify(
+        self, body: Dict[str, Any], client_ip: str = ""
+    ) -> Tuple[int, Dict[str, Any]]:
         """自建邮箱注册：验码 + 用共享密钥建号（公开端点）。成功回 {user_id, access_token...}。"""
         from cosmac import registration
         b = body or {}
         return registration.verify_and_register(
             b.get("email", ""), b.get("code", ""), b.get("username", ""), b.get("password", ""),
-            hs_url=self.config.homeserver_url,
+            hs_url=self.config.homeserver_url, client_ip=client_ip,
         )
 
-    def handle_reset_request_code(self, body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
+    def handle_reset_request_code(
+        self, body: Dict[str, Any], client_ip: str = ""
+    ) -> Tuple[int, Dict[str, Any]]:
         """找回密码：给邮箱发验证码（公开端点；防枚举：未注册也回成功但不发信）。"""
         from cosmac import registration
-        return registration.reset_request_code((body or {}).get("email", ""))
+        return registration.reset_request_code(
+            (body or {}).get("email", ""), client_ip=client_ip
+        )
 
-    def handle_reset_verify(self, body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
+    def handle_reset_verify(
+        self, body: Dict[str, Any], client_ip: str = ""
+    ) -> Tuple[int, Dict[str, Any]]:
         """找回密码：验码 + 用管理员令牌重置密码（公开端点）。成功回 {ok}。"""
         from cosmac import registration
         b = body or {}
         return registration.reset_verify(
             b.get("email", ""), b.get("code", ""), b.get("password", ""),
             hs_url=self.config.homeserver_url, server_name=self.config.server_name,
+            client_ip=client_ip,
         )
 
-    def handle_login_email(self, body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
+    def handle_login_email(
+        self, body: Dict[str, Any], client_ip: str = ""
+    ) -> Tuple[int, Dict[str, Any]]:
         """邮箱登录：反查用户名 → 登 Synapse → 返回登录响应（公开端点）。"""
         from cosmac import registration
         b = body or {}
         return registration.login_email(
-            b.get("email", ""), b.get("password", ""), hs_url=self.config.homeserver_url,
+            b.get("email", ""), b.get("password", ""),
+            hs_url=self.config.homeserver_url, client_ip=client_ip,
         )
 
     def handle_kb_list_mine(self, access_token: str) -> Tuple[int, Dict[str, Any]]:
@@ -1517,7 +1583,10 @@ class CosmacBot:
         if not ev.paid:
             return 200  # 非成功事件（如失败/退款通知），先确认收到、不开会员
         try:
-            self.orders.on_payment_success(ev.order_no, provider_ref=ev.provider_ref)
+            self.orders.on_payment_success(
+                ev.order_no, provider_ref=ev.provider_ref,
+                paid_amount_cents=ev.amount_cents, paid_currency=ev.currency,
+            )
         except OrderError as e:
             logger.warning("支付回调开通失败 order=%s: %s", ev.order_no, e)
             return 500  # 让平台重试
@@ -1983,6 +2052,21 @@ class _Handler(BaseHTTPRequestHandler):
             return
         self._send_json(404, {"errcode": "M_UNRECOGNIZED"})
 
+    def _client_ip(self) -> str:
+        """取请求方真实 IP（公开注册/登录端点限频用）。
+
+        线上 nginx 反代，真实 IP 在 X-Forwarded-For 第一段；取链头（最靠近客户端的那个）。
+        直连无该头时回退到 TCP 对端地址。注意：X-Forwarded-For 可被伪造，但本机服务只经我们
+        自己的反代暴露，反代会重写该头——单实例「够用即止」口径下可接受。
+        """
+        xff = self.headers.get("X-Forwarded-For", "")
+        if xff:
+            return xff.split(",")[0].strip()
+        try:
+            return self.client_address[0]
+        except Exception:
+            return ""
+
     def _read_json_body(self, max_len: int) -> Optional[Dict[str, Any]]:
         """按上限读 + 解析 JSON 请求体；超限/超时/非法返回 None（调用方回对应错误）。"""
         try:
@@ -2021,7 +2105,7 @@ class _Handler(BaseHTTPRequestHandler):
             if body is None:
                 self._send_json(400, {"error": "请求无效"}, cors=True)
                 return
-            code, payload = self.bot.handle_register_request_code(body)
+            code, payload = self.bot.handle_register_request_code(body, self._client_ip())
             self._send_json(code, payload, cors=True)
             return
 
@@ -2031,7 +2115,7 @@ class _Handler(BaseHTTPRequestHandler):
             if body is None:
                 self._send_json(400, {"error": "请求无效"}, cors=True)
                 return
-            code, payload = self.bot.handle_register_verify(body)
+            code, payload = self.bot.handle_register_verify(body, self._client_ip())
             self._send_json(code, payload, cors=True)
             return
 
@@ -2041,7 +2125,7 @@ class _Handler(BaseHTTPRequestHandler):
             if body is None:
                 self._send_json(400, {"error": "请求无效"}, cors=True)
                 return
-            code, payload = self.bot.handle_reset_request_code(body)
+            code, payload = self.bot.handle_reset_request_code(body, self._client_ip())
             self._send_json(code, payload, cors=True)
             return
 
@@ -2051,7 +2135,7 @@ class _Handler(BaseHTTPRequestHandler):
             if body is None:
                 self._send_json(400, {"error": "请求无效"}, cors=True)
                 return
-            code, payload = self.bot.handle_reset_verify(body)
+            code, payload = self.bot.handle_reset_verify(body, self._client_ip())
             self._send_json(code, payload, cors=True)
             return
 
@@ -2061,7 +2145,7 @@ class _Handler(BaseHTTPRequestHandler):
             if body is None:
                 self._send_json(400, {"error": "请求无效"}, cors=True)
                 return
-            code, payload = self.bot.handle_login_email(body)
+            code, payload = self.bot.handle_login_email(body, self._client_ip())
             self._send_json(code, payload, cors=True)
             return
 

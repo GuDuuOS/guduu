@@ -19,14 +19,21 @@ from cosmac.trading.base import CheckoutResult, PaymentEvent, PaymentProvider
 
 
 def _secret() -> str:
-    """人工确认的验签密钥（只从服务端 env 读）。未配则用固定占位（仅本地测试可用）。"""
-    return os.environ.get("COSMAC_PAY_MANUAL_SECRET", "") or "cosmac-manual-dev-secret"
+    """人工确认的验签密钥（只从服务端 env 读）。未配置返回空串 → manual 渠道整体不可用。
+
+    安全默认必须 fail-closed：绝不回退到任何硬编码/公开占位密钥。否则一旦生产误开
+    COSMAC_PAY_ALLOW_MANUAL=1 又忘了配密钥，任何人都能用公开常量算出签名白嫖开会员。
+    """
+    return os.environ.get("COSMAC_PAY_MANUAL_SECRET", "")
 
 
 def manual_sign(order_no: str) -> str:
-    """对订单号做 HMAC 签名——人工确认回调要带上它才算数。"""
+    """对订单号做 HMAC 签名——人工确认回调要带上它才算数。未配密钥则拒绝（不签）。"""
+    secret = _secret()
+    if not secret:
+        raise RuntimeError("COSMAC_PAY_MANUAL_SECRET 未配置，manual 渠道不可用")
     return hmac.new(
-        _secret().encode("utf-8"), (order_no or "").encode("utf-8"), hashlib.sha256
+        secret.encode("utf-8"), (order_no or "").encode("utf-8"), hashlib.sha256
     ).hexdigest()
 
 

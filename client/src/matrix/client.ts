@@ -1252,8 +1252,11 @@ export async function getGlobalSkills(): Promise<GlobalSkill[]> {
       instructions: String(s?.instructions || ''),
       enabled: s?.enabled !== false, // 缺省视为启用
     })).filter((s: GlobalSkill) => s.slug)
-  } catch {
-    return [] // 房间在但还没写过技能
+  } catch (e: any) {
+    // 事件不存在(404)=还没写过技能 → []（合法）。瞬时读失败必须抛——否则上层会在空列表上
+    // 保存、把真实技能覆盖没了（同 gating/plans 的保护）。
+    if (e?.errcode === 'M_NOT_FOUND') return []
+    throw new Error('读取技能列表失败，请重试')
   }
 }
 
@@ -1322,8 +1325,10 @@ export async function getGlobalAgents(): Promise<GlobalAgent[]> {
       skill_slugs: Array.isArray(a?.skill_slugs) ? a.skill_slugs.map(String) : [],
       enabled: a?.enabled !== false,
     })).filter((a: GlobalAgent) => a.slug)
-  } catch {
-    return []
+  } catch (e: any) {
+    // 同 getGlobalSkills：404=未配置→[]；瞬时失败抛，防空列表覆盖真实智能体。
+    if (e?.errcode === 'M_NOT_FOUND') return []
+    throw new Error('读取智能体列表失败，请重试')
   }
 }
 
@@ -1351,8 +1356,10 @@ export async function getGlobalRules(): Promise<GlobalRule[]> {
     return arr
       .map((r: any) => ({ text: String(r?.text || ''), enabled: r?.enabled !== false }))
       .filter((r: GlobalRule) => r.text.trim())
-  } catch {
-    return []
+  } catch (e: any) {
+    // 404=未配置→[]；瞬时失败抛，防空列表覆盖真实规则。
+    if (e?.errcode === 'M_NOT_FOUND') return []
+    throw new Error('读取全局规则失败，请重试')
   }
 }
 
@@ -1403,8 +1410,10 @@ export async function getWorkflows(): Promise<WorkflowDef[]> {
       graph: String(w?.graph || ''),
       async: w?.async === true,
     })).filter((w: WorkflowDef) => w.slug)
-  } catch {
-    return []
+  } catch (e: any) {
+    // 404=未配置→[]；瞬时失败抛，防空列表覆盖真实工作流连接器。
+    if (e?.errcode === 'M_NOT_FOUND') return []
+    throw new Error('读取工作流列表失败，请重试')
   }
 }
 
@@ -1465,8 +1474,10 @@ export async function getOnboardingTemplates(): Promise<OnboardingTemplateDef[]>
       tier: String(t?.tier || 'free'),
       enabled: t?.enabled !== false,
     })).filter((t: OnboardingTemplateDef) => t.key && t.label)
-  } catch {
-    return []
+  } catch (e: any) {
+    // 404=未配置→[]；瞬时失败抛，防空列表覆盖真实入驻模板。
+    if (e?.errcode === 'M_NOT_FOUND') return []
+    throw new Error('读取入驻模板失败，请重试')
   }
 }
 

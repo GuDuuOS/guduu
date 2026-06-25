@@ -567,10 +567,13 @@ function isBot(s: string) {
 // 先 HTML 转义（防 XSS：任何 <script> 都变成纯文本），再做有限的 markdown 替换。
 // 代码块/行内代码先抠出占位、避免里面的符号被二次处理。
 function escapeHtml(s: string): string {
+  // 必须连引号一起转义：链接渲染时 url 会进 href="...", 不转 " 会被击穿属性边界注入属性。
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
 }
 function renderMd(raw: string): string {
-  let s = escapeHtml(raw || '')
+  // 先剥掉占位哨兵字符 \x00：下面用它做代码块占位，若用户原文里带 \x00 会污染还原逻辑。
+  let s = escapeHtml((raw || '').replace(/\x00/g, ''))
   const stash: string[] = []
   const keep = (html: string) => `\x00${stash.push(html) - 1}\x00`
   // 代码块 ```...```

@@ -76,6 +76,18 @@ def tier_level(tier: Optional[str]) -> int:
     return int(_TIER_BY_SLUG[normalize_tier(tier)]["level"])
 
 
+def _as_int(v: Any, default: int = 0) -> int:
+    """把可能脏的值安全转 int；非法回退 default。
+
+    会员数据存在控制室 state event（外部可写、不可信），``expires_ts`` 完全可能是非数字字符串。
+    凡是读它做 int 转换的地方都走这里，避免单条脏数据让整批读取抛异常（被外层吞成"全员免费"）。
+    """
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return default
+
+
 def active_tier(rec: Optional[Dict[str, Any]], now_ts: Optional[int] = None) -> str:
     """一条会员记录**当前生效**的等级 slug：到期(expires_ts>0 且已过)→回落免费（订阅制）。
 
@@ -86,11 +98,7 @@ def active_tier(rec: Optional[Dict[str, Any]], now_ts: Optional[int] = None) -> 
     tier = normalize_tier(rec.get("tier"))
     if tier == DEFAULT_TIER:
         return DEFAULT_TIER
-    exp = rec.get("expires_ts") or 0
-    try:
-        exp = int(exp)
-    except (TypeError, ValueError):
-        exp = 0
+    exp = _as_int(rec.get("expires_ts"))
     now = int(now_ts if now_ts is not None else time.time())
     if exp and now >= exp:
         return DEFAULT_TIER  # 已到期 → 失效回落免费
@@ -192,7 +200,7 @@ class MembersStore:
                         "tier": tier,
                         "source": str(content.get("source") or "admin"),
                         "updated_ts": content.get("updated_ts"),
-                        "expires_ts": int(content.get("expires_ts") or 0),
+                        "expires_ts": _as_int(content.get("expires_ts")),
                     }
             return legacy
         except Exception as e:
@@ -223,7 +231,7 @@ class MembersStore:
                     "tier": t,
                     "source": str(current.get("source") or "admin"),
                     "updated_ts": current.get("updated_ts"),
-                    "expires_ts": int(current.get("expires_ts") or 0),
+                    "expires_ts": _as_int(current.get("expires_ts")),
                 }
             legacy = parse_members(
                 self._client.get_state_event(room, MEMBERS_EVENT_TYPE)

@@ -7,6 +7,18 @@
 
 ---
 
+## 2026-06-26 — 全量代码审查 + 按优先级修一批安全/健壮性问题
+- 起因:负责人要求「整体代码检查」。5 个领域并行审(认证/支付/工作流/AI·DB/前端),逐条裏取り后按优先级修。
+- **高危(已修)**:
+  - **任务看板越权**:`task_repo.list_tasks/update_task` 加 room_id/sender 作用域;`handle_tasks_list/handle_task_update` 按「本人下达 ∪ 本人所在房间 ∪ 平台管理员」校验(`_can_access_task`,用 `is_joined_member` fail-closed)。之前任意登录用户可遍历 id 读写全平台任务。
+  - **前端 renderMd XSS**:`escapeHtml` 补转义 `"`/`'`(链接 href 属性击穿),渲染前剥 `\x00` 哨兵(占位符注入)。node 验证三个向量均封堵。
+  - **注册/找回密码限频**:registration.py 叠加按 IP 滑窗限频(发码 20/时、验码/登录尝试 30/15分),堵「换邮箱绕过 + 重发刷新尝试计数」爆破;username 正则去 `/`、加 64 长度上限;运算符优先级加括号。bot 经 `_client_ip()`(X-Forwarded-For)透传。
+  - **支付**:`on_payment_success` 加金额/货币二次校验(防少付拿全权益,P2 接 Stripe 前必须);续费按 user 串行锁(`_user_lock`)防并发回调叠加;`manual._secret()` 去掉公开默认密钥改 **fail-closed**(没配密钥 manual 不可用)。
+- **中危(已修)**:`handle_stats` 全平台运营指标限平台管理员(非管理员 403,前端优雅回退);`members._as_int` 安全转 expires_ts(脏 state 不再让整批读崩成全员免费)。
+- **澄清(经裏取り为误检/已安全,未改)**:工作流门控 `workflow_run` 默认本就 = admin、GatingStore 读失败 fail-closed(前后端一致);`OpenAIProvider` 类是**死代码**(build_provider 实际走支持工具的 `OpenAICompatProvider`)→ 删掉该文件除混淆。
+- 测试:新增支付金额/货币拒绝用例 + stats 限管理员用例;全量 216 测试通过、ruff 全绿、前端 build 通过。
+- **部署**:前端发 dist;**后端(cosmac/)需重启 bot 服务**(注册限频/支付校验/任务越权/stats 都在 bot 进程)。
+
 ## 2026-06-25 — AI 侧栏放大态右栏接真实数据（替掉写死演示）
 - 放大态右栏原是写死的 Progress(5/8 热点选题…) + 项目文件(xlsx/pdf)。改成真实:
   - **进度** = 任务看板真实任务(taskList)，标题+完成数 doneCount/总数，done 划线、doing 显进度%。

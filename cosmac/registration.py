@@ -49,7 +49,10 @@ _HS_TIMEOUT = 15            # 调 Synapse 的超时（秒）
 
 # 邮箱 / 用户名 / 密码 的基本校验
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-_USERNAME_RE = re.compile(r"^[a-z0-9._=\-/+]+$")  # Matrix localpart 允许的安全子集（小写）
+# Matrix localpart 安全子集（小写）。去掉了 `/`——localpart 习惯不含斜杠，且这个值会拼进
+# reset 的 user_id / admin URL 路径，留着 `/` 平白增加路径注入面、无正当用途。
+_USERNAME_RE = re.compile(r"^[a-z0-9._=\-+]+$")
+_USERNAME_MAX = 64           # localpart 长度上限（防超长 localpart 造成异常账号）
 
 
 class _PendingCode:
@@ -69,6 +72,47 @@ class _PendingCode:
 # 用「用途」前缀把注册码和找回密码码分开存——注册码不能拿去重置密码，反之亦然。
 _store: Dict[str, _PendingCode] = {}
 _lock = threading.Lock()
+
+# ── 按客户端 IP 的全局限频（纵深防御）──────────────────────────────
+# 为什么：上面的限频是按**邮箱**算的，攻击者枚举不同邮箱即可绕过（刷爆 SMTP 配额、
+# 给真实用户狂发骚扰码、放大 6 位码爆破空间）。再叠一层按 IP 的滑窗限频堵住批量枚举。
+# 注：nginx 反代后真实 IP 在 X-Forwarded-For，调用方负责取真实 IP 传进来。
+_IP_SEND_MAX = 20            # 单 IP 每小时最多触发发码（注册 + 找回合计）
+_IP_SEND_WINDOW = 3600
+_IP_ATTEMPT_MAX = 30         # 单 IP 每 15 分钟最多验码/登录尝试（限撞库/爆破）
+_IP_ATTEMPT_WINDOW = 900
+_ip_store: Dict[str, list[float]] = {}   # "桶:ip" → 命中时间戳滑窗
+_ip_lock = threading.Lock()
+
+
+def _prune_ip_store(now: float) -> None:
+    """丢弃所有时间戳都过期的 IP 桶，防内存无限增长。调用方需已持 _ip_lock。"""
+    dead = [k for k, ts in _ip_store.items()
+            if not any(now - t < _IP_SEND_WINDOW for t in ts)]
+    for k in dead:
+        _ip_store.pop(k, None)
+
+
+def _ip_rate_ok(bucket: str, ip: str, limit: int, window: int) -> bool:
+    """按 IP 滑窗限频；命中上限返回 False。
+
+    ip 为空（拿不到真实 IP，例如本地直连/未配反代）时**不限**，返回 True——宁可放过也别误伤
+    全体用户。单实例内存计数，与验证码同口径（够用即止）。
+    """
+    if not ip:
+        return True
+    now = time.time()
+    key = f"{bucket}:{ip}"
+    with _ip_lock:
+        times = [t for t in _ip_store.get(key, ()) if now - t < window]
+        if len(times) >= limit:
+            _ip_store[key] = times
+            return False
+        times.append(now)
+        _ip_store[key] = times
+        if len(_ip_store) > 10000:   # 偶发清理，避免字典在长期运行中膨胀
+            _prune_ip_store(now)
+        return True
 
 
 def _key(purpose: str, email: str) -> str:
@@ -243,13 +287,16 @@ def _issue_code(key: str, send: Callable[[str], None]) -> Tuple[int, Dict[str, A
     return 200, {"ok": True, "cooldown": _RESEND_COOLDOWN}
 
 
-def request_code(email: str) -> Tuple[int, Dict[str, Any]]:
+def request_code(email: str, *, client_ip: str = "") -> Tuple[int, Dict[str, Any]]:
     """发**注册**验证码到邮箱。返回 (http状态, 响应体)。"""
     if not registration_enabled():
         return 503, {"error": "服务器未开启邮箱注册"}
     email = (email or "").strip().lower()
     if not _EMAIL_RE.match(email):
         return 400, {"error": "邮箱格式不正确"}
+    # 先过 IP 限频（堵换邮箱绕过），再走邮箱维度限频。
+    if not _ip_rate_ok("send", client_ip, _IP_SEND_MAX, _IP_SEND_WINDOW):
+        return 429, {"error": "请求过于频繁，请稍后再试"}
     return _issue_code(_key("register", email), lambda c: _send_email(email, c))
 
 
@@ -314,7 +361,7 @@ def _synapse_register(hs_url: str, username: str, password: str) -> Tuple[int, D
             err = rr.json().get("error", "")
         except Exception:
             pass
-        if "in use" in err.lower() or rr.status_code == 400 and "exist" in err.lower():
+        if "in use" in err.lower() or (rr.status_code == 400 and "exist" in err.lower()):
             return 409, {"error": "该用户名已被占用，请换一个"}
         return rr.status_code if rr.status_code >= 400 else 502, {"error": err or "注册失败"}
     except requests.RequestException:
@@ -323,7 +370,8 @@ def _synapse_register(hs_url: str, username: str, password: str) -> Tuple[int, D
 
 
 def verify_and_register(
-    email: str, code: str, username: str, password: str, *, hs_url: str
+    email: str, code: str, username: str, password: str, *, hs_url: str,
+    client_ip: str = "",
 ) -> Tuple[int, Dict[str, Any]]:
     """验码 → 建号。成功返回 (200, {user_id, access_token...})。"""
     if not registration_enabled():
@@ -332,10 +380,13 @@ def verify_and_register(
     username = (username or "").strip().lower()
     if not _EMAIL_RE.match(email):
         return 400, {"error": "邮箱格式不正确"}
-    if not username or not _USERNAME_RE.match(username):
-        return 400, {"error": "用户名只能用小写字母/数字/._-=+/"}
+    if not username or not _USERNAME_RE.match(username) or len(username) > _USERNAME_MAX:
+        return 400, {"error": "用户名只能用小写字母/数字/._-=+，且不超过 64 位"}
     if len(password or "") < 8:
         return 400, {"error": "密码至少 8 位"}
+    # 按 IP 限制验码尝试（叠加单码 5 次上限，堵住「不断重发刷新尝试计数 + 多邮箱并发」爆破）。
+    if not _ip_rate_ok("attempt", client_ip, _IP_ATTEMPT_MAX, _IP_ATTEMPT_WINDOW):
+        return 429, {"error": "尝试过于频繁，请稍后再试"}
 
     ok, msg = _check_code(email, code, purpose="register")
     if not ok:
@@ -367,7 +418,9 @@ def _lookup_username(email: str) -> Optional[str]:
         return None
 
 
-def login_email(email: str, password: str, *, hs_url: str) -> Tuple[int, Dict[str, Any]]:
+def login_email(
+    email: str, password: str, *, hs_url: str, client_ip: str = ""
+) -> Tuple[int, Dict[str, Any]]:
     """邮箱+密码登录：按邮箱反查用户名 → 用账号密码登 Synapse → 原样返回 Synapse 登录响应
     （含 access_token/user_id/device_id，前端据此存会话）。
 
@@ -377,6 +430,9 @@ def login_email(email: str, password: str, *, hs_url: str) -> Tuple[int, Dict[st
     email = (email or "").strip().lower()
     if not _EMAIL_RE.match(email) or not password:
         return 403, {"error": "邮箱或密码错误"}
+    # 限在线撞库（请求经 bot 转发，Synapse 看到的是同一源 IP，这层得自己挡）。
+    if not _ip_rate_ok("attempt", client_ip, _IP_ATTEMPT_MAX, _IP_ATTEMPT_WINDOW):
+        return 429, {"error": "尝试过于频繁，请稍后再试"}
     username = _lookup_username(email)
     if not username:
         return 403, {"error": "邮箱或密码错误"}
@@ -427,7 +483,7 @@ def _admin_reset_password(hs_url: str, user_id: str, new_password: str) -> Tuple
         return 502, {"error": "重置服务暂不可用，请稍后重试"}
 
 
-def reset_request_code(email: str) -> Tuple[int, Dict[str, Any]]:
+def reset_request_code(email: str, *, client_ip: str = "") -> Tuple[int, Dict[str, Any]]:
     """找回密码：发验证码到邮箱。
 
     防邮箱枚举：无论该邮箱是否注册都返回成功，只有**确实注册过**才真正发信。
@@ -437,6 +493,9 @@ def reset_request_code(email: str) -> Tuple[int, Dict[str, Any]]:
     email = (email or "").strip().lower()
     if not _EMAIL_RE.match(email):
         return 400, {"error": "邮箱格式不正确"}
+    # IP 限频在查邮箱是否注册之前——返回 429 不泄露邮箱是否存在。
+    if not _ip_rate_ok("send", client_ip, _IP_SEND_MAX, _IP_SEND_WINDOW):
+        return 429, {"error": "请求过于频繁，请稍后再试"}
     if not _lookup_username(email):
         # 不泄露"该邮箱有没有注册"，不发信但照样回成功
         return 200, {"ok": True, "cooldown": _RESEND_COOLDOWN}
@@ -444,7 +503,8 @@ def reset_request_code(email: str) -> Tuple[int, Dict[str, Any]]:
 
 
 def reset_verify(
-    email: str, code: str, new_password: str, *, hs_url: str, server_name: str
+    email: str, code: str, new_password: str, *, hs_url: str, server_name: str,
+    client_ip: str = "",
 ) -> Tuple[int, Dict[str, Any]]:
     """找回密码：验码 → 重置该邮箱对应账号的密码。成功返回 (200, {ok})。"""
     if not reset_enabled():
@@ -454,6 +514,9 @@ def reset_verify(
         return 400, {"error": "邮箱格式不正确"}
     if len(new_password or "") < 8:
         return 400, {"error": "新密码至少 8 位"}
+    # 重置码爆破比注册更危险（成功即账号接管）——同样按 IP 限尝试。
+    if not _ip_rate_ok("attempt", client_ip, _IP_ATTEMPT_MAX, _IP_ATTEMPT_WINDOW):
+        return 429, {"error": "尝试过于频繁，请稍后再试"}
 
     ok, msg = _check_code(email, code, purpose="reset")
     if not ok:

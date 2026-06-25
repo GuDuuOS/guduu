@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import os
 import unittest
 from typing import Any, Dict, Optional
 
@@ -36,6 +37,11 @@ BOT = "@guduu:guduu.local"
 ADMIN = "@admin:guduu.local"
 ALICE = "@alice:guduu.local"
 BOB = "@bob:guduu.local"
+
+
+def setUpModule() -> None:
+    # manual 渠道现在 fail-closed：没配密钥就不可用。给测试配一个，才能验签跑通业务链。
+    os.environ["COSMAC_PAY_MANUAL_SECRET"] = "test-manual-secret"
 
 
 class FakeClient:
@@ -421,10 +427,13 @@ class PayEndpointTests(unittest.TestCase):
         self.assertEqual(code, 401)  # whoami 不过 → 拒绝下单
 
     def test_stats_endpoint(self):
-        # 数据看板真实指标：会员数从控制室、其余从 cosmac DB（这里至少不报错且字段齐）
+        # 数据看板真实指标：全平台聚合，**仅平台管理员**可读。
         bot = self._paybot()
         bot.members.grant(ALICE, TIER_PAID)
-        code, out = bot.handle_stats(ALICE)
+        # 普通登录用户（非控制室管理员）→ 403，不泄露平台运营数据
+        self.assertEqual(bot.handle_stats(ALICE)[0], 403)
+        # 平台管理员 → 200 且字段齐
+        code, out = bot.handle_stats(ADMIN)
         self.assertEqual(code, 200)
         self.assertEqual(out["members_paid"], 1)
         for k in ("members_creator", "workflow_runs", "orders_paid", "kb_docs"):

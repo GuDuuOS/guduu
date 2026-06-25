@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from cosmac.db.models import Task
@@ -52,13 +52,43 @@ def create_tasks(
     return out
 
 
-def list_tasks(session: Session, *, limit: int = 200) -> List[Task]:
-    """列出任务（按 id 倒序，新建在前）。单实例小规模，全列即可。"""
+def list_tasks(
+    session: Session,
+    *,
+    room_ids: Optional[List[str]] = None,
+    sender: Optional[str] = None,
+    limit: int = 200,
+) -> List[Task]:
+    """列出任务（按 id 倒序，新建在前）。单实例小规模，全列即可。
+
+    越权防护：``room_ids``/``sender`` 任一非 None 时，只返回「属于这些房间」或「由本人下达」
+    的任务（两者取并集）。两者都为 None 才返回全部——仅供平台管理员/内部统计调用，**不要**
+    直接拿用户请求里的空作用域去调它，否则会泄露全平台任务。
+    """
+    stmt = select(Task)
+    # 只要传了任一作用域，就收敛到「房间命中 ∪ 本人下达」；防止任意登录用户拉到全平台任务。
+    if room_ids is not None or sender is not None:
+        conds = []
+        if room_ids:
+            conds.append(Task.room_id.in_(room_ids))
+        if sender:
+            conds.append(Task.sender == sender)
+        if not conds:
+            # 作用域显式给了但为空（既不在任何房间、也无本人任务）→ 不返回任何东西。
+            return []
+        stmt = stmt.where(or_(*conds))
     return list(
         session.execute(
-            select(Task).order_by(Task.id.desc()).limit(limit)
+            stmt.order_by(Task.id.desc()).limit(limit)
         ).scalars().all()
     )
+
+
+def get_task(session: Session, task_id: int) -> Optional[Task]:
+    """按 id 取单个任务（给改状态前做归属校验用）。不存在返回 None。"""
+    return session.execute(
+        select(Task).where(Task.id == task_id)
+    ).scalars().first()
 
 
 def update_task(

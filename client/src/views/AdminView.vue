@@ -590,7 +590,7 @@
             <button class="adm-btn ghost" :disabled="ruLoading || ruSaving" @click="loadRules">
               {{ ruLoading ? '加载中…' : '重新加载' }}
             </button>
-            <button class="adm-btn" :disabled="ruLoading || ruSaving" @click="saveRules">
+            <button class="adm-btn" :disabled="ruLoading || ruSaving || !ruLoaded" @click="saveRules">
               {{ ruSaving ? '保存中…' : '保存' }}
             </button>
           </div>
@@ -1392,6 +1392,11 @@ function startEditSkill(s: GlobalSkill) {
 
 /** 把当前 skills 列表整体写回控制室（全局技能是一个 state event 里的数组）。 */
 async function persistSkills(next: GlobalSkill[], okMsg: string) {
+  // 加载失败(skLoaded=false)时拒绝写：此刻 skills 可能是空/旧值，整体覆盖会抹掉线上真实技能。
+  if (!skLoaded.value) {
+    warn('请先成功加载', '技能列表尚未加载成功，无法保存（避免覆盖线上配置）')
+    throw new Error('技能未加载')
+  }
   skSaving.value = true
   try {
     await setGlobalSkills(next)
@@ -1488,6 +1493,10 @@ function toggleAgentSkill(slug: string, on: boolean) {
 }
 
 async function persistAgents(next: GlobalAgent[], okMsg: string) {
+  if (!agLoaded.value) {
+    warn('请先成功加载', '智能体列表尚未加载成功，无法保存（避免覆盖线上配置）')
+    throw new Error('智能体未加载')
+  }
   agSaving.value = true
   try {
     await setGlobalAgents(next)
@@ -1603,6 +1612,10 @@ function addTplDoc() { tpForm.kbDocs.push({ title: '', content: '' }) }
 function removeTplDoc(i: number) { tpForm.kbDocs.splice(i, 1) }
 
 async function persistTemplates(next: OnboardingTemplateDef[], okMsg: string) {
+  if (!tpLoaded.value) {
+    warn('请先成功加载', '入驻模板尚未加载成功，无法保存（避免覆盖线上配置）')
+    throw new Error('模板未加载')
+  }
   tpSaving.value = true
   try {
     await setOnboardingTemplates(next)
@@ -1683,6 +1696,11 @@ async function loadRules() {
 }
 
 async function saveRules() {
+  // 加载失败时拒绝写：rules 可能是空/旧值，整体覆盖会抹掉线上真实规则。
+  if (!ruLoaded.value) {
+    warn('请先成功加载', '全局规则尚未加载成功，无法保存（避免覆盖线上配置）')
+    return
+  }
   ruSaving.value = true
   try {
     // 去掉空行后保存（空文本规则没意义）
@@ -1896,6 +1914,10 @@ function startEditWorkflow(w: WorkflowDef) {
 }
 
 async function persistWorkflows(next: WorkflowDef[], okMsg: string) {
+  if (!wfLoaded.value) {
+    warn('请先成功加载', '工作流列表尚未加载成功，无法保存（避免覆盖线上配置）')
+    throw new Error('工作流未加载')
+  }
   wfSaving.value = true
   try {
     await setWorkflows(next)
