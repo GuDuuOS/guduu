@@ -214,6 +214,7 @@ watch(aiOpen, (v) => { if (v) nextTick(scrollAiToBottom) })
 
 // ── 纯界面态（折叠分组 / 下拉菜单 / 专注模式 / 收藏星）────
 const channelsOpen = ref(true)
+const fanCommunityOpen = ref(true)
 const dmsOpen = ref(true)
 const appMenuOpen = ref(false)
 const userMenuOpen = ref(false)
@@ -509,6 +510,16 @@ const filteredRooms = computed(() =>
       (!filterText.value || r.name.includes(filterText.value)),
   ),
 )
+
+// ── 粉丝社区分组：把面向粉丝的房间（后援会/歌迷会/粉丝群/应援会/社区/fans）从「频道」里
+//    拆出来单列一组。纯前端名称启发式，零后端——房间名带这些关键词即归此组，其余留「频道」。
+//    （以后若要精确归类，可改成读房间的 cosmac.* 状态事件标签。）
+const FAN_RE = /(后援会|歌迷会|粉丝|应援|社区|fans?\b|fan ?club)/i
+function isFanRoom(name: string): boolean { return FAN_RE.test(name) }
+// 普通频道（剔除粉丝社区房间）
+const channelRooms = computed(() => filteredRooms.value.filter((r) => !isFanRoom(r.name)))
+// 粉丝社区频道
+const fanRooms = computed(() => filteredRooms.value.filter((r) => isFanRoom(r.name)))
 
 // ── 频道彩色图标：按名字确定性取色 + 取代表字（无需后端，所有频道立即生效）──
 const CHAN_PALETTE = ['#c96442', '#6b8e4e', '#4a7a8c', '#b58932', '#8a6a8a', '#5a7a8a', '#b94a4a', '#7a8a5a']
@@ -1100,7 +1111,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
             </button>
             <template v-if="channelsOpen">
               <div
-                v-for="r in filteredRooms"
+                v-for="r in channelRooms"
                 :key="r.id"
                 class="cs-item ch-row"
                 :class="{ active: r.id === currentRoom }"
@@ -1109,10 +1120,35 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
                 <span class="cs-chan-av" :style="{ background: colorOf(r.name) }">{{ iconChar(r.name) }}</span>
                 <span class="cs-label">{{ r.name }}</span>
               </div>
-              <p v-if="!filteredRooms.length" class="cs-empty">还没有频道</p>
+              <p v-if="!channelRooms.length" class="cs-empty">还没有频道</p>
               <div class="cs-item cs-add-row" @click="openNewChannel">
                 <span class="cs-ic-box"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5v14" /></svg></span>
                 <span class="cs-label">添加频道</span>
+              </div>
+            </template>
+          </div>
+
+          <!-- 粉丝社区 group（面向粉丝的房间：后援会/歌迷会/粉丝群…，按名称归类）-->
+          <div class="cs-group">
+            <button class="cs-group-head" @click="fanCommunityOpen = !fanCommunityOpen">
+              <svg class="caret" :class="{ open: fanCommunityOpen }" width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M9 6 15 12 9 18z" /></svg>
+              <span>粉丝社区</span>
+            </button>
+            <template v-if="fanCommunityOpen">
+              <div
+                v-for="r in fanRooms"
+                :key="r.id"
+                class="cs-item ch-row"
+                :class="{ active: r.id === currentRoom }"
+                @click="openRoom(r.id)"
+              >
+                <span class="cs-chan-av" :style="{ background: colorOf(r.name) }">{{ iconChar(r.name) }}</span>
+                <span class="cs-label">{{ r.name }}</span>
+              </div>
+              <p v-if="!fanRooms.length" class="cs-empty">还没有粉丝社区频道</p>
+              <div class="cs-item cs-add-row" @click="openNewChannel">
+                <span class="cs-ic-box"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5v14" /></svg></span>
+                <span class="cs-label">添加粉丝频道</span>
               </div>
             </template>
           </div>
