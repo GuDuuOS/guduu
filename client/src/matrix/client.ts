@@ -1002,15 +1002,28 @@ export async function ensureControlRoom(): Promise<string> {
   const users: Record<string, number> = { [me]: CONTROL_OWNER_PL, [botId()]: CONTROL_OWNER_PL }
   for (const a of others) users[a] = CONTROL_ADMIN_PL
 
-  const res: any = await (mx as any).createRoom({
-    name: 'CosMac 控制室',
-    room_alias_name: CONTROL_ROOM_LOCALPART,
-    preset: 'private_chat',
-    invite: [botId(), ...others], // 主 AI + 其他管理员
-    topic: 'CosMac 管理后台 · 主 AI 运行时配置（请勿删除/退出）',
-    power_level_content_override: { users },
-  })
-  return res.room_id
+  try {
+    const res: any = await (mx as any).createRoom({
+      name: 'CosMac 控制室',
+      room_alias_name: CONTROL_ROOM_LOCALPART,
+      preset: 'private_chat',
+      invite: [botId(), ...others], // 主 AI + 其他管理员
+      topic: 'CosMac 管理后台 · 主 AI 运行时配置（请勿删除/退出）',
+      power_level_content_override: { users },
+    })
+    return res.room_id
+  } catch (e: any) {
+    // TOCTOU：resolve 与 create 之间，另一个 tab/管理员已抢先建好同别名房间 → 别名冲突。
+    // 此时不该报错，重新解析复用那个房间（并补齐管理员）即可。
+    if (e?.errcode === 'M_ROOM_IN_USE') {
+      const raced = await resolveControlRoom()
+      if (raced) {
+        await reconcileControlRoomAdmins(raced, others)
+        return raced
+      }
+    }
+    throw e
+  }
 }
 
 /**

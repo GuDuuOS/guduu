@@ -70,7 +70,7 @@
                 </div>
                 <div class="cam-row-desc">{{ m.roleLabel }} · {{ m.id }}</div>
               </div>
-              <button class="cam-del" title="移出频道" @click="doRemoveLive(m)">×</button>
+              <button class="cam-del" title="移出频道" :disabled="liveBusy" @click="doRemoveLive(m)">×</button>
             </div>
           </div>
           <p v-if="!liveMembers.length" class="cam-row-desc" style="padding:8px 2px">还没有成员（或正在加载…）</p>
@@ -316,12 +316,13 @@ async function doInviteLive() {
   } finally { liveBusy.value = false }
 }
 async function doRemoveLive(m: { id: string; name: string }) {
-  liveErr.value = ''
+  if (liveBusy.value) return  // 防连点对同一/多个成员并发 kick
+  liveBusy.value = true; liveErr.value = ''
   try {
     await removeLiveMember(m.id)
   } catch (e: any) {
     liveErr.value = `移出失败：${e?.message || e}`
-  }
+  } finally { liveBusy.value = false }
 }
 
 /* 人员：展开后勾选其要在大脑展示的数据 */

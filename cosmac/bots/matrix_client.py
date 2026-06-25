@@ -417,6 +417,8 @@ class MatrixClient:
             resp = self._session.get(url, timeout=10)
             if resp.status_code == 200:
                 return len(resp.json().get("joined", {}))
-        except requests.RequestException:
-            pass
+            logger.debug("查成员数 HTTP %s room=%s", resp.status_code, room_id)
+        except requests.RequestException as exc:
+            # 查不到保守按群聊(99)处理→私聊里 bot 因"没被 @"而沉默；留痕便于排查"bot 不回话"。
+            logger.debug("查成员数异常 room=%s: %s", room_id, exc)
         return 99

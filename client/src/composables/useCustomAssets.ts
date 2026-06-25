@@ -129,6 +129,19 @@ watch(
 let seq = 0
 const newId = (cat: AssetCat) => `${cat}-${Date.now()}-${++seq}`
 
+/**
+ * 清掉本机存的自定义资产（自定义 Agent/技能）。登出时调用——这些是**用户专属**数据，
+ * 存的是不带账号区分的固定 key，共享浏览器上不清会泄露给下一个登录的人。
+ * 配合登出整页 reload 一起用（reload 顺带清掉内存态）。
+ */
+export function clearCustomAssetsStorage(): void {
+  try {
+    localStorage.removeItem(STORE_KEY)
+  } catch {
+    /* 存储不可用时忽略 */
+  }
+}
+
 export function useCustomAssets() {
   return {
     assets,

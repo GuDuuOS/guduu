@@ -193,6 +193,9 @@ export function useSocialSources() {
     modalOpen,
     /** 切换当前工作区（LiveView 在 activeSpace 变化时调用）*/
     setSpace(id?: string) {
+      // 切 space 前取消旧 space 还没落盘的防抖保存，防其内容被写进新 space（数据串台）。
+      if (timer) { clearTimeout(timer); timer = null }
+      saveState.value = 'idle'
       spaceId.value = id || ''
       load()
     },

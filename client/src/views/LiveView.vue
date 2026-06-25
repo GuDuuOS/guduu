@@ -81,7 +81,7 @@ import { useMarketplace } from '@/composables/useMarketplace'
 import { useCli } from '@/composables/useCli'
 import { useProfileHome } from '@/composables/useProfileHome'
 import { usePluginStore } from '@/composables/usePluginStore'
-import { useCustomAssets } from '@/composables/useCustomAssets'
+import { useCustomAssets, clearCustomAssetsStorage } from '@/composables/useCustomAssets'
 import { useUserProfile, type UserSettingsTab } from '@/composables/useUserProfile'
 import { useChannelAdmin } from '@/composables/useChannelAdmin'
 
@@ -911,13 +911,12 @@ async function aiSend() {
 
 async function doLogout() {
   await logout()
-  loggedIn.value = false
-  rooms.value = []
-  msgs.value = []
-  currentRoom.value = ''
-  aiRoom.value = ''
-  aiMsgs.value = []
+  // 清掉用户专属的本机数据（自定义 Agent/技能），再整页 reload。
+  // reload 是关键：很多 composable 用模块级单例状态(CLI 历史/频道配置/插件…)，不 reload
+  // 的话共享浏览器上「登出→换人登录」会让下一个人看到上一个人的数据。reload 一次全清干净。
+  clearCustomAssetsStorage()
   userMenuOpen.value = false
+  window.location.reload()
 }
 
 function openAiPanel() {

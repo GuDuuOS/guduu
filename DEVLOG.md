@@ -7,6 +7,15 @@
 
 ---
 
+## 2026-06-26 — 代码审查·第三批（登出状态泄露/竞态/并发守卫）
+- **登出单例状态泄露(systemic·共享浏览器)**:很多 composable 用模块级单例(CLI 历史/频道配置/插件/自定义资产)，doLogout 原来只清几个 ref、不 reload → 换人登录能看到上个人的数据。改成 doLogout 清掉 customAssets 本机存储(`clearCustomAssetsStorage`)再**整页 reload**，一次全清(含未来新增的任何单例)。
+- **debounce 换工作区数据串台**:useSocialSources/useBoardSources 的 setSpace 切 space 前没取消在途防抖保存，persist 用执行时的 spaceId → 旧 space 内容被写进新 space。setSpace 顶部 clearTimeout 修掉。
+- **引导重复建工作区**:useOnboarding.runCreate 入口加 busy 重入守卫(防双击建俩工作区);OnboardingWizard 的 done 定时器在卸载时清理(防卸载后 emit)。
+- **频道管理并发**:ChannelAdminModal.doRemoveLive 加 liveBusy 守卫 + 按钮禁用(防连点并发 kick)。
+- **控制室 TOCTOU**:ensureControlRoom 的 createRoom 撞 M_ROOM_IN_USE(并发建房)时重 resolve 复用，不再报错。
+- **小修**:joined_member_count 查不到补 debug 日志(便于排查"bot 私聊不回话")。
+- 测试:全量 216 通过、ruff 全绿、前端 build + preview 无 console 报错。**部署:发 dist + 重启 bot**。
+
 ## 2026-06-26 — 代码审查·第二批（中低危健壮性/泄露/内存泄漏）
 - 接着上一批继续清剩余项:
   - **后端**:工具异常文本不再原样回灌模型(信息泄露)、best-effort 落库 except 补 debug 日志;`cosine` 维度不一致返回 0.0+告警(不再 min(len) 算错值);邮箱映射 `set_email` 加 SAVEPOINT 抗并发唯一约束撞车、注册成功但映射失败提到 error 级+重试一次(否则用户无法邮箱登录/找回);bot 启动时若 `COSMAC_PAY_ALLOW_MANUAL` 开着就大声告警(生产红线)。

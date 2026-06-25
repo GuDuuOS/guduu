@@ -80,7 +80,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, watch } from 'vue'
+import { ref, nextTick, watch, onBeforeUnmount } from 'vue'
 import { useOnboarding } from '@/composables/useOnboarding'
 
 const emit = defineEmits<{ (e: 'done', spaceId: string): void; (e: 'skip'): void }>()
@@ -107,13 +107,16 @@ watch(step, (s) => {
 })
 function onPersona() { submitPersona(aiNameInput.value, aiPersonaInput.value) }
 
+let doneTimer: ReturnType<typeof setTimeout> | null = null
 async function onCreate() {
   try {
     const sid = await runCreate()
     // 稍等让"搭好了"气泡显示一下，再切进新工作区
-    setTimeout(() => { visible.value = false; emit('done', sid) }, 700)
+    doneTimer = setTimeout(() => { doneTimer = null; visible.value = false; emit('done', sid) }, 700)
   } catch { /* 错误已在 composable 里写进 error，停在确认页 */ }
 }
+// 组件卸载时清掉未触发的定时器，避免卸载后还 emit('done')/改 visible（对已销毁实例操作）。
+onBeforeUnmount(() => { if (doneTimer) { clearTimeout(doneTimer); doneTimer = null } })
 async function onSkip() { await skip(); emit('skip') }
 
 // 新消息自动滚到底

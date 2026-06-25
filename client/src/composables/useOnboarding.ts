@@ -225,6 +225,8 @@ export function useOnboarding() {
      * 返回新建的 spaceId（失败抛错，由 UI 显示）。
      */
     async runCreate(): Promise<string> {
+      // 重入守卫：防止快速双击/重复触发并发跑两遍，建出两个工作区。
+      if (busy.value) throw new Error('正在创建中，请稍候…')
       busy.value = true
       error.value = ''
       step.value = 'creating'

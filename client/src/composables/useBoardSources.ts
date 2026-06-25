@@ -87,6 +87,10 @@ export function useBoardSources() {
     closeSourcePanel() { panelOpen.value = false },
     /** 切换当前工作区（LiveView 在 activeSpace 变化时调用）*/
     setSpace(id?: string) {
+      // 关键：切 space 前取消旧 space 还没落盘的防抖保存。persist 用执行时的 spaceId，
+      // 若不取消，旧 space 的 sources 会被写进**新 space**（数据串台）。
+      if (timer) { clearTimeout(timer); timer = null }
+      saveState.value = 'idle'
       spaceId.value = id || ''
       load()
     },
