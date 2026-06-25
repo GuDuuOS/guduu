@@ -7,6 +7,13 @@
 
 ---
 
+## 2026-06-25 — P3 数据看板按「接入数据源」配置渲染（去掉写死的安其演示）
+- 负责人定:看板社媒区跟工作区「接入数据源」配置(cosmac.social_sources)走。
+- 看板社媒区重做:没配数据源→空态(引导去接入);配了→每个平台一张卡(平台/账号/模式/状态),指标显示「待接入」(等社媒采集器 P2~P4 接上变真数)。平台运营(真实 KPI)那组保留。
+- **彻底删掉安其演示数据**:dashboards.ts(银河谣/墨白/抖音占位)、PanelChart.vue、UnitGrid.vue、useChart.ts 全删(已无引用)。看板不再有任何安其专属内容。
+- 验证:build(`index-DjZF4N9m.js`)。看板在登录后,需眼验。纯前端,**发 dist**。
+- 注:社媒数值仍是占位,真实数要等社媒采集器(social-data-source P2~P4)。
+
 ## 2026-06-25 — 修生产知识库入库失败(cosmac_kb_chunk 缺 embed_tag 列)
 - 自测 P2c 入驻知识库入库返回 ingested:0。查 bot 日志:`UndefinedColumn: column "embed_tag" of relation "cosmac_kb_chunk" does not exist`。
 - 根因:旧生产库建 cosmac_kb_chunk 时还没 embed_tag 列(后加的向量空间标识),create_all 只建表不补列 → 入库 INSERT 报错、整个 KB 写入失效(pgvector 本身没问题,embedding 列在)。

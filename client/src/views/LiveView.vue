@@ -74,7 +74,7 @@ import { useRightPanel } from '@/composables/useRightPanel'
 import BoardSourcePanel from '@/components/layout/BoardSourcePanel.vue'
 import { useBoardSources } from '@/composables/useBoardSources'
 import SocialSourceModal from '@/components/board/SocialSourceModal.vue'
-import { useSocialSources } from '@/composables/useSocialSources'
+import { useSocialSources, platformLabel, platformIcon } from '@/composables/useSocialSources'
 import OnboardingWizard from '@/components/onboarding/OnboardingWizard.vue'
 import { useOnboarding } from '@/composables/useOnboarding'
 import { useMarketplace } from '@/composables/useMarketplace'
@@ -92,8 +92,8 @@ const { open: openAdmin, setCurrent: setAdminChannel } = useChannelAdmin()
 const { visible: rightPanelVisible, toggle: toggleRightPanel, hide: hideRightPanel } = useRightPanel()
 // 看板数据源：数据看板/任务看板的数据源展示(展开列表) + 编辑(弹窗)，按工作区持久化
 const { sources, panelOpen: boardPanelOpen, toggleSourcePanel, closeSourcePanel: closeBoardSrcPanel, setSpace: setBoardSpace } = useBoardSources()
-// 社媒数据源：看板「社媒数据」组的真实取数配置（账号API / AI爬取），按工作区持久化
-const { openModal: openSocialModal, setSpace: setSocialSpace } = useSocialSources()
+// 社媒数据源：看板「社媒数据」组读这份配置渲染（用户配的平台），数值待采集器接入
+const { sources: socialSources, openModal: openSocialModal, setSpace: setSocialSpace } = useSocialSources()
 // 首次引导：注册/登录后的「主 AI 问答」向导（建工作区/频道/AI人设）
 const { maybeAutoStart: maybeStartOnboarding } = useOnboarding()
 let onbChecked = false // 首屏只检测一次是否要弹引导
@@ -104,24 +104,15 @@ const { open: openPluginStore } = usePluginStore()
 const { open: openAssets } = useCustomAssets()
 const { openSettings } = useUserProfile()
 
-// ── 数据看板（复用 DEMO 的画布组件 + 影视公司主题数据）──
+// ── 数据看板 ──
 import KpiCard from '@/components/canvas/KpiCard.vue'
-import PanelChart from '@/components/canvas/PanelChart.vue'
-import UnitGrid from '@/components/canvas/UnitGrid.vue'
-import { getDashboard } from '@/data/dashboards'
-import { useActiveWorkspace } from '@/composables/useActiveWorkspace'
 import '@/styles/canvas.css' // 看板样式，命名空间在 .canvas/.panel 下，不与 LiveView 撞
-const { activeId } = useActiveWorkspace()
-const dash = computed(() => getDashboard(activeId.value))
 
-// 数据看板 KPI：负责人定调「社媒 + 平台运营 混排」——
-//  · 上排 = 社媒数据（播放量/粉丝/粉丝增长/互动率），演示数据来自 dash.value.kpis（待接真实社媒源）。
-//  · 下排 = 平台**真实**运营指标（会员/工作流/订单/知识库），来自后端 getPlatformStats。
+// 数据看板 KPI：社媒区跟「接入数据源」配置走（见 socialSources）；下排 = 平台**真实**运营指标
+//（会员/工作流/订单/知识库），来自后端 getPlatformStats。
 import { getPlatformStats, type PlatformStats } from '@/matrix/client'
 const stats = ref<PlatformStats | null>(null)
 async function loadStats() { stats.value = await getPlatformStats() }
-// 上排：社媒数据（演示），口径与下方图表一致
-const socialKpis = computed(() => dash.value.kpis)
 // 下排：平台运营真实数据；拿不到时为空（不渲染该组，避免空屏占位）
 const opsKpis = computed(() => {
   const s = stats.value
@@ -1380,28 +1371,38 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
                 </div>
                 <div class="board-ask-tip">交给中枢 AI 执行（建群 / 查任务 / 跑工作流…），结果在右侧中枢 AI 面板。</div>
               </div>
-              <!-- 社媒数据（演示）：播放量 / 粉丝 / 粉丝增长 / 互动率 -->
+              <!-- 社媒数据：跟工作区「接入数据源」配置走（cosmac.social_sources）。
+                   数值待社媒采集器(P2~P4)接上才有真数，现在显示「待接入」占位。 -->
               <div class="board-group-h">
-                📈 社媒数据 <span class="board-group-tag">演示</span>
-                <!-- 接入真实数据源：配各平台账号 API / AI 爬取（存 cosmac.social_sources）-->
+                📈 社媒数据
                 <button class="board-src-btn" title="接入社媒数据源（账号 API / AI 爬取）" @click="openSocialModal">
                   🔌 接入数据源
                 </button>
               </div>
-              <div class="kpis">
-                <KpiCard v-for="(k, i) in socialKpis" :key="k.label" :data="k" :delay="200 + i * 80" />
+              <!-- 没配数据源：引导去接入 -->
+              <div v-if="!socialSources.length" class="board-empty">
+                <div class="board-empty-ic">📡</div>
+                <div class="board-empty-t">还没接入社媒数据源</div>
+                <div class="board-empty-d">配置抖音 / Instagram / YouTube 等平台账号后，这里展示粉丝、播放、互动等数据。</div>
+                <button class="board-empty-btn" @click="openSocialModal">🔌 接入数据源</button>
               </div>
-              <!-- 社媒图表：播放趋势(LIVE) / 各周新增粉丝 / 状态网格 / 各平台粉丝分布 -->
-              <div class="grid-2">
-                <PanelChart :title="dash.prod.title" :config="dash.prod.build" :live="dash.prod.live" />
-                <PanelChart :title="dash.save.title" :config="dash.save.build" />
-              </div>
-              <div class="grid-3">
-                <div class="panel" style="grid-column: span 2">
-                  <div class="pt">{{ dash.unitsTitle }}</div>
-                  <UnitGrid :units="dash.units" />
+              <!-- 配了数据源：每个平台一张卡（指标待采集器接入）-->
+              <div v-else class="src-grid">
+                <div v-for="(s, i) in socialSources" :key="i" class="src-card" :style="{ animationDelay: (200 + i * 80) + 'ms' }">
+                  <div class="src-head">
+                    <span class="src-plat">{{ platformIcon(s.platform) }} {{ platformLabel(s.platform) }}</span>
+                    <span class="src-mode" :class="s.mode">{{ s.mode === 'api' ? '官方 API' : 'AI 爬取' }}</span>
+                  </div>
+                  <div class="src-acc">{{ s.account || '—' }}</div>
+                  <div class="src-metrics">
+                    <div class="src-m"><span class="src-m-l">粉丝</span><span class="src-m-v">待接入</span></div>
+                    <div class="src-m"><span class="src-m-l">播放</span><span class="src-m-v">待接入</span></div>
+                    <div class="src-m"><span class="src-m-l">互动</span><span class="src-m-v">待接入</span></div>
+                  </div>
+                  <div class="src-status" :class="{ off: !s.enabled }">
+                    {{ !s.enabled ? '已停用' : (s.lastSync ? '已同步' : '待采集器接入') }}
+                  </div>
                 </div>
-                <PanelChart :title="dash.pie.title" :config="dash.pie.build" :height="dash.pie.height ?? 180" />
               </div>
               <!-- 平台运营（真实）：会员 / 工作流 / 订单 / 知识库；拿不到数据时整组不渲染 -->
               <template v-if="opsKpis.length">
@@ -2104,8 +2105,29 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
    造成用户看到的拖移 BUG。这里显式把 overflow-x 钉成 hidden，彻底禁掉横向拖动。 */
 .board-scroll { flex: 1; overflow-y: auto; overflow-x: hidden; min-height: 0; }
 /* 看板"一句话下达目标"hero（真发给中枢 AI）*/
-/* 看板分组小标题：区分「社媒数据(演示)」与「平台运营(真实)」两组 KPI */
+/* 看板分组小标题：区分「社媒数据」与「平台运营」两组 KPI */
 .board-group-h { display: flex; align-items: center; gap: 8px; font-size: var(--fs-100); font-weight: var(--fw-bold); color: var(--text); margin: 18px 2px 10px; }
+/* 社媒区：没配数据源的空态 */
+.board-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 36px 24px; background: var(--bg-panel); border: 1px dashed var(--border); border-radius: 14px; }
+.board-empty-ic { font-size: 30px; }
+.board-empty-t { font-size: var(--fs-150, 15px); font-weight: var(--fw-bold); color: var(--text); }
+.board-empty-d { font-size: var(--fs-75, 12px); color: var(--text-3); max-width: 380px; line-height: 1.6; }
+.board-empty-btn { margin-top: 6px; border: none; background: var(--accent); color: #fff; font-size: 13px; font-weight: var(--fw-bold); padding: 8px 18px; border-radius: 9px; cursor: pointer; }
+/* 社媒区：每个数据源一张卡 */
+.src-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+.src-card { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; animation: kpi-in .5s both; }
+.src-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.src-plat { font-size: 14px; font-weight: var(--fw-bold); color: var(--text); }
+.src-mode { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-dim, #888); }
+.src-mode.api { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.src-acc { font-size: 12px; color: var(--text-2); font-family: var(--font-mono, monospace); margin-top: 4px; word-break: break-all; }
+.src-metrics { display: flex; gap: 16px; margin-top: 12px; }
+.src-m { display: flex; flex-direction: column; gap: 2px; }
+.src-m-l { font-size: 11px; color: var(--text-3); }
+.src-m-v { font-size: 14px; font-weight: var(--fw-bold); color: var(--text-dim, #999); }
+.src-status { margin-top: 12px; font-size: 11px; color: var(--text-3); padding-top: 8px; border-top: 1px dashed var(--border); }
+.src-status.off { color: #b94a4a; }
+@keyframes kpi-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 /* 「接入数据源」按钮：靠右，弱化描边样式，不抢 KPI 视觉 */
 .board-src-btn { margin-left: auto; border: 1px solid var(--border); background: var(--bg-panel); color: var(--text-2); font-size: 12px; font-weight: var(--fw-bold); padding: 5px 12px; border-radius: 8px; cursor: pointer; white-space: nowrap; }
 .board-src-btn:hover { border-color: var(--accent); color: var(--accent); }
