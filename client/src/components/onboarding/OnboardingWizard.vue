@@ -125,7 +125,9 @@ watch(messages, () => { nextTick(() => { if (scroll.value) scroll.value.scrollTo
 </script>
 
 <style scoped>
-.onb-mask { position: fixed; inset: 0; z-index: 3000; background: var(--bg, #f5f3ee); display: flex; align-items: center; justify-content: center; padding: 24px; }
+/* 毛玻璃遮罩：半透明 + 背景模糊，让后面的应用数据透出来但虚化，聚焦在 AI 引导卡片上。
+   （backdrop-filter 不支持的旧浏览器会回退成半透明底色，仍可用。）*/
+.onb-mask { position: fixed; inset: 0; z-index: 3000; background: rgba(245, 243, 238, 0.5); backdrop-filter: blur(12px) saturate(1.1); -webkit-backdrop-filter: blur(12px) saturate(1.1); display: flex; align-items: center; justify-content: center; padding: 24px; }
 .onb { width: 100%; max-width: 560px; height: min(680px, 90vh); display: flex; flex-direction: column; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 18px; box-shadow: 0 24px 64px rgba(0,0,0,.18); overflow: hidden; }
 .onb-head { display: flex; align-items: center; gap: 10px; padding: 16px 20px; border-bottom: 1px solid var(--border); }
 .onb-logo { font-weight: 800; color: var(--text); letter-spacing: .3px; }
