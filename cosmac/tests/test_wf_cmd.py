@@ -303,6 +303,50 @@ class TestWfCommand(unittest.TestCase):
             self.assertEqual(get_run(s, rid).status, "error")
         self.assertTrue(any("提交队列中断" in t for _r, t in bot.client.sent))
 
+    def test_release_pending_source_allows_retry(self) -> None:
+        # 池满提交失败时回滚来源预约：删掉 queued 占位，让同一事件能重新预约。
+        from cosmac.db.wf_repo import (
+            create_pending,
+            find_by_source_key,
+            release_pending_source,
+        )
+
+        SK = "event:$same:ai"
+        with session_scope() as s:
+            create_pending(
+                s, slug="cover", platform="webhook", room_id=ROOM,
+                sender="@u:host", user_input="x", token="", source_key=SK,
+            )
+        # 预约已登记 → 再查得到（不回滚的话重试会被误判"已触发过"）
+        with session_scope() as s:
+            self.assertIsNotNone(find_by_source_key(s, SK))
+        # 回滚后 → queued 占位被删，来源键可重新预约
+        with session_scope() as s:
+            release_pending_source(s, SK)
+        with session_scope() as s:
+            self.assertIsNone(find_by_source_key(s, SK))
+
+    def test_release_pending_source_spares_started_run(self) -> None:
+        # 只删 queued：已开始外呼(pending/processing)或已结清的绝不能删，否则丢回调/重复结算。
+        from cosmac.db.wf_repo import (
+            create_pending,
+            find_by_source_key,
+            mark_submission_started,
+            release_pending_source,
+        )
+
+        SK = "event:$started:ai"
+        with session_scope() as s:
+            r = create_pending(
+                s, slug="cover", platform="webhook", room_id=ROOM,
+                sender="@u:host", user_input="x", token="tok", source_key=SK,
+            )
+            mark_submission_started(s, r.id)  # queued → pending（已外呼）
+        with session_scope() as s:
+            release_pending_source(s, SK)  # 不该删 pending
+        with session_scope() as s:
+            self.assertIsNotNone(find_by_source_key(s, SK))
+
     def test_reclaim_orphans_grace_spares_recent(self) -> None:
         # #1：新近的 pending 不回收（外部平台可能仍在跑、稍后回调；回收会误杀+双扣费）
         from datetime import datetime, timedelta

@@ -336,7 +336,13 @@ class CosmacBot:
                 extra_system=extra_system,
                 history=history,
             )
-            self.client.send_text(room_id, reply)
+            # 幂等发送：用 event_id 派生固定 txn_id，让 Synapse 据此去重。
+            # 场景：同一事务里若有别的事件失败，handle_transaction 会让 Synapse 重发**整批**，
+            # 已成功的这条 AI 回复会被重新处理；固定 txn_id 保证群里不会冒出两条同样的回复。
+            self.client.send_text(
+                room_id, reply,
+                txn_id=f"cosmac-ai-{event_id}" if event_id else None,
+            )
 
     # 短期记忆窗口：最多带最近这么多条历史；单条正文截断长度（控 token）。
     _HISTORY_LIMIT = 12

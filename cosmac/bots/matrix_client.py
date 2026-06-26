@@ -31,6 +31,9 @@ class MatrixClient:
         # 日志）。改用 Authorization: Bearer 请求头，用一个 Session 统一带上。
         self._session = requests.Session()
         self._session.headers["Authorization"] = f"Bearer {as_token}"
+        # 每房间已加入成员数缓存：上次成功查到的值。查不到（瞬时抖动/5xx）时回退它，
+        # 避免本来 2 人的私聊被误判成群聊→bot 因"没被 @"而沉默（可用性 bug）。
+        self._member_count_cache: Dict[str, int] = {}
 
     def _url(self, path: str) -> str:
         """拼出完整的 API URL，只在查询参数里带 user_id（身份标识，非密钥）。
@@ -410,15 +413,31 @@ class MatrixClient:
         """查房间当前已加入的成员数（用于区分"私聊"和"群聊"）。
 
         私聊（只有用户 + 主 AI，共 2 人）里，主 AI 对每句话都回；
-        群聊里则只在被 @ 时才回。查不到就保守按群聊处理。
+        群聊里则只在被 @ 时才回。
+
+        可用性：直接对成员数查询 fail-open 返回 99（按群聊）会让**私聊在服务端瞬时
+        抖动/5xx 期间彻底沉默**（最难排查的"bot 不回话"）。两层兜底：
+          1) 一次重试，吸收瞬时网络抖动；
+          2) 仍失败时回退**上次成功查到的值**——私聊一旦见过就稳定是 2，不会被误判群聊。
+        从未成功查过的房间才最终保守按群聊(99)。
         """
         url = self._url(f"/_matrix/client/v3/rooms/{quote(room_id)}/joined_members")
-        try:
-            resp = self._session.get(url, timeout=10)
-            if resp.status_code == 200:
-                return len(resp.json().get("joined", {}))
-            logger.debug("查成员数 HTTP %s room=%s", resp.status_code, room_id)
-        except requests.RequestException as exc:
-            # 查不到保守按群聊(99)处理→私聊里 bot 因"没被 @"而沉默；留痕便于排查"bot 不回话"。
-            logger.debug("查成员数异常 room=%s: %s", room_id, exc)
-        return 99
+        for attempt in range(2):  # 首次 + 一次重试，覆盖瞬时抖动
+            try:
+                resp = self._session.get(url, timeout=10)
+                if resp.status_code == 200:
+                    n = len(resp.json().get("joined", {}))
+                    self._member_count_cache[room_id] = n  # 记成功值供下次回退
+                    return n
+                logger.debug(
+                    "查成员数 HTTP %s room=%s (第%d次)",
+                    resp.status_code, room_id, attempt + 1,
+                )
+            except requests.RequestException as exc:
+                logger.debug("查成员数异常 room=%s (第%d次): %s", room_id, attempt + 1, exc)
+        # 两次都没查到：优先回退上次成功值，避免私聊因瞬时故障被误判成群聊而沉默。
+        cached = self._member_count_cache.get(room_id)
+        if cached is not None:
+            logger.debug("查成员数失败，回退上次缓存值 %s room=%s", cached, room_id)
+            return cached
+        return 99  # 从未成功查过：保守按群聊（宁可不在群里刷屏）

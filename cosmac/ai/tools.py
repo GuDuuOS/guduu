@@ -448,12 +448,17 @@ class Toolbox:
                 logger.exception("后台工作流执行出错：%s", name)
 
         pool = "slow" if platform == "comfyui" else "fast"  # ComfyUI 走慢池(#5)
-        if ctx.source_key and not self._reserve_workflow_source(
+        reserved = bool(ctx.source_key)
+        if reserved and not self._reserve_workflow_source(
             ctx.source_key, slug, platform, ctx, user_input
         ):
             return f"工作流「{name}」已经由这条消息触发过，我不会重复提交。"
         if submit_background(_work, pool=pool):
             return f"工作流「{name}」已开始，完成后我会把结果发到群里。"
+        # 池满提交失败：必须回滚刚才的来源预约，否则这条事件之后重试会被误判"已触发过"
+        # 而永远跑不起来（预约占位残留，直到 1 小时后才被遗孤回收并误报"提交队列中断"）。
+        if reserved:
+            self._release_workflow_source(ctx.source_key)
         return "任务太多、系统繁忙，请稍后再让我跑。"
 
     def _tool_create_tasks(self, args: Dict[str, Any], ctx: ToolContext) -> str:
@@ -519,3 +524,15 @@ class Toolbox:
         except Exception:
             # DB 不可用时宁可继续执行（保持旧可用性），只失去重放幂等。
             return True
+
+    def _release_workflow_source(self, source_key: str) -> None:
+        """提交线程池失败时回滚来源预约（删尚未提交的 queued 占位）。DB 不可用则忽略。"""
+        try:
+            from cosmac.db import session_scope
+            from cosmac.db.wf_repo import release_pending_source
+
+            with session_scope() as s:
+                release_pending_source(s, source_key)
+        except Exception:
+            # 回滚失败只会让该来源在遗孤回收前不可重试，不影响当前响应；留痕即可。
+            logger.debug("回滚工作流来源预约失败（忽略）", exc_info=True)

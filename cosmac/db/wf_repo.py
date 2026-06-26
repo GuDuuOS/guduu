@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from datetime import datetime, timedelta
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.orm import Session
 
 from cosmac.db.models import WorkflowRun
@@ -151,6 +151,27 @@ def reclaim_orphans(session: Session) -> List[Tuple[int, str, str, str]]:
 def get_run(session: Session, run_id: int) -> "WorkflowRun | None":
     """按 id 取运行记录。"""
     return session.get(WorkflowRun, run_id)
+
+
+def release_pending_source(session: Session, source_key: str) -> None:
+    """回滚来源预约：删除尚未真正提交(queued)的占位记录。
+
+    场景：run_workflow 先按 source_key 建 queued 占位再往线程池提交，若**线程池满**提交
+    失败，这条占位会残留——之后同一事件(Synapse 重发)重试时被 find_by_source_key 命中、
+    误判"已触发过"而永远不再执行。这里把它删掉，让重试能重新预约并真正提交。
+
+    只删 **queued**：pending/processing/ok/error 说明已开始外呼或已结清，绝不能删。
+    """
+    key = (source_key or "").strip()
+    if not key:
+        return
+    session.execute(
+        delete(WorkflowRun).where(
+            WorkflowRun.source_key == key,
+            WorkflowRun.status == "queued",
+        )
+    )
+    session.flush()
 
 
 def find_by_source_key(session: Session, source_key: str) -> Optional[WorkflowRun]:

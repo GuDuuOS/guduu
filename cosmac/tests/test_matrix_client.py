@@ -7,8 +7,64 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
+
+import requests
 
 from cosmac.bots.matrix_client import MatrixClient
+
+
+class _Resp:
+    """最小化的假 requests 响应。"""
+
+    def __init__(self, status_code: int, payload: dict) -> None:
+        self.status_code = status_code
+        self._payload = payload
+
+    def json(self) -> dict:
+        return self._payload
+
+
+class TestJoinedMemberCount(unittest.TestCase):
+    """私聊/群聊判定的可用性回归：瞬时故障不能让私聊被误判成群聊。"""
+
+    def setUp(self) -> None:
+        self.client = MatrixClient(
+            homeserver_url="http://hs:8008", as_token="t", bot_user_id="@guduu:hs",
+        )
+
+    def test_caches_and_falls_back_on_failure(self) -> None:
+        # 先成功查到 2 人（私聊），缓存下来
+        with mock.patch.object(
+            self.client._session, "get",
+            return_value=_Resp(200, {"joined": {"@a:hs": {}, "@guduu:hs": {}}}),
+        ):
+            self.assertEqual(self.client.joined_member_count("!r:hs"), 2)
+        # 随后服务端抖动（两次都抛异常）：必须回退上次缓存值 2，而不是 fail-open 的 99
+        with mock.patch.object(
+            self.client._session, "get",
+            side_effect=requests.RequestException("boom"),
+        ):
+            self.assertEqual(self.client.joined_member_count("!r:hs"), 2)
+
+    def test_retries_once_then_succeeds(self) -> None:
+        # 第一次抛异常、第二次成功：一次重试应吸收瞬时抖动
+        with mock.patch.object(
+            self.client._session, "get",
+            side_effect=[
+                requests.RequestException("flaky"),
+                _Resp(200, {"joined": {"@a:hs": {}, "@guduu:hs": {}}}),
+            ],
+        ):
+            self.assertEqual(self.client.joined_member_count("!r:hs"), 2)
+
+    def test_unknown_room_conservatively_group(self) -> None:
+        # 从未成功查过、又查不到 → 保守按群聊(99)，避免在群里刷屏
+        with mock.patch.object(
+            self.client._session, "get",
+            side_effect=requests.RequestException("boom"),
+        ):
+            self.assertEqual(self.client.joined_member_count("!never:hs"), 99)
 
 
 class TestMatrixClientAuth(unittest.TestCase):
