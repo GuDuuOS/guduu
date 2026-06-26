@@ -7,6 +7,18 @@
 
 ---
 
+## 2026-06-26 — 验证编排链 + 交互增强·选择卡 ask_user_choice
+- **验证结论（已留档、测试脚本已删）**:
+  - **逻辑层**:写了 e2e 脚本(假 client+真内存DB)模拟主AI 走完整链，6 阶段全对(名册→拆解+类型化指派→建专班+写channel_config→审核回填→任务RULE注入→多AI@名路由)。脚本验证完已删(run/ 本是 gitignored)。
+  - **智能层(线上真模型 DeepSeek)**:负责人在线上 bot 实测——一句"办新品发布会，要文案/设计/现场统筹，把团队拉起来分任务"，bot **真建出「新品发布会专班」频道 + 拆出 3 个对口任务**(文案/设计/现场统筹)，且**没瞎编不存在的人**(名册空→克制地反问邀请谁)。证明：真模型会主动调编排工具、理解到位、不臆造。✅ 真智能、非背稿。
+  - 全量单测 277 通过(需 COSMAC_PAY_MANUAL_SECRET 才跑 trading 那批)。
+- **交互增强·选择卡**(负责人反馈"该让用户点选而非打字"):
+  - **后端**:新增主AI 工具 `ask_user_choice(question, options[], multi)` → 发 cosmac.card{kind:'choice'} 富卡(纯文本兜底);_ALWAYS_ON。
+  - **前端**:新组件 `components/chat/ChoiceCard.vue`(单选点即发 / 多选选完点"确定");LiveView 频道与中枢AI 面板的卡片渲染都加 `kind==='choice'` 分支;`pickChoice` 把选择作为用户消息发回房间、对话继续(同打字效果)。
+  - 已知小边界:频道里点选发的是普通消息(bot 仅被 @ 才答);主用例是 DM 中枢AI 编排，正常生效。
+- **测试**:test_agent_tools 加 ask_user_choice(发 choice 卡/选项正确);工具集断言 12→13。277 通过、ruff 全绿、client build OK。
+- **部署**:动了 client + cosmac → **发 dist + 重启 bot**。新 hash index-CauOMoIi.js。
+
 ## 2026-06-26 — 模块3.5 档3b·专班多AI 的 @名路由（纯后端，模块3.5 收官）
 - **做了什么**:让"拉多个AI 进专班"真正生效——专班里点名某个绑定的协作 Agent（按 slug 或显示名匹配正文），就由该 worker 以自己的人设/技能/模型接这条；没点名则维持 lead（项目主AI）。这样编剧Agent/分镜Agent 能在同一专班各自接活。
 - **实现**:`_group_context` 多带 `worker_slugs`(频道 channel_config.agentSlugs);`_apply_worker_routing(text, gctx)` 在正文里匹配 worker 名/slug，命中就换其人设/技能/模型回这条，**任务RULE 不变**(worker 仍受专班约束);`_handle_event` 在算 addendum 前调一次。方案A(单 bot 多人设，worker 非独立 Matrix 账号)。

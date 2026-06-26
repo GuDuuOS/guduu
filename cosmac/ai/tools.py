@@ -98,7 +98,7 @@ class Toolbox:
     # 双保险，不靠工具开关来拦；放这里免得旧 AI 配置白名单没有它而被当禁用。
     _ALWAYS_ON: Set[str] = {
         "create_tasks", "search_knowledge", "web_search", "list_capabilities",
-        "assemble_team", "list_room_tasks", "update_task",
+        "assemble_team", "list_room_tasks", "update_task", "ask_user_choice",
     }
 
     def _is_enabled(self, name: str) -> bool:
@@ -482,6 +482,44 @@ class Toolbox:
             fn=self._tool_update_task,
         )
 
+        # 13) 让用户点选（而非打字）：需要用户做选择时发一组可点击选项卡。
+        self._register(
+            name="ask_user_choice",
+            description=(
+                "需要用户从若干选项里做选择时，用它发一组**可点击的选项**给用户（而不是用一句话让 TA 打字）。"
+                "适合：选邀请谁加入专班、选方案/模板、二选一确认、是否继续等。"
+                "发出后**结束本轮**，等用户点选、其选择会作为新消息发回来，你再继续。"
+                "选项尽量来自真实可选项（如 list_capabilities 里的人/Agent）。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string", "description": "问用户的话。"},
+                    "options": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "label": {"type": "string", "description": "按钮显示文字。"},
+                                "value": {
+                                    "type": "string",
+                                    "description": "点选后代表用户发回的内容；不填则用 label。",
+                                },
+                            },
+                            "required": ["label"],
+                        },
+                        "description": "可点选的选项（2-8 个）。",
+                    },
+                    "multi": {
+                        "type": "boolean",
+                        "description": "是否允许多选（如『邀请哪些人』）；默认单选。",
+                    },
+                },
+                "required": ["question", "options"],
+            },
+            fn=self._tool_ask_user_choice,
+        )
+
     # —— 各工具的具体执行（转发到 MatrixClient）——
 
     def _tool_create_room(self, args: Dict[str, Any], ctx: ToolContext) -> str:
@@ -742,6 +780,34 @@ class Toolbox:
             snippet = (h.get("snippet") or "")[:300]
             lines.append(f"[{i}] {title}\n    {url}\n    {snippet}")
         return "\n".join(lines)
+
+    def _tool_ask_user_choice(self, args: Dict[str, Any], ctx: ToolContext) -> str:
+        """发一张「选择卡」给用户点选（档·交互增强）。结束本轮，等用户点完发回再继续。"""
+        question = (args.get("question") or "").strip()
+        raw = args.get("options") or []
+        if not question or not isinstance(raw, list) or not raw:
+            return "需要给出问题和至少一个选项。"
+        options = []
+        for o in raw[:8]:
+            if isinstance(o, dict):
+                label = str(o.get("label") or "").strip()
+                value = str(o.get("value") or "").strip() or label
+            else:
+                label = value = str(o).strip()
+            if label:
+                options.append({"label": label, "value": value})
+        if not options:
+            return "选项无效。"
+        multi = bool(args.get("multi"))
+        card = {"kind": "choice", "question": question, "options": options, "multi": multi}
+        # 纯文本兜底：Element 等不认 cosmac.card 的客户端显示这段，仍可看到选项
+        body = "\n".join([question] + [f"{i}. {o['label']}" for i, o in enumerate(options, 1)])
+        try:
+            self.client.send_card(ctx.room_id, body, card)
+        except Exception:
+            logger.exception("发送选择卡失败")
+            return "发选项时出错了，请直接用文字告诉我你的选择。"
+        return "已把选项发给用户，等 TA 点选后我再继续。"
 
     def _tool_list_room_tasks(self, args: Dict[str, Any], ctx: ToolContext) -> str:
         """列出本频道任务（档4）：给项目主AI 跟踪/审核用。绝不抛异常。"""

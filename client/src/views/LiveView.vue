@@ -72,6 +72,7 @@ import AdminView from '@/views/AdminView.vue'
 import MembershipModal from '@/components/membership/MembershipModal.vue'
 import ChannelAdminModal from '@/components/channel/ChannelAdminModal.vue'
 import KnowledgeModal from '@/components/layout/KnowledgeModal.vue'
+import ChoiceCard from '@/components/chat/ChoiceCard.vue'
 import { useKnowledge } from '@/composables/useKnowledge'
 import RightPanel from '@/components/layout/RightPanel.vue'
 import { useRightPanel } from '@/composables/useRightPanel'
@@ -936,6 +937,14 @@ async function aiSend() {
   setTimeout(refresh, 400)
 }
 
+// 选择卡点选：把用户选的内容作为普通消息发回该房间，主 AI 据此继续（同打字效果）
+async function pickChoice(text: string, room: string) {
+  const t = (text || '').trim()
+  if (!t || !room) return
+  await sendText(room, t)
+  setTimeout(refresh, 400)
+}
+
 async function doLogout() {
   await logout()
   // 清掉用户专属的本机数据（自定义 Agent/技能），再整页 reload。
@@ -1583,6 +1592,7 @@ onBeforeUnmount(() => {
                 <span class="time">{{ fmtTime(m.ts) }}</span>
               </div>
               <div v-if="!m.card" class="text"><span v-html="renderMd(m.body)"></span><span v-if="m.edited" class="edited">（已编辑）</span></div>
+              <ChoiceCard v-else-if="m.card.kind === 'choice'" :card="m.card" @pick="(t) => pickChoice(t, currentRoom)" />
               <div v-else class="rich info">
                 <div class="r-head"><span class="t">🗂 {{ m.card.title }}</span></div>
                 <p v-if="m.card.subtitle">{{ m.card.subtitle }}</p>
@@ -1717,6 +1727,7 @@ onBeforeUnmount(() => {
             <div ref="aiBodyRef" class="ai-body">
               <div v-for="m in aiMsgs" :key="m.id" class="ai-msg" :class="{ mine: isMe(m.sender) }">
                 <div v-if="!m.card" class="ai-bubble" v-html="renderMd(m.body)"></div>
+                <ChoiceCard v-else-if="m.card.kind === 'choice'" :card="m.card" @pick="(t) => pickChoice(t, aiRoom)" />
                 <div v-else class="rich info">
                   <div class="r-head"><span class="t">🗂 {{ m.card.title }}</span></div>
                   <p v-if="m.card.subtitle">{{ m.card.subtitle }}</p>

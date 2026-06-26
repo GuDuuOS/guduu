@@ -234,6 +234,29 @@ class TestAgentTools(unittest.TestCase):
         )
         self.assertIn("不可用", out)
 
+    def test_ask_user_choice_sends_choice_card(self) -> None:
+        # ask_user_choice 应发一张 cosmac.card{kind:choice} 富卡（带选项），结束本轮等点选
+        client = FakeClient()
+        sent_cards = []
+        client.send_card = lambda room, body, card: (  # type: ignore
+            sent_cards.append((room, card)) or "$e"
+        )
+        out = Toolbox(client).execute(
+            ToolCall(id="c", name="ask_user_choice", arguments={
+                "question": "邀请谁加入专班？",
+                "options": [{"label": "小雨", "value": "@xiaoyu:h"}, {"label": "阿设", "value": "@adesign:h"}],
+                "multi": True,
+            }),
+            ToolContext("!cur:test", "@a:test"),
+        )
+        self.assertEqual(len(sent_cards), 1)
+        room, card = sent_cards[0]
+        self.assertEqual(room, "!cur:test")
+        self.assertEqual(card["kind"], "choice")
+        self.assertTrue(card["multi"])
+        self.assertEqual([o["value"] for o in card["options"]], ["@xiaoyu:h", "@adesign:h"])
+        self.assertIn("等", out)  # "等 TA 点选后我再继续"
+
     def test_max_steps_guard(self) -> None:
         # 模型一直要求调工具（不收敛），Agent 应在 max_steps 后兜底退出，不死循环
         loop = TurnResult(
