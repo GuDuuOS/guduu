@@ -24,6 +24,11 @@ class FakeClient:
         self.created.append((name, invitees))
         return "!team:h"
 
+    def invite_user(self, room_id, user_id):
+        self.invited = getattr(self, "invited", [])
+        self.invited.append(user_id)
+        return True
+
     def set_state_event(self, room_id, etype, content, state_key=""):
         self.states.append((room_id, etype, content))
         return True
@@ -52,10 +57,11 @@ class TestAssembleTeam(unittest.TestCase):
             "task_rule": "对外报价需主管确认", "skills": ["weekly"],
             "tasks": [{"title": "写文案", "executor_kind": "human", "executor_ref": "@a:h"}],
         })
-        # 建房：名字对、含发起人+成员
+        # 建房：名字对、发起人随建房邀请；其余成员逐个 invite_user（健壮性：坏 id 不搞崩建房）
         name, invitees = self.client.created[0]
         self.assertEqual(name, "双11大促")
-        self.assertGreaterEqual(set(invitees), {"@owner:h", "@a:h", "@b:h"})
+        self.assertEqual(invitees, ["@owner:h"])
+        self.assertEqual(set(self.client.invited), {"@a:h", "@b:h"})
         # 频道配置：任务RULE / 协作Agent / 项目主AI / 技能
         room, etype, content = self.client.states[0]
         self.assertEqual(etype, CHANNEL_CONFIG_EVENT_TYPE)
@@ -71,6 +77,18 @@ class TestAssembleTeam(unittest.TestCase):
         # 开班消息 + 回灌含 room_id
         self.assertTrue(any("专班" in t for _r, t in self.client.sent))
         self.assertIn("!team:h", out)
+
+    def test_failed_invite_does_not_break_team(self) -> None:
+        # 健壮性：某成员邀请失败（如账号不存在）→ 专班照样建成、配置照写、如实告知未邀到
+        self.client.invite_user = lambda room, uid: uid != "@ghost:h"  # @ghost 邀不到
+        out = self._run({"project": "测试班", "members": ["@a:h", "@ghost:h"]})
+        # 专班仍建成（频道配置写入成功）
+        self.assertTrue(self.client.states)
+        self.assertEqual(self.client.states[0][1], CHANNEL_CONFIG_EVENT_TYPE)
+        # 回灌如实反映：邀到 1 人、1 人没邀到
+        self.assertIn("邀到 1 人", out)
+        self.assertIn("@ghost:h", out)
+        self.assertIn("没邀到", out)
 
     def test_builtin_persona_when_no_lead(self) -> None:
         self._run({"project": "小项目"})

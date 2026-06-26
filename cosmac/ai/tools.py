@@ -881,11 +881,20 @@ class Toolbox:
         if not project:
             return "请给专班/项目起个名字。"
         members = [str(m).strip() for m in (args.get("members") or []) if str(m).strip()]
-        # 把发起人也拉进去（去重）——专班至少要有下达人在场
-        invitees = list(dict.fromkeys([ctx.sender, *members]))
-        room_id = self.client.create_room(project, invitees=invitees)
+        # 健壮性：只用发起人(必然存在)建房，其余成员**逐个尽力邀请**——某个 id 不存在/邀请
+        # 失败都不影响专班建成（否则一个坏 id 就把整件事搞崩）。
+        room_id = self.client.create_room(project, invitees=[ctx.sender])
         if not room_id:
             return f"建专班「{project}」失败了（建房间接口出错）。"
+        invited, failed = [], []
+        for m in members:
+            if m == ctx.sender:
+                continue  # 发起人建房时已邀
+            try:
+                ok = self.client.invite_user(room_id, m)
+            except Exception:
+                ok = False
+            (invited if ok else failed).append(m)
 
         lead = (args.get("lead_agent") or "").strip()
         workers = [str(a).strip() for a in (args.get("worker_agents") or []) if str(a).strip()]
@@ -927,8 +936,10 @@ class Toolbox:
 
         # 开班消息发进频道
         parts = [f"🗂 专班「{project}」已组建。"]
-        if members:
-            parts.append("成员：" + "、".join(members))
+        if invited:
+            parts.append("已邀请：" + "、".join(invited))
+        if failed:
+            parts.append("未邀到（账号可能不存在）：" + "、".join(failed))
         parts.append(f"项目主AI：{lead}" if lead else "项目主AI：内置编排人设")
         if workers:
             parts.append("AI 协作：" + "、".join(workers))
@@ -938,8 +949,10 @@ class Toolbox:
             parts.append(f"已派 {n_tasks} 个任务，详见任务看板。")
         self.client.send_text(room_id, "\n".join(parts))
 
-        # 回灌给模型（让它知道建好了、可继续编排/汇报）
-        summary = [f"已建好专班「{project}」(room_id={room_id})，邀请 {len(invitees)} 人"]
+        # 回灌给模型（让它知道建好了、可继续编排/汇报；邀请失败也如实告知，别假装都拉进来了）
+        summary = [f"已建好专班「{project}」(room_id={room_id})，邀到 {len(invited)} 人"]
+        if failed:
+            summary.append(f"{len(failed)} 人没邀到（{('、'.join(failed))}，账号可能不存在）")
         summary.append(f"项目主AI={lead}" if lead else "项目主AI=内置编排人设")
         if workers:
             summary.append(f"协作Agent {len(workers)} 个")

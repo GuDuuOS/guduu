@@ -180,16 +180,25 @@ class MatrixClient:
         logger.warning("创建房间失败: %s %s", resp.status_code, resp.text)
         return None
 
-    def invite_user(self, room_id: str, user_id: str) -> None:
-        """把某用户邀请进房间。"""
+    def invite_user(self, room_id: str, user_id: str) -> bool:
+        """把某用户邀请进房间。成功返回 True，失败（账号不存在/网络异常等）返回 False、不抛。
+
+        返回布尔让调用方（如 assemble_team 逐个邀请成员）能"尽力而为"：某个 id 邀不到
+        不影响其余流程，而不是让一个坏 id 把整件事搞崩。
+        """
         url = self._url(f"/_matrix/client/v3/rooms/{quote(room_id)}/invite")
-        resp = self._session.post(url, json={"user_id": user_id}, timeout=10)
+        try:
+            resp = self._session.post(url, json={"user_id": user_id}, timeout=10)
+        except requests.RequestException as exc:
+            logger.warning("邀请 %s 进 %s 异常: %s", user_id, room_id, exc)
+            return False
         if resp.status_code == 200:
             logger.info("已邀请 %s 进 %s", user_id, room_id)
-        else:
-            logger.warning(
-                "邀请 %s 进 %s 失败: %s %s", user_id, room_id, resp.status_code, resp.text
-            )
+            return True
+        logger.warning(
+            "邀请 %s 进 %s 失败: %s %s", user_id, room_id, resp.status_code, resp.text
+        )
+        return False
 
     def set_power_levels(self, room_id: str, content: Dict[str, Any]) -> bool:
         """整体覆盖某房间的 m.room.power_levels 状态事件（调用方负责传完整内容）。

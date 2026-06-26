@@ -7,6 +7,12 @@
 
 ---
 
+## 2026-06-26 — 健壮性·建专班邀请尽力而为（坏 id 不搞崩）
+- **背景**:测试时发现——assemble_team 把所有成员一股脑塞进 createRoom 的 invite，万一某个 user_id 不存在(如还没注册的测试人员)，整个建房可能失败、专班建不出来。
+- **修法**:`invite_user` 改为**返回 bool + 吞网络异常**(不抛);`assemble_team` 改为**只用发起人(必然存在)建房，其余成员逐个 invite_user 尽力邀请**——某个邀不到只记进 failed、不影响专班建成;开班消息与回灌**如实**告知"邀到 N 人 / X 人没邀到(账号可能不存在)"，不假装都拉进来了。
+- **副作用收益**:这样名册里即便有还没注册的人(纯画像)，也能正常建专班测试；生产上用户填错一个 id 也不至于整件事崩。
+- **测试**:test_assemble_team 改邀请断言 + 加 test_failed_invite_does_not_break_team;278 通过、ruff 全绿。**纯后端**——无需发 dist,只 `restart guduu-bot`。
+
 ## 2026-06-26 — 收口·create_tasks/assemble_team 分工（防任务重复登记）
 - **背景**:完整流程模拟暴露——主AI 若先 create_tasks(任务落原对话)再 assemble_team 带 tasks(任务落专班)，会**重复登记两份**、一份成孤儿。
 - **修法(方案A,纯提示词)**:改两个工具的 description 把分工讲清——要拉团队/建专班的目标**直接用 assemble_team**(tasks 一并带上)，create_tasks 只用于"不开专班的轻量待办"，且两者互相点名"别对同一目标都调"。零代码风险、零回归。
