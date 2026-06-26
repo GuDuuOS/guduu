@@ -205,7 +205,11 @@
           </div>
         </header>
 
-        <div class="adm-filters"><input v-model.trim="chSearch" class="adm-search" placeholder="🔍 搜索频道名 / ID…" /><span class="adm-filter-n">{{ chFiltered.length }} / {{ rooms.length }}</span></div>
+        <div class="adm-filters">
+          <input v-model.trim="chSearch" class="adm-search" placeholder="🔍 搜索频道名 / ID…" />
+          <select v-model="chType" class="adm-fsel"><option value="all">全部类型</option><option value="public">公开</option><option value="private">私有</option></select>
+          <span class="adm-filter-n">{{ chFiltered.length }} / {{ rooms.length }}</span>
+        </div>
         <div v-if="roomsLoading" class="adm-center"><div class="adm-spin" /> 加载频道列表…</div>
 
         <table v-else class="adm-table">
@@ -327,7 +331,11 @@
           </div>
         </header>
 
-        <div class="adm-filters"><input v-model.trim="skSearch" class="adm-search" placeholder="🔍 搜索技能名 / slug / 说明…" /><span class="adm-filter-n">{{ skFiltered.length }} / {{ skills.length }}</span></div>
+        <div class="adm-filters">
+          <input v-model.trim="skSearch" class="adm-search" placeholder="🔍 搜索技能名 / slug / 说明…" />
+          <select v-model="skEn.mode.value" class="adm-fsel"><option value="all">全部状态</option><option value="on">启用</option><option value="off">停用</option></select>
+          <span class="adm-filter-n">{{ skFiltered.length }} / {{ skills.length }}</span>
+        </div>
         <div v-if="skLoading" class="adm-center"><div class="adm-spin" /> 加载技能…</div>
 
         <div v-else class="adm-form">
@@ -403,7 +411,11 @@
           </div>
         </header>
 
-        <div class="adm-filters"><input v-model.trim="agSearch" class="adm-search" placeholder="🔍 搜索智能体名 / slug / 说明…" /><span class="adm-filter-n">{{ agFiltered.length }} / {{ agents.length }}</span></div>
+        <div class="adm-filters">
+          <input v-model.trim="agSearch" class="adm-search" placeholder="🔍 搜索智能体名 / slug / 说明…" />
+          <select v-model="agEn.mode.value" class="adm-fsel"><option value="all">全部状态</option><option value="on">启用</option><option value="off">停用</option></select>
+          <span class="adm-filter-n">{{ agFiltered.length }} / {{ agents.length }}</span>
+        </div>
         <div v-if="agLoading" class="adm-center"><div class="adm-spin" /> 加载智能体…</div>
 
         <div v-else class="adm-form">
@@ -493,7 +505,11 @@
           </div>
         </header>
 
-        <div class="adm-filters"><input v-model.trim="peopleSearch" class="adm-search" placeholder="🔍 搜索用户名 / ID / 角色 / 擅长…" /><span class="adm-filter-n">{{ peopleFiltered.length }} / {{ peopleRows.length }}</span></div>
+        <div class="adm-filters">
+          <input v-model.trim="peopleSearch" class="adm-search" placeholder="🔍 搜索用户名 / ID / 角色 / 擅长…" />
+          <select v-model="peopleCap" class="adm-fsel"><option value="all">全部</option><option value="set">已设能力</option><option value="unset">未设能力</option></select>
+          <span class="adm-filter-n">{{ peopleFiltered.length }} / {{ peopleRows.length }}</span>
+        </div>
         <div v-if="plLoading" class="adm-center"><div class="adm-spin" /> 加载用户与能力…</div>
 
         <div v-else class="adm-form">
@@ -571,7 +587,11 @@
           </div>
         </header>
 
-        <div class="adm-filters"><input v-model.trim="tpSearch" class="adm-search" placeholder="🔍 搜索模板名 / key / 描述…" /><span class="adm-filter-n">{{ tpFiltered.length }} / {{ templates.length }}</span></div>
+        <div class="adm-filters">
+          <input v-model.trim="tpSearch" class="adm-search" placeholder="🔍 搜索模板名 / key / 描述…" />
+          <select v-model="tpEn.mode.value" class="adm-fsel"><option value="all">全部状态</option><option value="on">启用</option><option value="off">停用</option></select>
+          <span class="adm-filter-n">{{ tpFiltered.length }} / {{ templates.length }}</span>
+        </div>
         <div v-if="tpLoading" class="adm-center"><div class="adm-spin" /> 加载模板…</div>
 
         <div v-else class="adm-form">
@@ -734,7 +754,11 @@
           </div>
         </header>
 
-        <div class="adm-filters"><input v-model.trim="wfSearch" class="adm-search" placeholder="🔍 搜索工作流名 / slug / 平台…" /><span class="adm-filter-n">{{ wfFiltered.length }} / {{ workflows.length }}</span></div>
+        <div class="adm-filters">
+          <input v-model.trim="wfSearch" class="adm-search" placeholder="🔍 搜索工作流名 / slug / 平台…" />
+          <select v-model="wfEn.mode.value" class="adm-fsel"><option value="all">全部状态</option><option value="on">启用</option><option value="off">停用</option></select>
+          <span class="adm-filter-n">{{ wfFiltered.length }} / {{ workflows.length }}</span>
+        </div>
         <div v-if="wfLoading" class="adm-center"><div class="adm-spin" /> 加载连接器…</div>
 
         <div v-else class="adm-form">
@@ -909,7 +933,11 @@
           </div>
         </header>
 
-        <div class="adm-filters"><input v-model.trim="plSearch" class="adm-search" placeholder="🔍 搜索套餐名 / slug…" /><span class="adm-filter-n">{{ plFiltered.length }} / {{ plans.length }}</span></div>
+        <div class="adm-filters">
+          <input v-model.trim="plSearch" class="adm-search" placeholder="🔍 搜索套餐名 / slug…" />
+          <select v-model="plEn.mode.value" class="adm-fsel"><option value="all">全部状态</option><option value="on">启用</option><option value="off">停用</option></select>
+          <span class="adm-filter-n">{{ plFiltered.length }} / {{ plans.length }}</span>
+        </div>
         <div v-if="planLoading" class="adm-center"><div class="adm-spin" /> 加载套餐…</div>
 
         <!-- 读取失败不渲染可编辑区(避免空列表误存覆盖真实套餐) -->
@@ -1163,7 +1191,7 @@ import {
   type WorkflowDef,
 } from '@/matrix/client'
 import { useToast } from '@/composables/useToast'
-import { useListSearch } from '@/composables/useListSearch'
+import { useListSearch, useEnabledFilter } from '@/composables/useListSearch'
 
 // 作为覆盖层使用：关闭时通知父组件（LiveView）收起
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -1730,10 +1758,15 @@ const peopleRows = computed(() =>
   }),
 )
 const peopleSearch = ref('')
+const peopleCap = ref<'all' | 'set' | 'unset'>('all')  // 按是否已设能力筛
 const peopleFiltered = computed(() => {
   const q = peopleSearch.value.trim().toLowerCase()
-  if (!q) return peopleRows.value
-  return peopleRows.value.filter((r) => `${r.name} ${r.id} ${r.role} ${r.expertise}`.toLowerCase().includes(q))
+  return peopleRows.value.filter((r) => {
+    if (q && !`${r.name} ${r.id} ${r.role} ${r.expertise}`.toLowerCase().includes(q)) return false
+    if (peopleCap.value === 'set' && !r.hasProfile) return false
+    if (peopleCap.value === 'unset' && r.hasProfile) return false
+    return true
+  })
 })
 
 function startEditPersonForUser(r: { id: string; name: string }) {
@@ -2117,13 +2150,22 @@ const workflows = ref<WorkflowDef[]>([])
 const wfLoading = ref(false)
 const wfSaving = ref(false)
 
-// —— 各列表页搜索（用户多了能定位；用户管理另有角色/会员/状态筛选）——
-const { query: chSearch, filtered: chFiltered } = useListSearch(rooms, (r) => `${r.name} ${r.id} ${r.alias || ''} ${r.creator || ''}`)
-const { query: skSearch, filtered: skFiltered } = useListSearch(skills, (s) => `${s.name} ${s.slug} ${s.description}`)
-const { query: agSearch, filtered: agFiltered } = useListSearch(agents, (a) => `${a.name} ${a.slug} ${a.description}`)
-const { query: tpSearch, filtered: tpFiltered } = useListSearch(templates, (t) => `${t.label} ${t.key} ${t.desc}`)
-const { query: wfSearch, filtered: wfFiltered } = useListSearch(workflows, (w) => `${w.name} ${w.slug} ${w.platform || ''}`)
-const { query: plSearch, filtered: plFiltered } = useListSearch(plans, (p) => `${p.name} ${p.slug} ${p.tier}`)
+// —— 各列表页 搜索 + 筛选（用户管理另有角色/会员/状态筛选）——
+// 频道：按类型（全部/公开/私有）筛
+const chType = ref<'all' | 'public' | 'private'>('all')
+const chPred = computed(() => (r: AdminRoom) => chType.value === 'all' || (chType.value === 'public' ? r.isPublic : !r.isPublic))
+const { query: chSearch, filtered: chFiltered } = useListSearch(rooms, (r) => `${r.name} ${r.id} ${r.alias || ''} ${r.creator || ''}`, chPred)
+// 技能 / 智能体 / 模板 / 工作流 / 套餐：按 启用/停用 筛
+const skEn = useEnabledFilter<GlobalSkill>()
+const { query: skSearch, filtered: skFiltered } = useListSearch(skills, (s) => `${s.name} ${s.slug} ${s.description}`, skEn.predicate)
+const agEn = useEnabledFilter<GlobalAgent>()
+const { query: agSearch, filtered: agFiltered } = useListSearch(agents, (a) => `${a.name} ${a.slug} ${a.description}`, agEn.predicate)
+const tpEn = useEnabledFilter<OnboardingTemplateDef>()
+const { query: tpSearch, filtered: tpFiltered } = useListSearch(templates, (t) => `${t.label} ${t.key} ${t.desc}`, tpEn.predicate)
+const wfEn = useEnabledFilter<WorkflowDef>()
+const { query: wfSearch, filtered: wfFiltered } = useListSearch(workflows, (w) => `${w.name} ${w.slug} ${w.platform || ''}`, wfEn.predicate)
+const plEn = useEnabledFilter<PlanDef>()
+const { query: plSearch, filtered: plFiltered } = useListSearch(plans, (p) => `${p.name} ${p.slug} ${p.tier}`, plEn.predicate)
 const wfLoaded = ref(false)
 const wfEditing = ref(false)
 const wfForm = reactive<WorkflowDef & { _isEdit: boolean }>({
