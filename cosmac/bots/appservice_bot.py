@@ -328,6 +328,9 @@ class CosmacBot:
                 self._apply_runtime_config()
                 # 本群上下文读一次（人设/绑定技能/模型覆盖），供 addendum 与选模型共用。
                 gctx = self._group_context(room_id)
+                # 档3b：专班里若点名了某协作 Agent（按名/slug），改用该 worker 的人设/技能/模型
+                # 回这条（任务RULE 不变、仍受约束）；没点名则维持 lead（项目主AI）。
+                gctx = self._apply_worker_routing(text or user_text, gctx)
                 # 按 (本群, 发起人) 算出本轮 system addendum：人设 + 技能 + 知识库检索片段(RAG)。
                 # 任何失败（DB 没装/没数据/出错）都返回空串、绝不阻断回复（见 _skill_addendum）。
                 extra_system = self._skill_addendum(
@@ -656,12 +659,17 @@ class CosmacBot:
                 ② 否则用本群自定义人设(persona.prompt)。都没有 → 空。
         失败一律返回空 dict（绝不阻断回复）。
         """
-        out: Dict[str, Any] = {"persona": "", "skill_slugs": [], "model": "", "task_rule": ""}
+        out: Dict[str, Any] = {
+            "persona": "", "skill_slugs": [], "model": "", "task_rule": "",
+            "worker_slugs": [],
+        }
         try:
             cfg = self.client.get_state_event(room_id, CHANNEL_CONFIG_EVENT_TYPE) or {}
             # 本专班任务 RULE（档3）：项目主AI 的缰绳，最高优先级注入（见 _skill_addendum）。
             # 先于 persona 取出，确保两条返回路径都带上它。
             out["task_rule"] = str(cfg.get("taskRule") or "").strip()
+            # 本专班绑定的协作 Agent slug（档3b @名路由用）；一并取出避免重复读 state。
+            out["worker_slugs"] = [str(s) for s in (cfg.get("agentSlugs") or []) if s]
             persona = cfg.get("persona") or {}
             slug = (persona.get("agentSlug") or "").strip()
             if slug:
@@ -690,6 +698,41 @@ class CosmacBot:
         except Exception as e:
             logger.debug("读取本群上下文失败（忽略）：%s", e)
             return out
+
+    def _apply_worker_routing(self, text: str, gctx: Dict[str, Any]) -> Dict[str, Any]:
+        """档3b：专班里若消息点名了某个绑定的协作 Agent（按 slug 或显示名），就改用该 worker
+        的人设/技能/模型回这条；**任务 RULE 不变**（worker 仍在专班、受同一约束）。
+
+        没点名、或非专班（worker_slugs 为空）→ 原样返回 lead（项目主AI）的 gctx。
+        方案A（单 bot 多人设）：worker 不是独立 Matrix 账号，靠在正文里匹配名/slug 路由。
+        匹配多个时取第一个；全程兜异常，绝不阻断回复。
+        """
+        slugs = gctx.get("worker_slugs") or []
+        body = (text or "").strip()
+        if not slugs or not body:
+            return gctx
+        low = body.lower()
+        try:
+            for slug in slugs:
+                agent = self._find_global_agent(str(slug))
+                if not agent:
+                    continue
+                name = str(agent.get("name") or "").strip()
+                hit = (str(slug).lower() in low) or (bool(name) and name in body)
+                if not hit:
+                    continue
+                sp = (agent.get("system_prompt") or "").strip()
+                out = dict(gctx)
+                out["persona"] = (
+                    f"本条由你以协作智能体「{name or slug}」的身份回应，"
+                    f"请按下述人设履职：\n{sp}"
+                )
+                out["skill_slugs"] = [str(s) for s in (agent.get("skill_slugs") or [])]
+                out["model"] = (agent.get("model") or "").strip()
+                return out
+        except Exception as e:
+            logger.debug("协作 Agent 路由失败（忽略，用 lead 回应）：%s", e)
+        return gctx
 
     def _agent_for_model(self, model: str) -> Agent:
         """按「本群模型覆盖」拿一个 Agent：没覆盖或与当前一致 → 用 self.agent；

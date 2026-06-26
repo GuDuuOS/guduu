@@ -142,6 +142,70 @@ class TestTaskReviewTools(unittest.TestCase):
         self.assertEqual(t.status, "todo")  # 未被改动
 
 
+def _bot_with_channel(channel_cfg, agents_state=None):
+    """造一个 bot，其假 client 返回给定的 channel_config 与（可选）全局 agents。"""
+    from cosmac.bots.appservice_bot import CosmacBot
+    from cosmac.config import AGENTS_EVENT_TYPE, CosmacConfig
+
+    bot = CosmacBot(CosmacConfig(llm_provider="echo"))
+
+    class C:
+        def resolve_alias(self, a):
+            return "!ctrl:h"
+
+        def get_state_event(self, room, etype, key=""):
+            if etype == CHANNEL_CONFIG_EVENT_TYPE:
+                return channel_cfg
+            if etype == AGENTS_EVENT_TYPE:
+                return agents_state
+            return None
+
+        def set_displayname(self, *a, **k):
+            pass
+
+        def send_text(self, *a, **k):
+            return "$e"
+
+    bot.client = C()
+    bot._gate_allows = lambda u, c: True  # type: ignore
+    return bot
+
+
+class TestWorkerRouting(unittest.TestCase):
+    """档3b：专班里 @协作 Agent 名 → 换该 worker 人设回应；任务RULE 不变。"""
+
+    def setUp(self) -> None:
+        init_engine("sqlite://", create_all=True)
+        self.agents = {"agents": [
+            {"slug": "designer", "name": "分镜师", "system_prompt": "你画分镜",
+             "skill_slugs": ["storyboard"], "model": "", "enabled": True},
+        ]}
+        self.cfg = {"persona": {"prompt": "我是项目主AI"}, "taskRule": "对外报价需确认",
+                    "agentSlugs": ["designer"]}
+
+    def test_named_worker_overrides_persona(self) -> None:
+        bot = _bot_with_channel(self.cfg, self.agents)
+        gctx = bot._group_context("!team:h")
+        routed = bot._apply_worker_routing("请 designer 出一版分镜", gctx)
+        self.assertIn("分镜师", routed["persona"])
+        self.assertIn("你画分镜", routed["persona"])
+        self.assertEqual(routed["skill_slugs"], ["storyboard"])
+        # 任务RULE 不变（worker 仍受专班约束）
+        self.assertEqual(routed["task_rule"], "对外报价需确认")
+
+    def test_no_mention_keeps_lead(self) -> None:
+        bot = _bot_with_channel(self.cfg, self.agents)
+        gctx = bot._group_context("!team:h")
+        routed = bot._apply_worker_routing("项目进度怎么样了", gctx)
+        self.assertIn("项目主AI", routed["persona"])  # 没点名 → 维持 lead
+
+    def test_no_workers_is_noop(self) -> None:
+        bot = _bot_with_channel({"persona": {"prompt": "普通群人设"}}, self.agents)
+        gctx = bot._group_context("!r:h")
+        routed = bot._apply_worker_routing("designer 你好", gctx)
+        self.assertEqual(routed["persona"], gctx["persona"])  # 非专班→不路由
+
+
 class TestTaskRuleInjection(unittest.TestCase):
     """本专班任务RULE 注入：项目主AI 被频道 taskRule 约束。"""
 
@@ -149,27 +213,7 @@ class TestTaskRuleInjection(unittest.TestCase):
         init_engine("sqlite://", create_all=True)
 
     def _bot(self, channel_cfg):
-        from cosmac.bots.appservice_bot import CosmacBot
-        from cosmac.config import CosmacConfig
-
-        bot = CosmacBot(CosmacConfig(llm_provider="echo"))
-
-        class C:
-            def resolve_alias(self, a):
-                return None  # 全局规则读不到→空，聚焦 taskRule
-
-            def get_state_event(self, room, etype, key=""):
-                return channel_cfg if etype == CHANNEL_CONFIG_EVENT_TYPE else None
-
-            def set_displayname(self, *a, **k):
-                pass
-
-            def send_text(self, *a, **k):
-                return "$e"
-
-        bot.client = C()
-        bot._gate_allows = lambda u, c: True  # type: ignore
-        return bot
+        return _bot_with_channel(channel_cfg)
 
     def test_group_context_reads_task_rule(self) -> None:
         bot = self._bot({"persona": {"prompt": "人设X"}, "taskRule": "只做分配与审核"})
