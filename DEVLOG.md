@@ -7,6 +7,12 @@
 
 ---
 
+## 2026-06-26 — 改进·「我的协作人」同步联系人（不再单独敲 id）
+- **反馈**:我的协作人不该单独拉人/敲 id，应从"已加的朋友/联系人"里自动出现，只补能力。
+- **改法(纯前端)**:client.ts 加 `listMyContacts()` —— 遍历 `mx.getRooms()` 收集与本人**共处一群/私信**的所有人(去重、排除自己和中枢AI、排除 Space)，这就是"已加的朋友"。`useMyPeople` 改为合并 `listMyContacts()`(联系人) + `myPeopleList()`(已填能力)：表格**列出所有联系人**，每行叠加其能力(已设/未设)，编辑时 user_id 固定取自联系人。已填能力但已不在联系人里的也补显示，避免看不到。去掉自由敲 id 的"添加协作人"，改成每个联系人"设置能力"。
+- 后端不变(仍 cosmac_person + /cosmac/people/* + list_capabilities 合并)。
+- **测试**:client build OK、preview 零 console 报错。新 hash index-BK6OIqZB.js。**发 dist + 重启 bot**(配合上一条的后端端点)。
+
 ## 2026-06-26 — 新增·普通用户的「我的协作人」能力名册（个人级）
 - **需求**:普通用户(非 admin)也想给自己常合作的人加能力备注，但 admin 的「人员能力」写控制室、普通用户够不到。负责人定**个人级 v1**:每人维护自己的协作人名册。
 - **后端**:新表 `cosmac_person`(按 owner 隔离, create_all 自动建);`db/person_repo.py`(list/upsert/delete);bot 3 个端点 `/cosmac/people/{mine,add,delete}`(本人 token 鉴权、owner=本人);`_personal_people_items(owner)` 读 DB;`list_capabilities` 把 **admin 全局名册 + 下达者个人名册合并去重** —— 主AI 给某用户拆任务时就能用上 TA 自己加的人。**隔离**:A 的个人协作人 B 看不到(单测验证)。

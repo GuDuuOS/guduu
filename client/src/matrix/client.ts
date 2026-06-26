@@ -598,6 +598,26 @@ export function listRoomMembers(roomId: string): { id: string; name: string; isB
   }))
 }
 
+/** 我的联系人 = 跟我共享了房间/私信的所有人（去重，排除自己和中枢AI）。
+ *
+ * 普通用户没有 admin 的全量用户列表权限，但能看到自己共处一室的人——这就是"已加的朋友/协作人"。
+ * 「我的协作人」据此自动列出，用户只给他们补能力备注，无需重新敲 id。 */
+export function listMyContacts(): { id: string; name: string }[] {
+  if (!mx) return []
+  const me = mx.getUserId?.() || ''
+  const bot = botId()
+  const seen = new Map<string, string>()  // userId → name（保留首次见到的名字）
+  for (const r of mx.getRooms()) {
+    if ((r as any).isSpaceRoom?.()) continue  // Space 本身不算"人"
+    for (const m of (r.getJoinedMembers() || [])) {
+      const id = (m as any).userId
+      if (!id || id === me || id === bot || seen.has(id)) continue
+      seen.set(id, (m as any).name || id)
+    }
+  }
+  return Array.from(seen, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, 'zh'))
+}
+
 /** 频道管理「人员」标签用的成员（含头像/角色/在不在群） */
 export interface ChannelMember {
   id: string              // 完整 Matrix 用户 id，如 @alice:cosmac.cc
