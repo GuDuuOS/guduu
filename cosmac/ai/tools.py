@@ -21,7 +21,7 @@ from typing import Any, Callable, Dict, List, Optional, Set
 
 from cosmac.ai.base import ToolCall, ToolSpec
 from cosmac.bots.matrix_client import MatrixClient
-from cosmac.config import WORKFLOWS_EVENT_TYPE
+from cosmac.config import CHANNEL_CONFIG_EVENT_TYPE, WORKFLOWS_EVENT_TYPE
 
 logger = logging.getLogger("cosmac.ai.tools")
 
@@ -98,6 +98,7 @@ class Toolbox:
     # 双保险，不靠工具开关来拦；放这里免得旧 AI 配置白名单没有它而被当禁用。
     _ALWAYS_ON: Set[str] = {
         "create_tasks", "search_knowledge", "web_search", "list_capabilities",
+        "assemble_team",
     }
 
     def _is_enabled(self, name: str) -> bool:
@@ -381,6 +382,62 @@ class Toolbox:
             fn=self._tool_list_capabilities,
         )
 
+        # 10) 一键建专班（模块3.5 档3）：把"建频道+拉人+绑AI+装任务RULE/技能+派单"串成一个动作。
+        self._register(
+            name="assemble_team",
+            description=(
+                "为一个项目**一键组建专班频道**：建频道 → 拉真人成员 → 绑定 AI（项目主AI + 协作Agent）"
+                "→ 设本专班的任务 RULE → 装技能 → 把子任务派进去。"
+                "当你已拆好任务、要真正把团队拉起来干活时调用。"
+                "成员/Agent/技能都应来自 list_capabilities；项目主AI 会被任务 RULE 约束、只围绕本项目分配与审核。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "project": {"type": "string", "description": "专班/项目名（也是频道名）。"},
+                    "members": {
+                        "type": "array", "items": {"type": "string"},
+                        "description": "邀请的真人完整 user_id 列表（来自 list_capabilities）。",
+                    },
+                    "lead_agent": {
+                        "type": "string",
+                        "description": "作为项目主AI 的 Agent slug；留空则用内置编排人设。",
+                    },
+                    "worker_agents": {
+                        "type": "array", "items": {"type": "string"},
+                        "description": "绑进专班的协作 Agent slug 列表（可空）。",
+                    },
+                    "task_rule": {
+                        "type": "string",
+                        "description": "本专班的任务 RULE/约束：项目主AI 据此分配与审核（可空）。",
+                    },
+                    "skills": {
+                        "type": "array", "items": {"type": "string"},
+                        "description": "装进专班的 Skill slug 列表（可空）。",
+                    },
+                    "tasks": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": "string"},
+                                "assignee": {"type": "string"},
+                                "executor_kind": {
+                                    "type": "string",
+                                    "enum": ["human", "agent", "workflow", "none"],
+                                },
+                                "executor_ref": {"type": "string"},
+                            },
+                            "required": ["title"],
+                        },
+                        "description": "派进专班的子任务卡（同 create_tasks 的结构，可空）。",
+                    },
+                },
+                "required": ["project"],
+            },
+            fn=self._tool_assemble_team,
+        )
+
     # —— 各工具的具体执行（转发到 MatrixClient）——
 
     def _tool_create_room(self, args: Dict[str, Any], ctx: ToolContext) -> str:
@@ -641,6 +698,83 @@ class Toolbox:
             snippet = (h.get("snippet") or "")[:300]
             lines.append(f"[{i}] {title}\n    {url}\n    {snippet}")
         return "\n".join(lines)
+
+    def _tool_assemble_team(self, args: Dict[str, Any], ctx: ToolContext) -> str:
+        """一键建专班（模块3.5 档3）：建频道→拉人→绑AI→写任务RULE/技能→派单。
+
+        把前几档的积木串起来。门控走 create_room（建房+拉人+绑配置是重动作）。绝不抛异常。
+        """
+        project = (args.get("project") or "").strip()
+        if not project:
+            return "请给专班/项目起个名字。"
+        members = [str(m).strip() for m in (args.get("members") or []) if str(m).strip()]
+        # 把发起人也拉进去（去重）——专班至少要有下达人在场
+        invitees = list(dict.fromkeys([ctx.sender, *members]))
+        room_id = self.client.create_room(project, invitees=invitees)
+        if not room_id:
+            return f"建专班「{project}」失败了（建房间接口出错）。"
+
+        lead = (args.get("lead_agent") or "").strip()
+        workers = [str(a).strip() for a in (args.get("worker_agents") or []) if str(a).strip()]
+        skills = [str(s).strip() for s in (args.get("skills") or []) if str(s).strip()]
+        task_rule = (args.get("task_rule") or "").strip()
+        # 组装频道配置：项目主AI 人设 + 任务RULE + 协作Agent + 技能
+        persona: Dict[str, Any] = {}
+        if lead:
+            persona["agentSlug"] = lead  # _group_context 会用该全局 Agent 的人设
+        else:
+            persona["prompt"] = (
+                f"你是本专班「{project}」的项目主AI（编排者）。职责仅限于：围绕本项目把子任务"
+                "分配给合适的成员/AI、跟踪进度、按下方任务约束审核交付（通过或打回并说明），"
+                "卡点时汇报。不要越出本项目范围去做无关的事。"
+            )
+        if skills:
+            persona["skill_slugs"] = skills
+        content: Dict[str, Any] = {"persona": persona, "agentSlugs": workers}
+        if task_rule:
+            content["taskRule"] = task_rule
+        self.client.set_state_event(room_id, CHANNEL_CONFIG_EVENT_TYPE, content)
+
+        # 派任务卡进这个专班（作用域 = 新频道）
+        n_tasks = 0
+        task_items = args.get("tasks") or []
+        if isinstance(task_items, list) and task_items:
+            try:
+                from cosmac.db import session_scope
+                from cosmac.db.task_repo import create_tasks
+
+                with session_scope() as s:
+                    created = create_tasks(
+                        s, goal=project, items=task_items,
+                        room_id=room_id, sender=ctx.sender,
+                    )
+                    n_tasks = len(created)
+            except Exception:
+                logger.exception("派任务进专班失败")
+
+        # 开班消息发进频道
+        parts = [f"🗂 专班「{project}」已组建。"]
+        if members:
+            parts.append("成员：" + "、".join(members))
+        parts.append(f"项目主AI：{lead}" if lead else "项目主AI：内置编排人设")
+        if workers:
+            parts.append("AI 协作：" + "、".join(workers))
+        if task_rule:
+            parts.append("已设本专班任务约束（RULE）。")
+        if n_tasks:
+            parts.append(f"已派 {n_tasks} 个任务，详见任务看板。")
+        self.client.send_text(room_id, "\n".join(parts))
+
+        # 回灌给模型（让它知道建好了、可继续编排/汇报）
+        summary = [f"已建好专班「{project}」(room_id={room_id})，邀请 {len(invitees)} 人"]
+        summary.append(f"项目主AI={lead}" if lead else "项目主AI=内置编排人设")
+        if workers:
+            summary.append(f"协作Agent {len(workers)} 个")
+        if skills:
+            summary.append(f"技能 {len(skills)} 个")
+        summary.append("已设任务RULE" if task_rule else "无任务RULE")
+        summary.append(f"派 {n_tasks} 个任务" if n_tasks else "暂未派任务")
+        return "；".join(summary) + "。"
 
     def _record_workflow_run(self, slug, platform, ctx, user_input, result) -> None:
         """尽力把运行记录落库；DB 不可用就跳过（不影响已拿到的结果）。"""

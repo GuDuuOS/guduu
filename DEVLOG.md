@@ -7,6 +7,15 @@
 
 ---
 
+## 2026-06-26 — 模块3.5 档3·一键建专班 assemble_team（纯后端）
+- **做了什么**:把"建频道+拉人+绑AI+装任务RULE/技能+派单"串成主AI 的**一个工具调用**——拆完任务后真的把团队拉起来。这是编排"动起来"的关键一刀。
+- **assemble_team 工具**:① create_room(项目名,邀请发起人+成员) → ② 写 channel_config:persona(给了 lead_agent 用其 agentSlug,否则用内置"项目主AI 编排人设")+ agentSlugs(协作 Agent)+ taskRule + skill_slugs → ③ create_tasks 把子任务派进新专班(作用域=新房间) → ④ 发开班消息。门控走 create_room、_ALWAYS_ON 默认常开。成员/Agent/技能都来自 list_capabilities。
+- **任务RULE 真生效（项目主AI 的缰绳）**:`_group_context` 读频道 `cfg.taskRule`;`_skill_addendum` 注入顺序改为 平台规则→**本专班任务RULE**→人设→长期记忆→技能→知识库(任务RULE 优先级高于人设)。这样专班里的项目主AI 被频道任务RULE 约束、围绕本项目分配与审核——正是负责人要的"群里有主AI、但只围绕这个任务的RULE 行事"。
+- **未做(记为档3b)**:协作 worker Agent 的 @名路由——现在只有 lead(项目主AI)接话;worker agents 已存进 channel_config.agentSlugs,但响应时还不会按 @名切换到对应 worker 人设。留待档4 或单独做(方案A 路由)。
+- **测试**:新增 test_assemble_team.py(全量装配/无lead用内置人设/缺名字拒绝/group_context读taskRule/addendum注入且优先级高于人设);工具集断言 9→10。269 通过、ruff 全绿;10 失败仍是 manual 支付缺 env、无关。
+- **部署**:**纯后端**(只动 cosmac/)——**无需发 dist**,只 `restart guduu-bot`。
+- **下一步**:档4 派单+审核回填(执行者交结果→项目主AI 按任务RULE 审核→通过/打回;工作流复用异步回调;update_task 回填) + 可选档3b worker @名路由。
+
 ## 2026-06-26 — 模块3.5 档2·拆任务的类型化执行者匹配
 - **做了什么**:把拆出来的子任务从"自由文本负责人"升级成**类型化执行者**——主AI 读能力名册(档1)后，给每条子任务标清"谁来干、怎么干"，为档3 派发铺路。
 - **后端**:Task 模型加 `executor_kind`(human/agent/workflow/none) + `executor_ref`(@user/agent-slug/workflow-slug) 两列;engine `_heal_business_schema` 给旧 cosmac_task 补这两列(非破坏);task_repo.create_tasks 收并校验(非法 kind/none 一律回落 none 且清空 ref，防悬空引用);create_tasks 工具 schema 加这两字段 + 说明"**先调 list_capabilities** 看有谁可用再按能力指派，拿不准用 none 别臆造";handle_tasks_list 返回 executor。

@@ -503,10 +503,16 @@ class CosmacBot:
         try:
             # 平台级硬约束（全局规则）——放最前、优先级最高
             rules_text = self._global_rules_text()
-            # 本群上下文（人设/绑定技能/模型）——_handle_event 已读则复用，避免重复读
+            # 本群上下文（人设/绑定技能/模型/本专班任务RULE）——_handle_event 已读则复用
             if gctx is None:
                 gctx = self._group_context(room_id)
             persona = gctx.get("persona", "")
+            # 本专班任务 RULE（档3）：项目主AI 的缰绳，紧随平台规则之后、优先级高于人设。
+            task_rule = (gctx.get("task_rule") or "").strip()
+            task_rule_text = (
+                "【本专班任务约束（RULE，须严格遵守；你只围绕本项目分配与审核，不越界）】：\n"
+                + task_rule
+            ) if task_rule else ""
             agent_slugs = gctx.get("skill_slugs", [])
             items = (
                 self._global_skill_items()
@@ -525,9 +531,9 @@ class CosmacBot:
             skills_text = render_skills(deduped)
             mem_text = self._memory_context(room_id)
             kb_text = self._kb_context(room_id, sender, query)
-            # 规则(硬约束) → 人设 → 长期记忆 → 技能 → 知识库，依次拼成本轮 addendum
+            # 平台规则 → 本专班任务RULE → 人设 → 长期记忆 → 技能 → 知识库，依次拼成本轮 addendum
             return "\n\n".join(
-                p for p in (rules_text, persona, mem_text, skills_text, kb_text) if p
+                p for p in (rules_text, task_rule_text, persona, mem_text, skills_text, kb_text) if p
             )
         except Exception as e:
             # 兜住**最终组装**：脏数据绝不能让这条消息收不到回复（docstring 的承诺）
@@ -650,9 +656,12 @@ class CosmacBot:
                 ② 否则用本群自定义人设(persona.prompt)。都没有 → 空。
         失败一律返回空 dict（绝不阻断回复）。
         """
-        out: Dict[str, Any] = {"persona": "", "skill_slugs": [], "model": ""}
+        out: Dict[str, Any] = {"persona": "", "skill_slugs": [], "model": "", "task_rule": ""}
         try:
             cfg = self.client.get_state_event(room_id, CHANNEL_CONFIG_EVENT_TYPE) or {}
+            # 本专班任务 RULE（档3）：项目主AI 的缰绳，最高优先级注入（见 _skill_addendum）。
+            # 先于 persona 取出，确保两条返回路径都带上它。
+            out["task_rule"] = str(cfg.get("taskRule") or "").strip()
             persona = cfg.get("persona") or {}
             slug = (persona.get("agentSlug") or "").strip()
             if slug:
@@ -2145,6 +2154,7 @@ class CosmacBot:
         "run_workflow": "workflow_run",
         "search_knowledge": "knowledge",  # 与「知识」命令、RAG 自动注入同一道 knowledge 门
         "web_search": "web_search",       # 联网搜索：共享付费 key、默认仅管理员（见 GATE_CATALOG）
+        "assemble_team": "create_room",   # 建专班=建房+拉人+配置，归到 create_room 门槛
     }
 
     def _tool_gate_check(self, sender: str, tool_name: str) -> Optional[str]:
