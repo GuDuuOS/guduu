@@ -97,6 +97,11 @@ class CosmacBot:
         # 功能门控策略：控制室 cosmac.gating（带 TTL 缓存）。后台配「能力→最低等级」，
         # bot 在执行点服务端强制（见 _gate_allows / _tool_gate_check）。
         self.gating = GatingStore(self.client, config.control_room_alias)
+        # 用量配额（变现第二步）：控制室 cosmac.quotas（带 TTL 缓存）。后台配「计量项→各等级上限」，
+        # bot 在执行点服务端计数 + 强制（见 _quota_limit / _rate_quota_blocked）。计数进 cosmac DB。
+        from cosmac.quotas import QuotaStore
+
+        self.quotas = QuotaStore(self.client, config.control_room_alias)
         # 模块4 交易系统：订单服务（读控制室套餐 cosmac.plans + 建订单 + 支付成功开会员）。
         # 前端「升级会员」走 bot 的 /cosmac/pay/* 端点调它（前端够不到 cosmac DB）。
         from cosmac.trading.service import OrderService
@@ -317,6 +322,11 @@ class CosmacBot:
             #     不受此门控影响——保证用户随时能查/升级会员）。
             if not self._gate_allows(sender, "ai_chat"):
                 self.client.send_text(room_id, self._gate_denied_text("ai_chat"))
+                return
+            # 用量配额（变现第二步）：每天 AI 对话条数。超额提示升级并停在这（不消耗 LLM）。
+            quota_msg = self._rate_quota_blocked(sender, "ai_msg_daily")
+            if quota_msg:
+                self.client.send_text(room_id, quota_msg)
                 return
             #     它能边想边调用工具（建群/发消息/查记录），最后把结论发回群。
             #     （echo 后端不支持工具，会自动退化为纯文本回复。）
@@ -1928,13 +1938,18 @@ class CosmacBot:
 
         if len(content) > MAX_DOC_CHARS:
             return 400, {"error": f"正文太长（{len(content)} 字），上限 {MAX_DOC_CHARS} 字，请拆成多篇"}
+        # 用量配额（变现第二步）：知识库文档数按会员等级限。-1=不限；硬上限 MAX_DOCS_PER_SCOPE 兜底。
+        kb_limit = self._quota_limit(user_id, "kb_docs")
         try:
             from cosmac.db import kb, session_scope
             from cosmac.db.models import SCOPE_USER
 
             with session_scope() as s:
-                if len(kb.list_docs(s, scope=SCOPE_USER, scope_id=user_id)) >= MAX_DOCS_PER_SCOPE:
-                    return 400, {"error": f"知识库已满（上限 {MAX_DOCS_PER_SCOPE} 篇），先删一些再加"}
+                cur = len(kb.list_docs(s, scope=SCOPE_USER, scope_id=user_id))
+                if kb_limit >= 0 and cur >= kb_limit:
+                    return 400, {"error": f"知识库已满（{cur}/{kb_limit} 篇）。升级会员可扩容。"}
+                if cur >= MAX_DOCS_PER_SCOPE:  # 不限额(creator/admin)也别无限堆，留个硬上限兜底
+                    return 400, {"error": f"知识库已达系统上限（{MAX_DOCS_PER_SCOPE} 篇），先删一些再加"}
                 doc = kb.ingest_document(
                     s, scope=SCOPE_USER, scope_id=user_id,
                     title=title, source="upload", text=content,
@@ -2300,6 +2315,48 @@ class CosmacBot:
         "assemble_team": "assemble_team",  # 一键建专班：独立门控（默认免费，可在后台调成付费）
         "create_tasks": "task_board",      # AI 拆解任务到看板：独立门控（默认免费）
     }
+
+    # —— 用量配额（变现第二步）——
+
+    def _quota_limit(self, user_id: str, metric: str) -> int:
+        """某用户某计量项的上限：平台管理员永远不限(-1)；否则按其会员等级取配额。-1=不限。"""
+        if self._is_platform_admin(user_id):
+            return -1
+        try:
+            return self.quotas.limit(metric, self.members.get_tier(user_id))
+        except Exception:
+            return -1  # 读不到配额配置：宁可放行，不锁死
+
+    def _rate_quota_blocked(self, user_id: str, metric: str) -> Optional[str]:
+        """rate 类配额（按天/月）检查 + 消费：超额返回升级提示文案，否则计数 +1 返回 None。
+
+        DB 不可用一律放行（不因计数挂了就把人挡在门外）。管理员/不限额直接放行不计数。
+        """
+        limit = self._quota_limit(user_id, metric)
+        if limit < 0:
+            return None
+        from cosmac.quotas import metric_meta
+
+        meta = metric_meta(metric) or {}
+        period = str(meta.get("period") or "day")
+        label = str(meta.get("label") or metric)
+        try:
+            from cosmac.db import session_scope
+            from cosmac.db.quota_repo import get_count, incr, period_key
+
+            pkey = period_key(period)
+            with session_scope() as s:
+                used = get_count(s, user_id, metric, pkey)
+                if used >= limit:
+                    span = "今天" if period == "day" else ("本月" if period == "month" else "")
+                    return (
+                        f"你{span}的「{label}」额度已用完（{used}/{limit}）。"
+                        "升级会员可解锁更多 —— 私聊发「会员」查看，或在「升级会员」里订阅。"
+                    )
+                incr(s, user_id, metric, pkey)
+        except Exception:
+            logger.debug("配额计数失败（放行）：metric=%s", metric, exc_info=True)
+        return None
 
     def _tool_gate_check(self, sender: str, tool_name: str) -> Optional[str]:
         """工具门控钩子（注入 Toolbox.gate_check）：放行返回 None，拦下返回拒绝文案。"""

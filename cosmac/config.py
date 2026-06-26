@@ -249,3 +249,9 @@ PLANS_EVENT_TYPE = "cosmac.plans"
 # 内容形如 {"people": [{"user_id":"@a:h","name","role","expertise","note","enabled":true}]}。
 # 设计基线见 memory task-orchestration-design。
 PEOPLE_EVENT_TYPE = "cosmac.people"
+
+# 管理后台写、bot 读的「用量配额」state event 类型（存控制室；模块4 变现第二步）。
+# 给每个计量维度按会员等级配上限（如 免费每天 30 条 AI 对话、知识库 5 篇）。-1=不限。
+# 内容形如 {"limits": {"ai_msg_daily": {"free": 30, "paid": -1, "creator": -1}, ...}}。
+# 同 gating 套路（浏览器够不到 DB→走控制室 state event；bot 读、服务端强制）。计数进 cosmac DB。
+QUOTAS_EVENT_TYPE = "cosmac.quotas"

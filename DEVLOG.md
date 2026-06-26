@@ -7,6 +7,16 @@
 
 ---
 
+## 2026-06-26 — 变现第二步·用量配额系统（订阅真引擎）
+- **背景**:门控管"能不能用",配额管"能用多少"——免费版撞墙才升级,这是订阅主要付费驱动。开工第二步。
+- **引擎**:新建 `cosmac/quotas.py`(QUOTA_CATALOG 计量目录 + `QuotaStore` 读控制室 cosmac.quotas 配额配置,带 TTL 缓存,-1=不限) + 新表 `cosmac_usage`(user+metric+周期键累计) + `db/quota_repo.py`(period_key/get_count/incr)。两类指标:rate(按天/月计数)、total(数现有存量)。
+- **强制**(bot `_quota_limit`/`_rate_quota_blocked`,管理员永远不限):
+  - `ai_msg_daily`「AI 对话/天」(默认免费 30、付费/创作者不限):`_handle_event` AI 路径超额停在这、不耗 LLM、提示升级。
+  - `kb_docs`「知识库文档数」(免费 5、付费 200、创作者不限):`handle_kb_add` 按 tier 限(替换原硬上限,留系统硬顶兜底)。
+- **后台 UI**:新增「用量配额」tab(计量项×等级 数字表,-1=不限,写控制室 cosmac.quotas);client getQuotas/setQuotas + QUOTA_CATALOG。
+- **测试**:新增 test_quota.py(repo 增计/周期键 + QuotaStore 默认/覆盖 + bot 强制:撞墙拦/管理员不限/付费不计)。290 通过、ruff 全绿、client build OK。**发 dist + 重启 bot**(新表 create_all 自动建)。新 hash index-Dw-PoBVt.js。
+- **后续**:更多计量项(专班数/工作流次数/工作区·成员数)按引擎补;前端"今日额度 X/Y"展示按需加。
+
 ## 2026-06-26 — 变现第一步续·个人协作人设为付费
 - 新增权限 `people_manage`「个人协作人名册」默认付费 + 在 `handle_people_add` 强制(查看/删除自己数据不拦，同知识库做法，只对"添加/更新"增值动作收费)。前后端 GATE_CATALOG 各加。test_person 加门控用例。
 - 283 通过、ruff 全绿、client build OK。**发 dist + 重启 bot**。新 hash index-BmIJJRfR.js。

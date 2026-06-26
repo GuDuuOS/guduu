@@ -1309,6 +1309,46 @@ export const GATE_CATALOG: { key: string; label: string; default: string; group:
 /** 门控策略 map：能力 key → 门槛 slug。 */
 export type GatingMap = Record<string, string>
 
+/* ===== 用量配额（变现第二步；与 bot 端 cosmac/quotas.py QUOTA_CATALOG 一致）===== */
+const QUOTAS_EVENT_TYPE = 'cosmac.quotas'
+/** 计量项目录：每项按会员等级配上限，-1=不限。group 用于分组展示。 */
+export const QUOTA_CATALOG: { key: string; label: string; unit: string; group: string; defaults: Record<string, number> }[] = [
+  { key: 'ai_msg_daily', label: 'AI 对话（每天）', unit: '条/天', group: 'AI', defaults: { free: 30, paid: -1, creator: -1 } },
+  { key: 'kb_docs', label: '知识库文档数', unit: '篇', group: '知识库', defaults: { free: 5, paid: 200, creator: -1 } },
+]
+/** 配额 map：计量项 → 等级 → 上限（-1=不限）。 */
+export type QuotaLimits = Record<string, Record<string, number>>
+
+/** 读用量配额（控制室 state event，合并默认）；不存在→默认。 */
+export async function getQuotas(): Promise<QuotaLimits> {
+  const out: QuotaLimits = {}
+  for (const q of QUOTA_CATALOG) out[q.key] = { ...q.defaults }
+  if (!mx) return out
+  const rid = await resolveControlRoom()
+  if (!rid) return out
+  try {
+    const ev = await (mx as any).getStateEvent(rid, QUOTAS_EVENT_TYPE, '')
+    const raw = (ev?.limits && typeof ev.limits === 'object') ? ev.limits : {}
+    for (const q of QUOTA_CATALOG) {
+      const cfg = raw[q.key] || {}
+      for (const tier of Object.keys(out[q.key])) {
+        if (typeof cfg[tier] === 'number') out[q.key][tier] = cfg[tier]
+      }
+    }
+    return out
+  } catch (e: any) {
+    if (e?.errcode === 'M_NOT_FOUND') return out
+    throw new Error('读取配额失败，请重试')
+  }
+}
+
+/** 整体写入用量配额（必要时先建控制室）。 */
+export async function setQuotas(limits: QuotaLimits): Promise<void> {
+  if (!mx) throw new Error('未登录')
+  const rid = await ensureControlRoom()
+  await (mx as any).sendStateEvent(rid, QUOTAS_EVENT_TYPE, { limits }, '')
+}
+
 /**
  * 读门控策略（合并默认）。控制室不存在 / 事件不存在(404) → 返回纯默认（合法）。
  * #3：**瞬时读失败（网络/权限）会抛异常**，绝不伪装成"默认配置"——否则管理员在默认值上

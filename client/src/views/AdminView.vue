@@ -42,6 +42,9 @@
         <button class="adm-mi" :class="{ active: tab === 'gating' }" @click="switchToGating">
           <span class="adm-mi-ic">🔐</span> 会员权限
         </button>
+        <button class="adm-mi" :class="{ active: tab === 'quotas' }" @click="switchToQuotas">
+          <span class="adm-mi-ic">📈</span> 用量配额
+        </button>
         <button class="adm-mi" :class="{ active: tab === 'plans' }" @click="switchToPlans">
           <span class="adm-mi-ic">💳</span> 会员套餐
         </button>
@@ -920,6 +923,52 @@
         </div>
       </template>
 
+      <!-- 用量配额面板(变现第二步):给每个计量项按会员等级配上限,写控制室 cosmac.quotas,bot 服务端计数+强制 -->
+      <template v-else-if="tab === 'quotas'">
+        <header class="adm-head">
+          <div>
+            <h1 class="adm-h1">用量配额</h1>
+            <p class="adm-hint">给每个计量维度按会员等级设上限 · 填 -1 = 不限 · bot 服务端计数 + 强制 · 约 20 秒热生效</p>
+          </div>
+          <div class="adm-actions">
+            <button class="adm-btn ghost" :disabled="quotaLoading || quotaSaving" @click="loadQuotas">
+              {{ quotaLoading ? '加载中…' : '重新加载' }}
+            </button>
+            <button class="adm-btn" :disabled="quotaLoading || quotaSaving || !quotaLoaded" @click="saveQuotas">
+              {{ quotaSaving ? '保存中…' : '保存' }}
+            </button>
+          </div>
+        </header>
+
+        <div v-if="quotaLoading" class="adm-center"><div class="adm-spin" /> 加载配额…</div>
+        <div v-else-if="!quotaLoaded" class="adm-center adm-denied">
+          <div class="adm-denied-ic">⚠️</div>
+          <div class="adm-denied-t">配额加载失败</div>
+          <div class="adm-denied-d">为避免把默认值误存覆盖真实配置，已暂不显示。请点「重新加载」重试。</div>
+        </div>
+
+        <div v-else class="adm-form">
+          <p class="adm-hint">免费版很快撞墙→提示升级，这是订阅的主要付费驱动。-1=不限（多给付费/创作者）。管理员永远不受配额限制。</p>
+          <table class="adm-table">
+            <thead>
+              <tr>
+                <th>计量项</th>
+                <th v-for="t in MEMBER_TIERS" :key="t.slug">{{ t.label }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="q in QUOTA_CATALOG" :key="q.key">
+                <td>{{ q.label }}<span class="adm-muted">（{{ q.unit }}）</span></td>
+                <td v-for="t in MEMBER_TIERS" :key="t.slug">
+                  <input type="number" class="adm-qnum" v-model.number="quotas[q.key][t.slug]" min="-1" />
+                  <span v-if="quotas[q.key][t.slug] < 0" class="adm-muted">不限</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
+
       <!-- 会员套餐面板:配置可购买的会员套餐(tier/时长/各币种价),写控制室 cosmac.plans -->
       <template v-else-if="tab === 'plans'">
         <header class="adm-head">
@@ -1185,6 +1234,10 @@ import {
   GATE_CATALOG,
   GATE_LEVELS,
   type GatingMap,
+  getQuotas,
+  setQuotas,
+  QUOTA_CATALOG,
+  type QuotaLimits,
   AI_TOOL_CATALOG,
   AI_PROVIDERS,
   type AdminUser,
@@ -1203,7 +1256,7 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 const { success, warn } = useToast()
 
 // 当前管理模块：用户/频道/AI配置/技能库/智能体/规则/工作流/数据概览
-const tab = ref<'users' | 'rooms' | 'ai' | 'skills' | 'agents' | 'people' | 'templates' | 'rules' | 'workflows' | 'gating' | 'plans' | 'overview'>('users')
+const tab = ref<'users' | 'rooms' | 'ai' | 'skills' | 'agents' | 'people' | 'templates' | 'rules' | 'workflows' | 'gating' | 'quotas' | 'plans' | 'overview'>('users')
 
 // 页面状态机：checking 校验中 / denied 无权限 / ok 已是管理员
 const state = ref<'checking' | 'denied' | 'ok'>('checking')
@@ -2083,6 +2136,50 @@ async function saveGating() {
   }
 }
 
+/* —— 用量配额（写控制室 cosmac.quotas；变现第二步）—— */
+const quotas = ref<QuotaLimits>({})
+const quotaLoading = ref(false)
+const quotaSaving = ref(false)
+const quotaLoaded = ref(false)
+
+function switchToQuotas() {
+  tab.value = 'quotas'
+  if (!quotaLoaded.value) loadQuotas()
+}
+async function loadQuotas() {
+  quotaLoading.value = true
+  try {
+    quotas.value = await getQuotas() // 已合并默认，每项每等级都有值
+    quotaLoaded.value = true
+  } catch (e: any) {
+    warn('加载失败', e?.message || '无法读取配额')
+  } finally {
+    quotaLoading.value = false
+  }
+}
+async function saveQuotas() {
+  if (!quotaLoaded.value) { warn('请先成功加载', '配额尚未加载成功，无法保存（避免覆盖线上配置）'); return }
+  quotaSaving.value = true
+  try {
+    // 规范化成整数（-1=不限），避免空/小数写进去
+    const clean: QuotaLimits = {}
+    for (const q of QUOTA_CATALOG) {
+      clean[q.key] = {}
+      for (const t of MEMBER_TIERS) {
+        const v = Number(quotas.value[q.key]?.[t.slug])
+        clean[q.key][t.slug] = Number.isFinite(v) ? Math.trunc(v) : (q.defaults[t.slug] ?? -1)
+      }
+    }
+    await setQuotas(clean)
+    quotas.value = clean
+    success('已保存', '主 AI 约 20 秒内热生效')
+  } catch (e: any) {
+    warn('保存失败', e?.message || '无法写入控制室')
+  } finally {
+    quotaSaving.value = false
+  }
+}
+
 /* —— 会员套餐（写控制室 cosmac.plans；模块4 交易系统）—— */
 const plans = ref<PlanDef[]>([])
 const planLoading = ref(false)
@@ -2531,6 +2628,8 @@ onMounted(check)
   background: color-mix(in srgb, #7c3aed 14%, transparent);
 }
 .adm-muted { color: var(--text-3); }
+.adm-qnum { width: 72px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-soft); color: var(--text); font-size: var(--fs-75); }
+.adm-qnum:focus { outline: none; border-color: var(--accent); }
 
 .adm-ops { text-align: right; white-space: nowrap; }
 .adm-op {

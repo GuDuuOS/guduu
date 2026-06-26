@@ -1,0 +1,103 @@
+"""用量配额（模块4 变现第二步）—— 给每个计量维度按会员等级配上限。
+
+与「功能门控」(gating, members.py) 互补：门控管"**能不能用**某功能"，配额管"**能用多少**"。
+免费版撞墙(用完额度)就提示升级——这才是订阅的主要付费驱动。
+
+- **配额上限**：admin 在后台配，存控制室 `cosmac.quotas` state event（同 gating），-1=不限。
+- **用量计数**：进 cosmac DB（`cosmac_usage`，按 user+metric+周期键累计；见 db/quota_repo）。
+- **两类指标**：rate（按天/月累计，如每天 AI 对话条数）/ total（当前存量，如知识库文档数）。
+
+平台管理员永远不受配额限制（同门控）。
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+from typing import Any, Dict, List, Optional
+
+from cosmac.config import QUOTAS_EVENT_TYPE
+from cosmac.members import MEMBER_TIERS
+
+logger = logging.getLogger("cosmac.quotas")
+
+# 计量维度目录。period: day=每天 / month=每月 / total=当前存量。limit -1 = 不限。
+# 新增计量项往这里加一条（前后端各一份，见 client.ts QUOTA_CATALOG）。
+QUOTA_CATALOG: List[Dict[str, Any]] = [
+    {
+        "key": "ai_msg_daily", "label": "AI 对话（每天）", "unit": "条/天",
+        "period": "day", "group": "AI",
+        "defaults": {"free": 30, "paid": -1, "creator": -1},
+    },
+    {
+        "key": "kb_docs", "label": "知识库文档数", "unit": "篇",
+        "period": "total", "group": "知识库",
+        "defaults": {"free": 5, "paid": 200, "creator": -1},
+    },
+]
+
+_CATALOG_BY_KEY: Dict[str, Dict[str, Any]] = {q["key"]: q for q in QUOTA_CATALOG}
+_TIER_SLUGS = [t["slug"] for t in MEMBER_TIERS]  # free / paid / creator
+
+
+def metric_meta(key: str) -> Optional[Dict[str, Any]]:
+    """取某计量项的元信息（label/period/unit/defaults）；未知返回 None。"""
+    return _CATALOG_BY_KEY.get(key)
+
+
+def _as_int(v: Any, default: int) -> int:
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def parse_quota_limits(ev: Optional[Dict[str, Any]]) -> Dict[str, Dict[str, int]]:
+    """把控制室 cosmac.quotas 事件解析成 {metric: {tier: limit}}，缺的用目录默认补齐。"""
+    out: Dict[str, Dict[str, int]] = {}
+    raw = (ev or {}).get("limits") if isinstance(ev, dict) else {}
+    raw = raw if isinstance(raw, dict) else {}
+    for q in QUOTA_CATALOG:
+        key = q["key"]
+        defaults = q["defaults"]
+        cfg = raw.get(key) if isinstance(raw.get(key), dict) else {}
+        out[key] = {
+            tier: _as_int(cfg.get(tier), defaults.get(tier, -1)) for tier in _TIER_SLUGS
+        }
+    return out
+
+
+class QuotaStore:
+    """读控制室「用量配额」配置（带 TTL 缓存）。admin 写、bot 读。
+
+    构造参数同 GatingStore：client（resolve_alias/get_state_event）+ control_room_alias。
+    """
+
+    def __init__(self, client: Any, control_room_alias: str, ttl: float = 20.0):
+        self._client = client
+        self._alias = control_room_alias
+        self._ttl = ttl
+        self._cache: Optional[Dict[str, Dict[str, int]]] = None
+        self._cache_ts: float = float("-inf")
+
+    def _limits(self) -> Dict[str, Dict[str, int]]:
+        now = time.monotonic()
+        if self._cache is not None and (now - self._cache_ts) < self._ttl:
+            return self._cache
+        try:
+            room = self._client.resolve_alias(self._alias)
+            ev = self._client.get_state_event(room, QUOTAS_EVENT_TYPE) if room else None
+            limits = parse_quota_limits(ev)
+        except Exception as e:
+            logger.debug("读取配额配置失败，用默认：%s", e)
+            limits = parse_quota_limits(None)
+        self._cache = limits
+        self._cache_ts = now
+        return limits
+
+    def limit(self, metric: str, tier: str) -> int:
+        """某等级在某计量项上的上限；-1=不限。未知项/等级回退默认或不限。"""
+        per_tier = self._limits().get(metric)
+        if not per_tier:
+            return -1
+        return per_tier.get(tier, -1)

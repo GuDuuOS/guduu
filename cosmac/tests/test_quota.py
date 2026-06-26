@@ -1,0 +1,99 @@
+"""用量配额（变现第二步）单元测试：repo / QuotaStore / bot 强制。零 key、内存 SQLite。"""
+
+from __future__ import annotations
+
+import unittest
+
+from cosmac.db import init_engine, session_scope
+from cosmac.db.quota_repo import get_count, incr, period_key
+from cosmac.quotas import QuotaStore, parse_quota_limits
+
+
+class TestQuotaRepo(unittest.TestCase):
+    def setUp(self) -> None:
+        init_engine("sqlite://", create_all=True)
+
+    def test_incr_and_get(self) -> None:
+        with session_scope() as s:
+            self.assertEqual(get_count(s, "@a:h", "ai_msg_daily", "2026-06-26"), 0)
+            self.assertEqual(incr(s, "@a:h", "ai_msg_daily", "2026-06-26"), 1)
+            self.assertEqual(incr(s, "@a:h", "ai_msg_daily", "2026-06-26"), 2)
+        with session_scope() as s:
+            self.assertEqual(get_count(s, "@a:h", "ai_msg_daily", "2026-06-26"), 2)
+            # 不同周期键互不影响
+            self.assertEqual(get_count(s, "@a:h", "ai_msg_daily", "2026-06-27"), 0)
+
+    def test_period_key(self) -> None:
+        self.assertEqual(len(period_key("day")), 10)   # YYYY-MM-DD
+        self.assertEqual(len(period_key("month")), 7)  # YYYY-MM
+        self.assertEqual(period_key("total"), "")
+
+
+class TestQuotaStore(unittest.TestCase):
+    def test_defaults_and_override(self) -> None:
+        # 默认：免费 AI 对话 30/天，知识库 5 篇
+        limits = parse_quota_limits(None)
+        self.assertEqual(limits["ai_msg_daily"]["free"], 30)
+        self.assertEqual(limits["ai_msg_daily"]["paid"], -1)
+        self.assertEqual(limits["kb_docs"]["free"], 5)
+        # admin 覆盖
+        ev = {"limits": {"ai_msg_daily": {"free": 5}}}
+        limits2 = parse_quota_limits(ev)
+        self.assertEqual(limits2["ai_msg_daily"]["free"], 5)
+        self.assertEqual(limits2["ai_msg_daily"]["paid"], -1)  # 没覆盖的回退默认
+
+    def test_store_reads_control_room(self) -> None:
+        class C:
+            def resolve_alias(self, a):
+                return "!ctrl:h"
+
+            def get_state_event(self, room, etype, key=""):
+                return {"limits": {"ai_msg_daily": {"free": 3}}}
+
+        st = QuotaStore(C(), "#ctrl:h")
+        self.assertEqual(st.limit("ai_msg_daily", "free"), 3)
+        self.assertEqual(st.limit("kb_docs", "free"), 5)  # 默认
+
+
+def _bot():
+    from cosmac.bots.appservice_bot import CosmacBot
+    from cosmac.config import CosmacConfig
+
+    bot = CosmacBot(CosmacConfig(llm_provider="echo"))
+    bot._is_platform_admin = lambda u: False  # type: ignore  # 默认非管理员
+    return bot
+
+
+class TestBotQuotaEnforce(unittest.TestCase):
+    def setUp(self) -> None:
+        init_engine("sqlite://", create_all=True)
+
+    def test_rate_quota_blocks_after_limit(self) -> None:
+        bot = _bot()
+        bot.members.get_tier = lambda u: "free"  # type: ignore
+        # 配额配成免费 2 条/天
+        bot.quotas.limit = lambda metric, tier: 2 if metric == "ai_msg_daily" else -1  # type: ignore
+        self.assertIsNone(bot._rate_quota_blocked("@u:h", "ai_msg_daily"))  # 1
+        self.assertIsNone(bot._rate_quota_blocked("@u:h", "ai_msg_daily"))  # 2
+        blocked = bot._rate_quota_blocked("@u:h", "ai_msg_daily")           # 第3次超额
+        self.assertIsNotNone(blocked)
+        self.assertIn("额度已用完", blocked)
+        self.assertIn("2/2", blocked)
+
+    def test_admin_unlimited(self) -> None:
+        bot = _bot()
+        bot._is_platform_admin = lambda u: True  # type: ignore
+        self.assertEqual(bot._quota_limit("@admin:h", "ai_msg_daily"), -1)
+        for _ in range(50):
+            self.assertIsNone(bot._rate_quota_blocked("@admin:h", "ai_msg_daily"))
+
+    def test_paid_unlimited_not_counted(self) -> None:
+        bot = _bot()
+        bot.members.get_tier = lambda u: "paid"  # type: ignore
+        bot.quotas.limit = lambda metric, tier: (30 if tier == "free" else -1)  # type: ignore
+        for _ in range(50):
+            self.assertIsNone(bot._rate_quota_blocked("@p:h", "ai_msg_daily"))
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -351,6 +351,29 @@ class PersonProfile(Base, TimestampMixin):
         return f"<PersonProfile {self.owner}→{self.person_id}>"
 
 
+class UsageCounter(Base, TimestampMixin):
+    """用量计数（模块4 变现第二步）：按 用户 + 计量项 + 周期键 累计用量。
+
+    rate 类指标（如每天 AI 对话）周期键 = 日期/月份字符串，每次动作 +1；配额满则拦并提示升级。
+    total 类指标（如知识库文档数）不走这张表——直接数现有实体行（见各处 count）。
+    (user_id, metric, period_key) 唯一。
+    """
+
+    __tablename__ = "cosmac_usage"
+    __table_args__ = (
+        UniqueConstraint("user_id", "metric", "period_key", name="uq_usage"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    metric: Mapped[str] = mapped_column(String(64), nullable=False)
+    period_key: Mapped[str] = mapped_column(String(32), nullable=False, default="")
+    count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    def __repr__(self) -> str:
+        return f"<UsageCounter {self.user_id} {self.metric}@{self.period_key}={self.count}>"
+
+
 class RegisteredEmail(Base, TimestampMixin):
     """注册时把「邮箱 ↔ 用户名」存一份，给「找回密码」按邮箱定位账号用。
 
