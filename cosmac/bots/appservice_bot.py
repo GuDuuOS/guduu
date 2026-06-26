@@ -317,35 +317,41 @@ class CosmacBot:
                 return
             #     它能边想边调用工具（建群/发消息/查记录），最后把结论发回群。
             #     （echo 后端不支持工具，会自动退化为纯文本回复。）
-            # 回复前先按管理后台下发的运行时配置（人设/模型/工具开关）对齐一次。
-            self._apply_runtime_config()
-            # 本群上下文读一次（人设/绑定技能/模型覆盖），供 addendum 与选模型共用。
-            gctx = self._group_context(room_id)
-            # 按 (本群, 发起人) 算出本轮 system addendum：人设 + 技能 + 知识库检索片段(RAG)。
-            # 任何失败（DB 没装/没数据/出错）都返回空串、绝不阻断回复（见 _skill_addendum）。
-            extra_system = self._skill_addendum(
-                room_id, sender, query=text or user_text, gctx=gctx
-            )
-            # 短期记忆：把本房间最近的对话(不含当前这条)喂给模型，主 AI 才"记得"上文。
-            history = self._recent_history(room_id, sender, user_text)
-            # 本群若绑定的智能体指定了模型 → 用该模型的 Agent 回这条（否则用默认 Agent）。
-            agent = self._agent_for_model(gctx.get("model", ""))
-            reply = agent.run(
-                text or user_text,
-                ToolContext(
-                    room_id=room_id, sender=sender,
-                    source_key=f"event:{event_id}:ai" if event_id else "",
-                ),
-                extra_system=extra_system,
-                history=history,
-            )
-            # 幂等发送：用 event_id 派生固定 txn_id，让 Synapse 据此去重。
-            # 场景：同一事务里若有别的事件失败，handle_transaction 会让 Synapse 重发**整批**，
-            # 已成功的这条 AI 回复会被重新处理；固定 txn_id 保证群里不会冒出两条同样的回复。
-            self.client.send_text(
-                room_id, reply,
-                txn_id=f"cosmac-ai-{event_id}" if event_id else None,
-            )
+            # ③ 流式体感：进入可能较慢的 LLM 生成/工具调用前打开"正在输入…"，让用户看到
+            # bot 在干活而非死寂；try/finally 保证无论成功失败都关掉、不卡住输入中状态。
+            self.client.set_typing(room_id, True)
+            try:
+                # 回复前先按管理后台下发的运行时配置（人设/模型/工具开关）对齐一次。
+                self._apply_runtime_config()
+                # 本群上下文读一次（人设/绑定技能/模型覆盖），供 addendum 与选模型共用。
+                gctx = self._group_context(room_id)
+                # 按 (本群, 发起人) 算出本轮 system addendum：人设 + 技能 + 知识库检索片段(RAG)。
+                # 任何失败（DB 没装/没数据/出错）都返回空串、绝不阻断回复（见 _skill_addendum）。
+                extra_system = self._skill_addendum(
+                    room_id, sender, query=text or user_text, gctx=gctx
+                )
+                # 短期记忆：把本房间最近的对话(不含当前这条)喂给模型，主 AI 才"记得"上文。
+                history = self._recent_history(room_id, sender, user_text)
+                # 本群若绑定的智能体指定了模型 → 用该模型的 Agent 回这条（否则用默认 Agent）。
+                agent = self._agent_for_model(gctx.get("model", ""))
+                reply = agent.run(
+                    text or user_text,
+                    ToolContext(
+                        room_id=room_id, sender=sender,
+                        source_key=f"event:{event_id}:ai" if event_id else "",
+                    ),
+                    extra_system=extra_system,
+                    history=history,
+                )
+                # 幂等发送：用 event_id 派生固定 txn_id，让 Synapse 据此去重。
+                # 场景：同一事务里若有别的事件失败，handle_transaction 会让 Synapse 重发**整批**，
+                # 已成功的这条 AI 回复会被重新处理；固定 txn_id 保证群里不会冒出两条同样的回复。
+                self.client.send_text(
+                    room_id, reply,
+                    txn_id=f"cosmac-ai-{event_id}" if event_id else None,
+                )
+            finally:
+                self.client.set_typing(room_id, False)  # 关掉"正在输入…"
             # 长期记忆：回复发完后推进本群滚动摘要（到阈值才后台重摘要，绝不阻塞本次回复）。
             self._maybe_update_memory(room_id, history, text or user_text, reply)
 

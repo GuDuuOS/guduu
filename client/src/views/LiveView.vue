@@ -25,6 +25,8 @@ import {
   restoreSession,
   logout,
   onUpdate,
+  onTyping,
+  roomTyping,
   listRooms,
   listMessages,
   listReactions,
@@ -213,6 +215,8 @@ const filterInput = ref<HTMLInputElement>()
 
 // ── 右侧"中枢 AI"面板（= 与主 AI 的私聊）────────────────
 const aiRoom = ref('')
+// ③ 流式体感：中枢 AI 是否"正在输入…"（bot 生成回复期间发 typing 信号，这里渲染气泡）
+const botTyping = ref(false)
 const aiMsgs = ref<LiveMsg[]>([])
 const aiDraft = ref('')
 const aiOpen = ref(true)
@@ -689,6 +693,14 @@ function onOnboardingSkip() { /* 跳过即可，已标记 onboarded */ }
 
 // 持有 onUpdate 的解绑函数：登出/卸载时调用，避免重复登录累积监听器、同一更新触发多次。
 let stopUpdates: (() => void) | null = null
+// 同上：typing 监听的解绑函数。
+let stopTyping: (() => void) | null = null
+// typing 信号变化 → 重算中枢 AI 是否在输入；刚开始输入时滚到底，让"正在输入…"可见。
+function refreshTyping() {
+  const t = aiRoom.value ? roomTyping(aiRoom.value) : false
+  if (t && !botTyping.value) nextTick(scrollAiToBottom)
+  botTyping.value = t
+}
 
 async function afterLogin(uid: string) {
   me.value = uid
@@ -697,6 +709,8 @@ async function afterLogin(uid: string) {
   tasks.value = false
   if (stopUpdates) stopUpdates()   // 若是重新登录，先解绑上一次的
   stopUpdates = onUpdate(refresh)
+  if (stopTyping) stopTyping()
+  stopTyping = onTyping(refreshTyping)
   try {
     aiRoom.value = await ensureBotDm()
   } catch (e) {
@@ -1092,6 +1106,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   document.removeEventListener('click', onDocClick)
   if (stopUpdates) { stopUpdates(); stopUpdates = null }
+  if (stopTyping) { stopTyping(); stopTyping = null }
 })
 </script>
 
@@ -1702,7 +1717,11 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
               </div>
-              <p v-if="!aiMsgs.length" class="hint pad">跟中枢 AI 说句话，比如"帮我建个爆款专班"</p>
+              <!-- ③ 流式体感：bot 生成回复期间显示"正在输入…"，长回复不再死寂 -->
+              <div v-if="botTyping" class="ai-msg">
+                <div class="ai-bubble typing"><span class="td" /><span class="td" /><span class="td" /></div>
+              </div>
+              <p v-if="!aiMsgs.length && !botTyping" class="hint pad">跟中枢 AI 说句话，比如"帮我建个爆款专班"</p>
             </div>
             <div class="ai-composer">
               <div class="ai-input-box">
@@ -2454,6 +2473,12 @@ onBeforeUnmount(() => {
 .ai-msg.mine { justify-content: flex-end; }
 .ai-bubble { max-width: 86%; background: #fff; border: 1px solid var(--border-soft); padding: 9px 12px; border-radius: 12px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; color: var(--text); }
 .ai-msg.mine .ai-bubble { background: #fde7c2; border: 0; }
+/* ③ "正在输入…"气泡：三个点循环跳动 */
+.ai-bubble.typing { display: inline-flex; gap: 4px; align-items: center; padding: 11px 14px; }
+.ai-bubble.typing .td { width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); opacity: 0.5; animation: ai-typing 1.2s infinite ease-in-out; }
+.ai-bubble.typing .td:nth-child(2) { animation-delay: 0.2s; }
+.ai-bubble.typing .td:nth-child(3) { animation-delay: 0.4s; }
+@keyframes ai-typing { 0%, 60%, 100% { transform: translateY(0); opacity: 0.4; } 30% { transform: translateY(-4px); opacity: 0.9; } }
 .ai-composer { flex-shrink: 0; padding: 10px 14px 14px; }
 .ai-input-box { border: 1px solid var(--border); border-radius: 12px; background: var(--bg); padding: 8px 8px 4px 12px; transition: border-color .12s ease, box-shadow .12s ease; }
 .ai-input-box:focus-within { border-color: var(--ws-active); box-shadow: 0 0 0 3px var(--ws-active-soft); }

@@ -81,6 +81,24 @@ class MatrixClient:
         logger.warning("向房间 %s 发消息失败: %s %s", room_id, resp.status_code, resp.text)
         return None
 
+    def set_typing(self, room_id: str, typing: bool, timeout_ms: int = 30000) -> None:
+        """设置主 AI 在房间里的"正在输入…"状态（③ 流式体感）。
+
+        进入可能较慢的 LLM 生成前打开、回复发出后关闭，让用户看到 bot 在干活而非死寂。
+        带 ``timeout``：万一进程在生成途中崩了，服务端也会自动过期清除、不会一直卡着输入中。
+        best-effort：失败只记日志、绝不影响回复（typing 只是体验增强，不是关键路径）。
+        """
+        url = self._url(
+            f"/_matrix/client/v3/rooms/{quote(room_id)}/typing/{quote(self.bot_user_id)}"
+        )
+        body: Dict[str, Any] = {"typing": bool(typing)}
+        if typing:
+            body["timeout"] = timeout_ms  # 仅打开时需要超时；关闭不带
+        try:
+            self._session.put(url, json=body, timeout=10)
+        except requests.RequestException as exc:
+            logger.debug("set_typing 失败 room=%s typing=%s: %s", room_id, typing, exc)
+
     def upload_media(
         self, data: bytes, content_type: str, filename: str = "file"
     ) -> Optional[str]:

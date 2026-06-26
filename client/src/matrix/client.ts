@@ -253,6 +253,32 @@ export function onUpdate(cb: () => void): () => void {
   }
 }
 
+/** 订阅"正在输入…"变化（③ 流式体感）：某房间有人开始/停止输入时触发 cb。
+ *
+ * typing 是 Matrix 的 ephemeral 信号，matrix-js-sdk 收到后会 emit 'RoomMember.typing'。
+ * 返回解绑函数（登出/卸载时调用，避免累积监听）。 */
+export function onTyping(cb: () => void): () => void {
+  if (!mx) return () => {}
+  const handler = () => cb()
+  ;(mx as any).on('RoomMember.typing', handler)
+  return () => {
+    try { (mx as any)?.off?.('RoomMember.typing', handler) } catch { /* mx 可能已销毁 */ }
+  }
+}
+
+/** 某房间里是否有**别人**（非本人）正在输入。中枢 AI 私聊里只有 bot 与我，故=bot 在输入。 */
+export function roomTyping(roomId: string): boolean {
+  if (!mx || !roomId) return false
+  const room = mx.getRoom(roomId)
+  if (!room) return false
+  const me = (mx as any).getUserId?.()
+  try {
+    return room.getMembers().some((m: any) => m.typing && m.userId !== me)
+  } catch {
+    return false
+  }
+}
+
 /** 列出我加入的群频道（排除 Space 空间本身、"中枢 AI"私聊和无名 DM；按名称排序）。 */
 /** 读房间简介（m.room.topic 状态事件 → topic）。 */
 function roomTopic(room: any): string | undefined {

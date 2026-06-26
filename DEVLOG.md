@@ -7,6 +7,16 @@
 
 ---
 
+## 2026-06-26 — 模块2增强·流式体感「正在输入…」（增量③，typing 方案）
+- **背景**:③ 之前因"自研客户端没有 typing 渲染"暂缓;既然 ⑤a 已在动客户端,顺手用 typing 方案把 ③ 收掉(非编辑流打字机——那个刷屏留痕、性价比差)。
+- **做了什么**:主 AI 回复慢路径(LLM 生成/工具调用可达数秒)期间显示"正在输入…"三点跳动气泡,长回复不再死寂。
+- **后端**:matrix_client 加 `set_typing(room, bool)`(带 30s timeout,崩了也自动过期);`_handle_event` 的 Agent 慢路径用 **try/finally** 包起来——进生成前开、发完/异常都关,绝不卡住输入中状态(命令快路不显示、无谓)。
+- **前端**:client.ts 加 `onTyping`(监听 matrix-js-sdk 'RoomMember.typing')+ `roomTyping(roomId)`(房间内有别人在输入;中枢 AI 私聊里=bot 在输入);LiveView 订阅(afterLogin 挂、onBeforeUnmount 解绑)→ `botTyping` ref → AI 面板渲染跳动三点气泡 + 出现时滚到底。
+- **关键决策**:只在中枢 AI 面板(1:1 等回复最焦虑处)渲染;频道里的 typing 留作易扩展的后续(roomTyping 已通用)。typing 是 best-effort 体验增强,失败只记日志、绝不影响回复。
+- **测试**:新增 `test_typing.py` 2 个(正常路径先开后关 + **生成抛异常也靠 finally 关掉**);客户端 build 通过(新 hash index-C64yVQ1L.js)、preview 零 console 报错。255 通过、ruff 全绿;10 失败仍是 manual 支付缺 env 既有问题、无关。
+- **部署**:动了 client + cosmac → **发 dist + 重启 bot**。
+- **路线收官**:问答智能增强 5 项落 5 项(① 检索工具化 ② 联网搜索 ③ 流式体感 ④ 长期记忆 ⑤a 上传UI);仅 ⑤b pgvector 按规模暂缓。
+
 ## 2026-06-26 — 模块2增强·知识库上传 UI（增量⑤a；⑤b pgvector 暂缓）
 - **做了什么**:之前知识库只能靠聊天命令「知识 添加/删除」维护;现在给个**界面**——AI 侧栏「知识库」面板加「管理」按钮,打开弹窗可贴标题+正文入库、列出、删除(个人库 scope=user,bot 在该用户任何房间检索 RAG 都会带上)。
 - **后端**:个人库 CRUD 端点 `/cosmac/kb/{add,delete}`(list 已有、补返回 id);`handle_kb_add`(knowledge 门控+字数/数量上限+真实成功失败)、`handle_kb_delete`(**越权防护**:只能删 scope=user 且本人的文档,删不到群库/别人的);OPTIONS 预检放开 `/cosmac/kb/`。
