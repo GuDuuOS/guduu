@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-06-26 — 模块2增强·群级长期记忆（增量④，跳过③）
+- **为什么跳过③流式回复**:查了自研客户端——**没有 typing 渲染**(发输入信号只有 Element 能看到、自家客户端看不到),而**编辑流打字机**(m.replace)会刷屏+时间线永久留 N 个编辑事件+"已编辑"标记,性价比差。负责人拍板:跳过③先做④;③留到下次顺手碰客户端时用 typing 方案(需给客户端加 typing 渲染)。
+- **做了什么(增量④)**:给主 AI **群级长期记忆**——短期记忆只读最近 ~12 条,跨多轮/跨天就"忘了";现在每个房间存一份**滚动摘要**,每轮回复注入 system(AI 就"记得"),**每 8 轮后台用 LLM 重摘要一次**(攒一批再摘、省调用)。
+- **实现**:① 新表 `cosmac_conversation_memory`(派生数据,原始聊天记录仍在 Synapse 不重存;create_all 自动建表、无需迁移);② `db/memory_repo.py`(get_summary/bump_and_check/save_summary,**计数到阈值当场清零**保证并发只触发一次);③ bot 侧 `_memory_context` 注入(顺序 规则→人设→**长期记忆**→技能→知识库)+ 回复发完调 `_maybe_update_memory`,到阈值就 `submit_background`(fast 池)后台摘要,**绝不阻塞回复**;④ echo 占位后端跳过摘要(回显摘不出东西、反污染)。
+- **关键决策**:摘要走后台线程不阻塞用户回复;摘要器用全局 LLM(非 per-group 模型);全程兜异常+DB 懒导入,没装 DB/出错静默跳过、绝不影响回话。**无新门控、无客户端改动**(属 ai_chat 体验)。
+- **测试**:新增 `test_memory.py` 10 个(repo 计数/清零/写回 + bot 注入/echo跳过/后台摘要落库,后台池同步化后断言)。248 通过、ruff 全绿;10 失败仍是 manual 支付缺 env 的既有问题、无关。**纯后端、无需发 dist;部署=重启 bot**。
+- 下一步:⑤ 知识库上传UI + pgvector(需 pgvector,涉及客户端上传界面)。
+
 ## 2026-06-26 — 模块2增强·联网搜索工具 web_search（增量②）
 - **做了什么**:给主 AI 加"会上网查"的 `web_search` 工具——问到知识截止之后/需要最新外部信息时，模型自己联网检索，返回标题+链接+摘要据此作答。
 - **可插拔 + 无 key 自动降级**(照搬 LLM/embeddings 一贯做法,所以**不需要预先拍板服务商**):新建 `cosmac/ai/websearch.py` 抽象,内置 **Tavily**(默认,专为 Agent 设计)+ **Brave** 两家;`COSMAC_SEARCH_PROVIDER` 选家、`COSMAC_SEARCH_API_KEY`(或各家专用 TAVILY/BRAVE_API_KEY)给 key;没 key → `DisabledSearcher`,工具明确回"未配置"、绝不报错。新增一家只需加个子类。

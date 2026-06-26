@@ -346,9 +346,105 @@ class CosmacBot:
                 room_id, reply,
                 txn_id=f"cosmac-ai-{event_id}" if event_id else None,
             )
+            # 长期记忆：回复发完后推进本群滚动摘要（到阈值才后台重摘要，绝不阻塞本次回复）。
+            self._maybe_update_memory(room_id, history, text or user_text, reply)
 
     # 短期记忆窗口：最多带最近这么多条历史；单条正文截断长度（控 token）。
     _HISTORY_LIMIT = 12
+
+    # 长期记忆：每多少轮回复后台重摘要一次（攒一批再摘，省 LLM 调用）；摘要字数上限。
+    _MEMORY_SUMMARIZE_EVERY = 8
+    _MEMORY_SUMMARY_CHARS = 400
+
+    def _maybe_update_memory(
+        self, room_id: str, history: List[Message], user_text: str, reply: str
+    ) -> None:
+        """推进本群长期记忆：累计轮数到阈值就**后台**用 LLM 重摘要（不阻塞回复）。
+
+        全程兜异常 + DB 懒导入：没装 DB / 出错都静默跳过，绝不影响已发出的回复。
+        echo 占位后端不做摘要（complete 只是回显、摘不出东西、反而污染记忆）。
+        """
+        if getattr(self.llm, "name", "") == "echo":
+            return  # 占位后端：摘要无意义，跳过
+        try:
+            from cosmac.db import session_scope
+            from cosmac.db.memory_repo import bump_and_check
+            from cosmac.db.models import SCOPE_ROOM
+
+            with session_scope() as s:
+                due, prior = bump_and_check(
+                    s, SCOPE_ROOM, room_id, self._MEMORY_SUMMARIZE_EVERY
+                )
+        except Exception:
+            logger.debug("推进长期记忆计数失败（忽略）", exc_info=True)
+            return
+        if not due:
+            return
+        # 组装本轮要喂给摘要器的对话文本（短期窗口 + 当前这轮），在事件线程内先拼好，
+        # 后台任务只做 LLM 调用 + 写库，不再碰 Matrix。
+        convo = self._render_convo_for_summary(history, user_text, reply)
+
+        def _work() -> None:
+            try:
+                new_summary = self._summarize_memory(prior, convo)
+                if not new_summary:
+                    return
+                from cosmac.db import session_scope
+                from cosmac.db.memory_repo import save_summary
+                from cosmac.db.models import SCOPE_ROOM
+
+                with session_scope() as s:
+                    save_summary(s, SCOPE_ROOM, room_id, new_summary)
+            except Exception:
+                logger.exception("后台更新长期记忆失败 room=%s", room_id)
+
+        # 走 fast 池（LLM 摘要，秒级）；池满则本轮跳过、下次到阈值再摘，不积压。
+        from cosmac.wf import submit_background
+
+        submit_background(_work, pool="fast")
+
+    @staticmethod
+    def _render_convo_for_summary(
+        history: List[Message], user_text: str, reply: str
+    ) -> str:
+        """把短期历史 + 当前这轮渲染成"用户/助手"逐行文本，供摘要器读。"""
+        lines: List[str] = []
+        for m in history or []:
+            who = "助手" if m.role == "assistant" else "用户"
+            body = (m.content or "").strip()
+            if body:
+                lines.append(f"{who}: {body}")
+        if user_text.strip():
+            lines.append(f"用户: {user_text.strip()}")
+        if reply.strip():
+            lines.append(f"助手: {reply.strip()}")
+        return "\n".join(lines)
+
+    def _summarize_memory(self, prior: str, convo: str) -> str:
+        """用当前 LLM 把(已有记忆 + 最近对话)融合成一份更新后的长期记忆摘要。
+
+        只输出摘要本身；失败/空返回空串（调用方据此不覆盖旧摘要）。
+        """
+        if not convo.strip():
+            return ""
+        sys = (
+            "你是对话记忆整理器。把【已有记忆】和【最近对话】融合成一份简洁的长期记忆摘要，"
+            "保留：用户是谁、偏好、长期目标、已达成的结论、待办与承诺、关键事实；"
+            "去掉寒暄和一次性细节。用要点式中文，"
+            f"控制在 {self._MEMORY_SUMMARY_CHARS} 字内。只输出摘要本身，不要客套。"
+        )
+        user = (
+            f"【已有记忆】\n{prior or '（暂无）'}\n\n"
+            f"【最近对话】\n{convo}\n\n请输出更新后的长期记忆摘要："
+        )
+        try:
+            out = self.llm.complete(
+                [Message(role="system", content=sys), Message(role="user", content=user)]
+            )
+        except Exception:
+            logger.debug("LLM 摘要调用失败（忽略）", exc_info=True)
+            return ""
+        return (out or "").strip()[: self._MEMORY_SUMMARY_CHARS * 3]  # 字数上限留余量
     _HISTORY_CHARS = 600
 
     def _recent_history(
@@ -418,9 +514,12 @@ class CosmacBot:
                 seen.add(slug)
                 deduped.append(it)
             skills_text = render_skills(deduped)
+            mem_text = self._memory_context(room_id)
             kb_text = self._kb_context(room_id, sender, query)
-            # 规则(硬约束) → 人设 → 技能 → 知识库，依次拼成本轮 addendum
-            return "\n\n".join(p for p in (rules_text, persona, skills_text, kb_text) if p)
+            # 规则(硬约束) → 人设 → 长期记忆 → 技能 → 知识库，依次拼成本轮 addendum
+            return "\n\n".join(
+                p for p in (rules_text, persona, mem_text, skills_text, kb_text) if p
+            )
         except Exception as e:
             # 兜住**最终组装**：脏数据绝不能让这条消息收不到回复（docstring 的承诺）
             logger.debug("组装 addendum 失败（忽略，按无附加继续）：%s", e)
@@ -482,6 +581,25 @@ class CosmacBot:
         except Exception as e:
             logger.debug("知识库检索失败（忽略）：%s", e)
             return []
+
+    def _memory_context(self, room_id: str) -> str:
+        """长期记忆注入：读本群滚动摘要，渲染成「长期记忆」块塞进 system（无则空串）。
+
+        cosmac.db 懒导入 + 全程兜异常：没装 DB / 无摘要 / 出错都返回空串，绝不阻断回复。
+        """
+        try:
+            from cosmac.db import session_scope
+            from cosmac.db.memory_repo import get_summary
+            from cosmac.db.models import SCOPE_ROOM
+
+            with session_scope() as s:
+                summary = get_summary(s, SCOPE_ROOM, room_id)
+        except Exception as e:
+            logger.debug("读取长期记忆失败（忽略）：%s", e)
+            return ""
+        if not summary:
+            return ""
+        return "【长期记忆（你与本群/该用户之前对话沉淀的要点，供连贯作答参考）】：\n" + summary
 
     def _kb_context(self, room_id: str, sender: str, query: str) -> str:
         """RAG 自动注入：按 query 检索知识库 top-K 片段，渲染成「参考资料」块塞进 system。

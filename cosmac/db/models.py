@@ -290,6 +290,34 @@ class Task(Base, TimestampMixin):
         return f"<Task #{self.id} {self.status} {self.title[:20]!r}>"
 
 
+class ConversationMemory(Base, TimestampMixin):
+    """群级长期记忆：一份**滚动摘要**，让主 AI 记得超出短期窗口（最近 N 条）的对话要点。
+
+    为什么要它：短期记忆只读房间最近 ~12 条，跨多轮/跨天的事 AI 就"忘了"。这里存一份
+    定期由 LLM 重写的摘要——每轮回复读它注入 system（AI 就"记得"），每 K 轮后台重摘要一次。
+    **派生数据**：原始聊天记录在 Synapse（不重存，见 CLAUDE.md §3），这里只存摘要。
+    作用域：room=本群/DM 的长期记忆（scope_id=room_id）；一个房间一条（唯一）。
+    """
+
+    __tablename__ = "cosmac_conversation_memory"
+    __table_args__ = (
+        UniqueConstraint("scope", "scope_id", name="uq_convmem_scope"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    scope: Mapped[str] = mapped_column(String(16), nullable=False, default=SCOPE_ROOM)
+    scope_id: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    # 当前生效的长期记忆摘要文本（每轮注入 system；空=还没攒够内容）
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # 自上次摘要以来累计的回复轮数；达到阈值就触发后台重摘要并清零
+    turns_since_summary: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # 累计回复轮数（单调递增，仅调试/审计用）
+    total_turns: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    def __repr__(self) -> str:
+        return f"<ConversationMemory {self.scope}:{self.scope_id} turns={self.total_turns}>"
+
+
 class RegisteredEmail(Base, TimestampMixin):
     """注册时把「邮箱 ↔ 用户名」存一份，给「找回密码」按邮箱定位账号用。
 
