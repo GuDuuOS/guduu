@@ -7,6 +7,16 @@
 
 ---
 
+## 2026-06-26 — 模块3.5 开工·能力名册（档1；AI 任务编排地基）
+- **背景/设计**:负责人敲定模块3.5「AI 任务编排 + 能力名册」(企业通用,非影视)。主AI 拆任务→读"能力名册"匹配执行者→一键建专班(项目级频道+拉人+多AI+room级RULE/KB/Skill)→派单+审核回填。**两层主AI**:全局中枢AI 拆解+建专班;每专班的项目主AI 被频道任务RULE约束、只做分配+审核。完整设计基线 + 进度追踪存 memory `task-orchestration-design`。
+- **本次做了档1「能力名册」**(地基:让主AI 拆任务时"知道找谁",不再凭空编负责人):
+  - **后端**:新增 `cosmac.people` state event(admin 写、bot 读,同 skills/agents 套路);bot `_people_items`/`_global_agent_items`/`_kb_doc_titles` 读四类资源;`_list_capabilities_for_tool` 聚合 真人+AI Agent+Skill+知识库(各带能力备注)成名册文本;主AI 新工具 **`list_capabilities`**(注入 Toolbox、_ALWAYS_ON 默认常开),工具说明要求"拆任务/分配前先调它"。
+  - **后台 UI**:AdminView 新增「人员能力」tab——admin CRUD 成员能力备注(用户ID/显示名/角色/擅长/备注/启用),client `getPeople/setPeople` 写 `cosmac.people`。
+- **决策记录**:①一个项目一个专班频道 ②真人profile由admin填存cosmac.people ③一频道可多AI(路由方案A:@Agent名,不点名 lead接话) ④审核终审权默认"AI初审+人终审"。暂缓:方案B(每Agent独立账号)、持续编排DAG。
+- **测试**:新增 test_capabilities.py(名册聚合/停用过滤/空名册)+ test_agent_tools(工具转发/降级/默认常开);更新 runtime_config 工具集断言(8→9)。260 通过、ruff 全绿;10 失败仍是 manual 支付缺 env 既有问题、无关。
+- **部署**:动了 client(AdminView+client.ts)+ cosmac → **发 dist + 重启 bot**。新 hash index-CJKTruqG.js。
+- **下一步**:档2 匹配(拆解时主AI 读名册标 executor_kind+ref,assignee 升类型化)→ 档3 一键建专班 assemble_team → 档4 派单+审核回填。
+
 ## 2026-06-26 — 模块2增强·流式体感「正在输入…」（增量③，typing 方案）
 - **背景**:③ 之前因"自研客户端没有 typing 渲染"暂缓;既然 ⑤a 已在动客户端,顺手用 typing 方案把 ③ 收掉(非编辑流打字机——那个刷屏留痕、性价比差)。
 - **做了什么**:主 AI 回复慢路径(LLM 生成/工具调用可达数秒)期间显示"正在输入…"三点跳动气泡,长回复不再死寂。

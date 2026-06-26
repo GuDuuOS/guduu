@@ -27,6 +27,9 @@
         <button class="adm-mi" :class="{ active: tab === 'agents' }" @click="switchToAgents">
           <span class="adm-mi-ic">🧑‍🚀</span> 智能体
         </button>
+        <button class="adm-mi" :class="{ active: tab === 'people' }" @click="switchToPeople">
+          <span class="adm-mi-ic">🧑‍💼</span> 人员能力
+        </button>
         <button class="adm-mi" :class="{ active: tab === 'templates' }" @click="switchToTemplates">
           <span class="adm-mi-ic">🧰</span> 入驻模板
         </button>
@@ -440,6 +443,81 @@
                   <button class="adm-btn ghost sm" :disabled="agSaving" @click="startEditAgent(a)">编辑</button>
                   <button class="adm-btn ghost sm" :disabled="agSaving" @click="toggleAgent(a)">{{ a.enabled ? '停用' : '启用' }}</button>
                   <button class="adm-btn ghost sm danger" :disabled="agSaving" @click="removeAgent(a)">删除</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
+
+      <!-- 人员能力面板（模块3.5）：admin 给真人成员登记能力备注，主 AI 拆任务时据此匹配"找谁" -->
+      <template v-else-if="tab === 'people'">
+        <header class="adm-head">
+          <div>
+            <h1 class="adm-h1">人员能力</h1>
+            <p class="adm-hint">
+              给团队成员登记"擅长什么" · 主 AI 拆任务/分配时据此把活派给最合适的人
+            </p>
+          </div>
+          <div class="adm-actions">
+            <button class="adm-btn ghost" :disabled="plLoading || plSaving" @click="loadPeople">
+              {{ plLoading ? '加载中…' : '重新加载' }}
+            </button>
+            <button class="adm-btn" :disabled="plLoading || plSaving" @click="startAddPerson">＋ 添加成员</button>
+          </div>
+        </header>
+
+        <div v-if="plLoading" class="adm-center"><div class="adm-spin" /> 加载人员名册…</div>
+
+        <div v-else class="adm-form">
+          <div v-if="plEditing" class="adm-skill-edit">
+            <label class="adm-field">
+              <span>用户 ID（完整，如 @alice:cosmac.cc）</span>
+              <input v-model.trim="plForm.user_id" :disabled="plForm._isEdit" placeholder="@alice:cosmac.cc" />
+            </label>
+            <label class="adm-field">
+              <span>显示名</span>
+              <input v-model.trim="plForm.name" placeholder="小雨" />
+            </label>
+            <label class="adm-field">
+              <span>角色 / 岗位</span>
+              <input v-model.trim="plForm.role" placeholder="文案 / 剪辑 / 客户对接" />
+            </label>
+            <label class="adm-field">
+              <span>擅长（能力备注，主 AI 据此匹配）</span>
+              <textarea v-model="plForm.expertise" rows="3" placeholder="如：小红书种草文案、爆款标题、竞品分析…" />
+            </label>
+            <label class="adm-field">
+              <span>补充备注（可空）</span>
+              <input v-model.trim="plForm.note" placeholder="如：负责美妆线客户、时区 GMT+8" />
+            </label>
+            <label class="adm-tool">
+              <input type="checkbox" v-model="plForm.enabled" />
+              <span class="adm-tool-l">启用</span>
+            </label>
+            <div class="adm-actions">
+              <button class="adm-btn ghost" :disabled="plSaving" @click="plEditing = false">取消</button>
+              <button class="adm-btn" :disabled="plSaving || !plForm.user_id" @click="savePerson">
+                {{ plSaving ? '保存中…' : '保存' }}
+              </button>
+            </div>
+          </div>
+
+          <p v-if="!people.length" class="adm-hint">还没有登记成员。点右上「添加成员」开始。</p>
+          <table v-else class="adm-table">
+            <thead>
+              <tr><th>用户</th><th>角色</th><th>擅长</th><th>状态</th><th>操作</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="p in people" :key="p.user_id">
+                <td><code>{{ p.user_id }}</code><template v-if="p.name"> · {{ p.name }}</template></td>
+                <td>{{ p.role || '—' }}</td>
+                <td class="adm-skill-desc">{{ p.expertise || '—' }}</td>
+                <td><span class="adm-badge" :class="{ on: p.enabled }">{{ p.enabled ? '启用' : '停用' }}</span></td>
+                <td class="adm-row-actions">
+                  <button class="adm-btn ghost sm" :disabled="plSaving" @click="startEditPerson(p)">编辑</button>
+                  <button class="adm-btn ghost sm" :disabled="plSaving" @click="togglePerson(p)">{{ p.enabled ? '停用' : '启用' }}</button>
+                  <button class="adm-btn ghost sm danger" :disabled="plSaving" @click="removePerson(p)">删除</button>
                 </td>
               </tr>
             </tbody>
@@ -1019,6 +1097,9 @@ import {
   setGlobalSkills,
   getGlobalAgents,
   setGlobalAgents,
+  getPeople,
+  setPeople,
+  type Person,
   getGlobalRules,
   setGlobalRules,
   getWorkflows,
@@ -1057,7 +1138,7 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 const { success, warn } = useToast()
 
 // 当前管理模块：用户/频道/AI配置/技能库/智能体/规则/工作流/数据概览
-const tab = ref<'users' | 'rooms' | 'ai' | 'skills' | 'agents' | 'templates' | 'rules' | 'workflows' | 'gating' | 'plans' | 'overview'>('users')
+const tab = ref<'users' | 'rooms' | 'ai' | 'skills' | 'agents' | 'people' | 'templates' | 'rules' | 'workflows' | 'gating' | 'plans' | 'overview'>('users')
 
 // 页面状态机：checking 校验中 / denied 无权限 / ok 已是管理员
 const state = ref<'checking' | 'denied' | 'ok'>('checking')
@@ -1544,6 +1625,97 @@ async function removeAgent(a: GlobalAgent) {
   if (!confirm(`确认删除智能体「${a.name || a.slug}」？`)) return
   const next = agents.value.filter((x) => x.slug !== a.slug)
   try { await persistAgents(next, '已删除') } catch { /* 已提示 */ }
+}
+
+/* —— 人员能力名册（模块3.5 档1：admin 给成员登记能力备注，主 AI 拆任务匹配用）—— */
+const people = ref<Person[]>([])
+const plLoading = ref(false)
+const plSaving = ref(false)
+const plLoaded = ref(false)
+const plEditing = ref(false)
+const plForm = reactive<Person & { _isEdit: boolean }>({
+  user_id: '', name: '', role: '', expertise: '', note: '', enabled: true, _isEdit: false,
+})
+
+function switchToPeople() {
+  tab.value = 'people'
+  if (!plLoaded.value) loadPeople()
+}
+
+async function loadPeople() {
+  plLoading.value = true
+  try {
+    people.value = await getPeople()
+    plLoaded.value = true
+  } catch (e: any) {
+    warn('加载失败', e?.message || '无法读取人员名册')
+  } finally {
+    plLoading.value = false
+  }
+}
+
+function startAddPerson() {
+  Object.assign(plForm, {
+    user_id: '', name: '', role: '', expertise: '', note: '', enabled: true, _isEdit: false,
+  })
+  plEditing.value = true
+}
+
+function startEditPerson(p: Person) {
+  Object.assign(plForm, { ...p, _isEdit: true })
+  plEditing.value = true
+}
+
+async function persistPeople(next: Person[], okMsg: string) {
+  if (!plLoaded.value) {
+    warn('请先成功加载', '人员名册尚未加载成功，无法保存（避免覆盖线上配置）')
+    throw new Error('人员名册未加载')
+  }
+  plSaving.value = true
+  try {
+    await setPeople(next)
+    people.value = next
+    success('已保存', okMsg)
+  } catch (e: any) {
+    warn('保存失败', e?.message || '无法写入控制室')
+    throw e
+  } finally {
+    plSaving.value = false
+  }
+}
+
+async function savePerson() {
+  const uid = plForm.user_id.trim()
+  if (!uid) return
+  const item: Person = {
+    user_id: uid,
+    name: plForm.name.trim(),
+    role: plForm.role.trim(),
+    expertise: plForm.expertise.trim(),
+    note: plForm.note.trim(),
+    enabled: plForm.enabled,
+  }
+  const next = people.value.slice()
+  const i = next.findIndex((p) => p.user_id === uid)
+  if (i >= 0) next[i] = item
+  else next.push(item)
+  try {
+    await persistPeople(next, '已保存成员')
+    plEditing.value = false
+  } catch { /* 已提示 */ }
+}
+
+async function togglePerson(p: Person) {
+  const next = people.value.map((x) =>
+    x.user_id === p.user_id ? { ...x, enabled: !x.enabled } : x,
+  )
+  try { await persistPeople(next, p.enabled ? '已停用' : '已启用') } catch { /* 已提示 */ }
+}
+
+async function removePerson(p: Person) {
+  if (!confirm(`确认删除成员「${p.name || p.user_id}」？`)) return
+  const next = people.value.filter((x) => x.user_id !== p.user_id)
+  try { await persistPeople(next, '已删除') } catch { /* 已提示 */ }
 }
 
 /* —— 入驻模板（管理员定义注册引导可选的「方案」，写控制室 state event）—— */

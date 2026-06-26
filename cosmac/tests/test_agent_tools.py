@@ -212,6 +212,28 @@ class TestAgentTools(unittest.TestCase):
             )
         self.assertIn("未配置", out)
 
+    def test_list_capabilities_forwards_and_default_on(self) -> None:
+        # 默认在工具清单里，且把调用转发给注入的 list_capabilities 回调
+        toolbox = Toolbox(FakeClient())
+        self.assertIn("list_capabilities", [s.name for s in toolbox.specs()])
+        seen = {}
+        toolbox.list_capabilities = lambda ctx: (  # type: ignore
+            seen.update(room=ctx.room_id) or "名册：@a 文案"
+        )
+        out = toolbox.execute(
+            ToolCall(id="c", name="list_capabilities", arguments={}),
+            ToolContext("!cur:test", "@alice:test"),
+        )
+        self.assertEqual(seen["room"], "!cur:test")
+        self.assertIn("名册", out)
+
+    def test_list_capabilities_graceful_without_callback(self) -> None:
+        out = Toolbox(FakeClient()).execute(
+            ToolCall(id="c", name="list_capabilities", arguments={}),
+            ToolContext("!c:test", "@a:test"),
+        )
+        self.assertIn("不可用", out)
+
     def test_max_steps_guard(self) -> None:
         # 模型一直要求调工具（不收敛），Agent 应在 max_steps 后兜底退出，不死循环
         loop = TurnResult(

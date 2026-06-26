@@ -932,6 +932,7 @@ const AGENTS_EVENT_TYPE = 'cosmac.agents'
 const RULES_EVENT_TYPE = 'cosmac.rules'
 /** 控制室里「工作流连接器」state event 的类型（与 bot 端 WORKFLOWS_EVENT_TYPE 一致）。 */
 const WORKFLOWS_EVENT_TYPE = 'cosmac.workflows'
+const PEOPLE_EVENT_TYPE = 'cosmac.people'
 /** 旧版会员聚合事件，仅用于读取已有数据。 */
 const MEMBERS_EVENT_TYPE = 'cosmac.members'
 /** 新版单用户会员事件：state_key=userId，避免并发覆盖和事件容量上限。 */
@@ -1411,6 +1412,56 @@ export async function setGlobalAgents(agents: GlobalAgent[]): Promise<void> {
   if (!mx) throw new Error('未登录')
   const rid = await ensureControlRoom()
   await (mx as any).sendStateEvent(rid, AGENTS_EVENT_TYPE, { agents }, '')
+}
+
+/** 一条「人员能力」名册项：admin 给真人成员登记能力备注，主 AI 拆任务时据此匹配（模块3.5）。 */
+export interface Person {
+  user_id: string
+  name: string
+  role: string
+  expertise: string
+  note: string
+  enabled: boolean
+}
+
+/** 读人员能力名册（控制室 state event）；不存在时返回 []。 */
+export async function getPeople(): Promise<Person[]> {
+  if (!mx) return []
+  const rid = await resolveControlRoom()
+  if (!rid) return []
+  try {
+    const ev = await (mx as any).getStateEvent(rid, PEOPLE_EVENT_TYPE, '')
+    const arr = Array.isArray(ev?.people) ? ev.people : []
+    return arr.map((p: any) => ({
+      user_id: String(p?.user_id || ''),
+      name: String(p?.name || ''),
+      role: String(p?.role || ''),
+      expertise: String(p?.expertise || ''),
+      note: String(p?.note || ''),
+      enabled: p?.enabled !== false,
+    })).filter((p: Person) => p.user_id)
+  } catch (e: any) {
+    // 同 getGlobalAgents：404=未配置→[]；瞬时失败抛，防空列表覆盖真实名册。
+    if (e?.errcode === 'M_NOT_FOUND') return []
+    throw new Error('读取人员能力名册失败，请重试')
+  }
+}
+
+/** 整体写入人员能力名册（必要时先建控制室）。user_id 必填，其余可空。 */
+export async function setPeople(people: Person[]): Promise<void> {
+  if (!mx) throw new Error('未登录')
+  const clean = people
+    .map((p) => ({
+      user_id: String(p.user_id || '').trim(),
+      name: String(p.name || '').trim().slice(0, 64),
+      role: String(p.role || '').trim().slice(0, 64),
+      expertise: String(p.expertise || '').trim().slice(0, 500),
+      note: String(p.note || '').trim().slice(0, 500),
+      enabled: p.enabled !== false,
+    }))
+    .filter((p) => p.user_id)
+  const rid = await ensureControlRoom()
+  await (mx as any).sendStateEvent(rid, PEOPLE_EVENT_TYPE, { people: clean }, '')
 }
 
 /** 一条「全局规则」：平台级硬约束，主 AI 在所有群都须遵守。 */

@@ -242,3 +242,10 @@ CHANNEL_CONFIG_EVENT_TYPE = "cosmac.channel_config"
 # 内容形如 {"plans": [{"slug","name","tier","period_days","prices":{"usd":999,...},"enabled"}]}。
 # 价格用**最小货币单位**(分/cent)的整数存，避免浮点；订单/支付走 DB(cosmac_order)。
 PLANS_EVENT_TYPE = "cosmac.plans"
+
+# 管理后台写、bot 读的「人员能力名册」state event 类型（存控制室；模块3.5 AI 任务编排）。
+# admin 给每个真人成员登记"能力备注"，主AI 拆任务时读它做匹配（"这条文案交给谁"）。
+# 同 skills/agents/workflows 套路（浏览器够不到 DB → 走控制室 state event；bot 读）。
+# 内容形如 {"people": [{"user_id":"@a:h","name","role","expertise","note","enabled":true}]}。
+# 设计基线见 memory task-orchestration-design。
+PEOPLE_EVENT_TYPE = "cosmac.people"

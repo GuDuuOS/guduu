@@ -37,6 +37,7 @@ from cosmac.config import (
     AI_CONFIG_EVENT_TYPE,
     CHANNEL_CONFIG_EVENT_TYPE,
     CONTROL_ADMINS_EVENT_TYPE,
+    PEOPLE_EVENT_TYPE,
     RULES_EVENT_TYPE,
     SKILLS_EVENT_TYPE,
     WORKFLOWS_EVENT_TYPE,
@@ -112,6 +113,8 @@ class CosmacBot:
         # 知识库检索工具化：把 bot 的检索逻辑注入 Toolbox，让主 AI 能主动调 search_knowledge
         # 工具（在每轮盲塞 RAG 之外，模型还能用精准关键词多次深挖）。门控走 knowledge 闸。
         self.toolbox.kb_search = self._kb_search_for_tool
+        # 能力名册（模块3.5 档1）：注入"列出可调配资源"的回调，让主AI 拆任务时知道找谁。
+        self.toolbox.list_capabilities = self._list_capabilities_for_tool
         self.agent = Agent(
             llm=self.llm,
             toolbox=self.toolbox,
@@ -727,6 +730,134 @@ class CosmacBot:
             return []
         want = set(slugs)
         return [s for s in self._global_skill_items() if str(s.get("slug")) in want]
+
+    def _global_agent_items(self) -> List[Dict[str, Any]]:
+        """读控制室「全局智能体」，返回启用的智能体字典列表（失败空）。给能力名册用。"""
+        try:
+            ctrl = self.client.resolve_alias(self.config.control_room_alias)
+            if not ctrl:
+                return []
+            ev = self.client.get_state_event(ctrl, AGENTS_EVENT_TYPE) or {}
+            return [
+                a for a in (ev.get("agents") or [])
+                if isinstance(a, dict) and a.get("enabled", True)
+            ]
+        except Exception as e:
+            logger.debug("读取全局智能体列表失败（忽略）：%s", e)
+            return []
+
+    def _people_items(self) -> List[Dict[str, Any]]:
+        """读控制室「人员能力名册」(cosmac.people)，返回启用的人员画像列表（失败空）。
+
+        admin 后台登记，每条形如 {user_id,name,role,expertise,note,enabled}。主AI 拆任务时
+        据此知道"这条活找谁"。同 _global_skill_items 套路：解析不到/出错都返回空、绝不阻断。
+        """
+        try:
+            ctrl = self.client.resolve_alias(self.config.control_room_alias)
+            if not ctrl:
+                return []
+            ev = self.client.get_state_event(ctrl, PEOPLE_EVENT_TYPE) or {}
+            return [
+                p for p in (ev.get("people") or [])
+                if isinstance(p, dict) and p.get("enabled", True)
+            ]
+        except Exception as e:
+            logger.debug("读取人员能力名册失败（忽略）：%s", e)
+            return []
+
+    def _list_capabilities_for_tool(self, ctx: ToolContext) -> str:
+        """能力名册（list_capabilities 工具的执行体，注入 Toolbox.list_capabilities）。
+
+        聚合四类"可调配资源"+各自能力备注，给主AI 拆任务/分配时匹配执行者用：
+          真人(cosmac.people) / AI Agent(全局) / Skill(全局) / 知识库(本群+个人文档标题)。
+        全程兜异常，任一来源失败只是少列一类、绝不抛出。
+        """
+        lines: List[str] = []
+        # — 真人 —
+        try:
+            people = self._people_items()
+        except Exception:
+            people = []
+        if people:
+            lines.append("— 真人（可派单给 TA）—")
+            for p in people[:50]:
+                uid = str(p.get("user_id") or "").strip()
+                name = str(p.get("name") or "").strip()
+                meta = " · ".join(
+                    x for x in [
+                        f"角色:{p.get('role')}" if p.get("role") else "",
+                        f"擅长:{p.get('expertise')}" if p.get("expertise") else "",
+                        str(p.get("note") or "").strip(),
+                    ] if x
+                )
+                head = uid + (f"（{name}）" if name else "")
+                lines.append(f"{head} {meta}".rstrip())
+        # — AI Agent —
+        try:
+            agents = self._global_agent_items()
+        except Exception:
+            agents = []
+        if agents:
+            lines.append("— AI Agent（可绑进专班/派活）—")
+            for a in agents[:50]:
+                slug = str(a.get("slug") or "").strip()
+                name = str(a.get("name") or "").strip()
+                desc = str(a.get("description") or "").strip()
+                skills = a.get("skill_slugs") or []
+                seg = f"{slug}" + (f"（{name}）" if name else "")
+                if desc:
+                    seg += f"：{desc}"
+                if skills:
+                    seg += f"（技能:{','.join(str(s) for s in skills)}）"
+                lines.append(seg)
+        # — Skill —
+        try:
+            skills_items = self._global_skill_items()
+        except Exception:
+            skills_items = []
+        if skills_items:
+            lines.append("— Skill（可装进专班）—")
+            for s in skills_items[:50]:
+                slug = str(s.get("slug") or "").strip()
+                name = str(s.get("name") or "").strip()
+                desc = str(s.get("description") or "").strip()
+                seg = slug + (f"（{name}）" if name else "")
+                if desc:
+                    seg += f"：{desc}"
+                lines.append(seg)
+        # — 知识库（本群 + 个人文档标题）—
+        try:
+            titles = self._kb_doc_titles(ctx.room_id, ctx.sender)
+        except Exception:
+            titles = []
+        if titles:
+            lines.append("— 知识库（可关联进专班）—")
+            lines.append("、".join(f"《{t}》" for t in titles[:30]))
+        if not lines:
+            return (
+                "能力名册暂时是空的：管理员可在后台「人员能力」页登记成员；"
+                "Agent/技能/知识库也还没有可用项。"
+            )
+        return (
+            "【可调配资源名册（拆任务/分配时据此选谁来干）】\n" + "\n".join(lines)
+        )
+
+    def _kb_doc_titles(self, room_id: str, sender: str) -> List[str]:
+        """列出本群 + 个人知识库的文档标题（给能力名册展示"有哪些库可用"）。失败空。"""
+        try:
+            from cosmac.db import session_scope
+            from cosmac.db.kb import list_docs
+            from cosmac.db.models import SCOPE_ROOM, SCOPE_USER
+
+            out: List[str] = []
+            with session_scope() as s:
+                for d in list_docs(s, scope=SCOPE_ROOM, scope_id=room_id):
+                    out.append((d.title or "").strip() or "(无标题)")
+                for d in list_docs(s, scope=SCOPE_USER, scope_id=sender):
+                    out.append((d.title or "").strip() or "(无标题)")
+            return out
+        except Exception:
+            return []
 
     def _global_skill_items(self) -> List[Dict[str, Any]]:
         """读控制室「全局技能」state event，返回启用的技能字典列表（失败返回空）。"""

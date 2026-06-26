@@ -65,6 +65,9 @@ class Toolbox:
         # 让 search_knowledge 工具的检索逻辑(embedder/DB/作用域)留在 bot 一侧，Toolbox 保持薄。
         # None（如单测/未注入）→ search_knowledge 工具返回"暂不可用"，绝不报错。
         self.kb_search: Optional[Callable[["str", ToolContext], str]] = None
+        # 能力名册回调（模块3.5 档1）：由 bot 注入 _list_capabilities_for_tool。签名 (ctx)->文本。
+        # 让 list_capabilities 工具能列出"可调配的 人/Agent/Skill/知识库"，供主AI 拆任务匹配。
+        self.list_capabilities: Optional[Callable[[ToolContext], str]] = None
         # 工具名 → (说明书, 执行函数)。执行函数签名: (arguments, ctx) -> 结果文本
         self._tools: Dict[str, Dict[str, Any]] = {}
         # 启用集合：None = 全部启用（默认）；否则只启用集合内的工具。
@@ -93,7 +96,9 @@ class Toolbox:
     # （旧 AI 配置的工具白名单里没有它，不放这会被当未勾选=禁用）。
     # web_search 也默认常开——它本身受 web_search 门控(默认仅管理员)+ 无 key 自动降级，
     # 双保险，不靠工具开关来拦；放这里免得旧 AI 配置白名单没有它而被当禁用。
-    _ALWAYS_ON: Set[str] = {"create_tasks", "search_knowledge", "web_search"}
+    _ALWAYS_ON: Set[str] = {
+        "create_tasks", "search_knowledge", "web_search", "list_capabilities",
+    }
 
     def _is_enabled(self, name: str) -> bool:
         if name in self._ALWAYS_ON:
@@ -345,6 +350,19 @@ class Toolbox:
             fn=self._tool_web_search,
         )
 
+        # 9) 能力名册（模块3.5 档1）：列出可调配的 人/AI Agent/Skill/知识库 + 各自能力备注。
+        #    主AI **拆任务/分配前**先调它，才能"知道找谁"，而不是凭空编个名字。
+        self._register(
+            name="list_capabilities",
+            description=(
+                "列出当前可调配的资源及其能力：真人成员、AI Agent、Skill、知识库（各带能力备注）。"
+                "当你要拆解目标、给子任务分配负责人、或组建项目专班前，**先调用它**了解有谁/有什么可用，"
+                "据此把每条子任务派给最合适的人或 AI，不要凭空臆造负责人。"
+            ),
+            parameters={"type": "object", "properties": {}},
+            fn=self._tool_list_capabilities,
+        )
+
     # —— 各工具的具体执行（转发到 MatrixClient）——
 
     def _tool_create_room(self, args: Dict[str, Any], ctx: ToolContext) -> str:
@@ -543,6 +561,16 @@ class Toolbox:
         if not n:
             return "没有有效的子任务可登记。"
         return f"已把目标拆成 {n} 个任务、登记到「任务看板」：\n" + "\n".join(lines)
+
+    def _tool_list_capabilities(self, args: Dict[str, Any], ctx: ToolContext) -> str:
+        """能力名册（转发到 bot 注入的 list_capabilities）。未注入则优雅降级。"""
+        if self.list_capabilities is None:
+            return "（能力名册当前不可用。）"
+        try:
+            return self.list_capabilities(ctx)
+        except Exception:
+            logger.exception("能力名册工具执行出错")
+            return "读取能力名册时出错了。"
 
     def _tool_search_knowledge(self, args: Dict[str, Any], ctx: ToolContext) -> str:
         """主动检索知识库（转发到 bot 注入的 kb_search）。门控由 execute 的 gate_check
