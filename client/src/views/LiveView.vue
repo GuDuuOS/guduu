@@ -69,6 +69,8 @@ import CliConsole from '@/components/layout/CliConsole.vue'
 import AdminView from '@/views/AdminView.vue'
 import MembershipModal from '@/components/membership/MembershipModal.vue'
 import ChannelAdminModal from '@/components/channel/ChannelAdminModal.vue'
+import KnowledgeModal from '@/components/layout/KnowledgeModal.vue'
+import { useKnowledge } from '@/composables/useKnowledge'
 import RightPanel from '@/components/layout/RightPanel.vue'
 import { useRightPanel } from '@/composables/useRightPanel'
 import BoardSourcePanel from '@/components/layout/BoardSourcePanel.vue'
@@ -144,11 +146,12 @@ function openBoard() { board.value = true; tasks.value = false; currentRoom.valu
 function openTasks() { tasks.value = true; board.value = false; currentRoom.value = ''; loadTasks() }
 
 // 任务看板（AI 任务编排 P1）：主 AI 拆解的真实任务，三列 Kanban + 手动改状态。
-import { getTasks, updateTask, kbListMine, type TaskItem } from '@/matrix/client'
+import { getTasks, updateTask, type TaskItem } from '@/matrix/client'
 const taskList = ref<TaskItem[]>([])
 // AI 侧栏放大态右栏：进度=真实任务完成数，项目文件=真实个人知识库文档
 const doneCount = computed(() => taskList.value.filter((t) => t.status === 'done').length)
-const kbDocsMine = ref<{ title: string; source: string }[]>([])
+// 个人知识库文档：与「知识库管理」弹窗共用同一份单例（增删后两处同步刷新）
+const { docs: kbDocsMine, load: loadKb, open: openKnowledge } = useKnowledge()
 const TASK_COLS = [
   { key: 'todo', label: '待办' },
   { key: 'doing', label: '进行中' },
@@ -221,7 +224,7 @@ watch(aiOpen, (v) => { if (!v) aiMax.value = false })
 watch(aiMax, async (v) => {
   if (!v) return
   if (!taskList.value.length) loadTasks()
-  kbDocsMine.value = await kbListMine()
+  loadKb()
 })
 
 // 中枢 AI 对话区：来新消息 / 打开面板时自动滚到底部（否则 bot 回复在视口下方看不到）
@@ -1727,12 +1730,12 @@ onBeforeUnmount(() => {
             <div class="ai-cw-sec">
               <div class="ai-cw-proj-h">
                 <span class="ai-cw-proj-nm">知识库 · {{ activeSpaceName }}</span>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" /></svg>
+                <button class="ai-cw-manage" title="管理知识库" @click="openKnowledge">管理</button>
               </div>
               <ul v-if="kbDocsMine.length" class="ai-cw-files">
-                <li v-for="(d, i) in kbDocsMine" :key="i"><span class="ic">📄</span>{{ d.title }}</li>
+                <li v-for="d in kbDocsMine" :key="d.id"><span class="ic">📄</span>{{ d.title || '(无标题)' }}</li>
               </ul>
-              <div v-else class="ai-cw-empty">还没有知识库文档。在频道里发「知识库 添加 标题|内容」，或注册时按模板预置。</div>
+              <div v-else class="ai-cw-empty">还没有知识库文档。点「管理」上传，或在频道里发「知识库 添加 标题|内容」。</div>
             </div>
           </div>
 
@@ -1759,6 +1762,7 @@ onBeforeUnmount(() => {
     <ProfileHome />
     <CliConsole />
     <ChannelAdminModal />
+    <KnowledgeModal />
 
     <!-- 平台管理后台（全屏覆盖层；仅管理员可从用户菜单进入）-->
     <AdminView v-if="adminOpen" @close="adminOpen = false" />
@@ -2528,6 +2532,12 @@ onBeforeUnmount(() => {
 .ai-cw-proj-h { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; padding: 0 4px; }
 .ai-cw-proj-nm { font-size: var(--fs-100); font-weight: var(--fw-bold); color: var(--text); }
 .ai-cw-proj-h svg { color: var(--text-3); }
+.ai-cw-manage {
+  border: 1px solid var(--border); background: transparent; color: var(--text-2);
+  padding: 2px 10px; border-radius: 999px; cursor: pointer; font-size: var(--fs-75);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.ai-cw-manage:hover { background: var(--bg-soft); color: var(--text); }
 .ai-cw-files li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; font-size: var(--fs-100); color: var(--text-2); cursor: pointer; }
 .ai-cw-files li:hover { background: var(--bg-hover); color: var(--text); }
 .ai-cw-files li .ic { width: 16px; text-align: center; flex-shrink: 0; }

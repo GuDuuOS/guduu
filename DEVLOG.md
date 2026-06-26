@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-06-26 — 模块2增强·知识库上传 UI（增量⑤a；⑤b pgvector 暂缓）
+- **做了什么**:之前知识库只能靠聊天命令「知识 添加/删除」维护;现在给个**界面**——AI 侧栏「知识库」面板加「管理」按钮,打开弹窗可贴标题+正文入库、列出、删除(个人库 scope=user,bot 在该用户任何房间检索 RAG 都会带上)。
+- **后端**:个人库 CRUD 端点 `/cosmac/kb/{add,delete}`(list 已有、补返回 id);`handle_kb_add`(knowledge 门控+字数/数量上限+真实成功失败)、`handle_kb_delete`(**越权防护**:只能删 scope=user 且本人的文档,删不到群库/别人的);OPTIONS 预检放开 `/cosmac/kb/`。
+- **前端**:`client.ts` 加 kbAddMine/kbDeleteMine(kbListMine 补 id);新 composable `useKnowledge`(模块级单例,docs 是「项目文件」面板与管理弹窗**共用的唯一来源**,增删两处同步);新组件 `KnowledgeModal.vue`(贴文本入库+列表+删除);LiveView 接进去(面板「管理」按钮、挂载弹窗、kbDocsMine 改用单例)。
+- **关键决策**:v1「上传」=贴标题+正文文本(文件解析 PDF/docx 留后续);删自己的数据不设门控(用户随时能清理);⑤b pgvector **暂缓**——当前几篇文档 Python 余弦完全够用,pgvector 是过早优化,等知识库真上量再做(同其它"已知边界")。
+- **测试**:新增 5 个 HTTP handler 测试(登录/空正文/带id列表/越权删除404/门控403);客户端 build 通过(新 hash index-Dq2-3nAk.js)、preview 启动零 console 报错。253 通过、ruff 全绿;10 失败仍是 manual 支付缺 env 既有问题、无关。
+- **部署**:动了 client + cosmac → **发 dist + 重启 bot**。
+
 ## 2026-06-26 — 模块2增强·群级长期记忆（增量④，跳过③）
 - **为什么跳过③流式回复**:查了自研客户端——**没有 typing 渲染**(发输入信号只有 Element 能看到、自家客户端看不到),而**编辑流打字机**(m.replace)会刷屏+时间线永久留 N 个编辑事件+"已编辑"标记,性价比差。负责人拍板:跳过③先做④;③留到下次顺手碰客户端时用 typing 方案(需给客户端加 typing 渲染)。
 - **做了什么(增量④)**:给主 AI **群级长期记忆**——短期记忆只读最近 ~12 条,跨多轮/跨天就"忘了";现在每个房间存一份**滚动摘要**,每轮回复注入 system(AI 就"记得"),**每 8 轮后台用 LLM 重摘要一次**(攒一批再摘、省调用)。

@@ -1668,8 +1668,8 @@ export async function onboardIngestKb(
   }
 }
 
-/** 列本人个人知识库文档（给 AI 侧栏「项目文件」展示）。失败/未登录返回 []。 */
-export async function kbListMine(): Promise<{ title: string; source: string }[]> {
+/** 列本人个人知识库文档（给 AI 侧栏「项目文件」展示 + 知识库管理）。失败/未登录返回 []。 */
+export async function kbListMine(): Promise<{ id: number; title: string; source: string }[]> {
   const token = (mx as any)?.getAccessToken?.() || ''
   if (!token) return []
   try {
@@ -1682,6 +1682,33 @@ export async function kbListMine(): Promise<{ title: string; source: string }[]>
   } catch {
     return []
   }
+}
+
+/** 给本人个人知识库添加一篇文档（标题+正文）。成功返回切块数；失败抛出带文案的错误。 */
+export async function kbAddMine(title: string, content: string): Promise<number> {
+  const token = (mx as any)?.getAccessToken?.() || ''
+  if (!token) throw new Error('登录已失效，请重新登录')
+  const r = await fetch(`${payBase()}/cosmac/kb/add`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ title, content }),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok || !j?.ok) throw new Error(j?.error || '入库失败')
+  return Number(j?.chunks) || 0
+}
+
+/** 删除本人个人知识库里的一篇文档（按 id）。失败抛出带文案的错误。 */
+export async function kbDeleteMine(id: number): Promise<void> {
+  const token = (mx as any)?.getAccessToken?.() || ''
+  if (!token) throw new Error('登录已失效，请重新登录')
+  const r = await fetch(`${payBase()}/cosmac/kb/delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ id }),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok || !j?.ok) throw new Error(j?.error || '删除失败')
 }
 
 /** 验码 + 重置密码。成功无返回；失败抛出带文案的错误。 */

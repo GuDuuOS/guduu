@@ -1642,7 +1642,8 @@ class CosmacBot:
 
             with session_scope() as s:
                 for d in kb.list_docs(s, scope=SCOPE_USER, scope_id=user_id):
-                    docs.append({"title": d.title, "source": d.source})
+                    # id 给「知识库管理」UI 删除用；title/source 给展示用
+                    docs.append({"id": d.id, "title": d.title, "source": d.source})
         except Exception:
             logger.debug("列知识库失败", exc_info=True)
         return 200, {"docs": docs}
@@ -1685,6 +1686,73 @@ class CosmacBot:
         except Exception:
             logger.exception("入驻知识库入库失败")
         return 200, {"ingested": ingested}
+
+    def handle_kb_add(
+        self, access_token: str, body: Dict[str, Any]
+    ) -> Tuple[int, Dict[str, Any]]:
+        """「知识库管理」UI：把一篇文档(标题+正文)加进**本人个人知识库**。需登录 + knowledge 门控。
+
+        与入驻批量灌库不同，这是用户在 UI 里逐篇添加，要返回真实成功/失败与数量上限提示。
+        """
+        user_id = self.client.whoami(access_token)
+        if not user_id:
+            return 401, {"error": "登录已失效，请重新登录"}
+        # 知识库门控：与「知识」命令、RAG 同一道 knowledge 闸（低等级用户被挡时给升级提示）
+        if not self._gate_allows(user_id, "knowledge"):
+            return 403, {"error": self._gate_denied_text("knowledge")}
+        title = str((body or {}).get("title") or "").strip()
+        content = str((body or {}).get("content") or "").strip()
+        if not content:
+            return 400, {"error": "正文不能为空"}
+        from cosmac.db.kb_cmd import MAX_DOC_CHARS, MAX_DOCS_PER_SCOPE
+
+        if len(content) > MAX_DOC_CHARS:
+            return 400, {"error": f"正文太长（{len(content)} 字），上限 {MAX_DOC_CHARS} 字，请拆成多篇"}
+        try:
+            from cosmac.db import kb, session_scope
+            from cosmac.db.models import SCOPE_USER
+
+            with session_scope() as s:
+                if len(kb.list_docs(s, scope=SCOPE_USER, scope_id=user_id)) >= MAX_DOCS_PER_SCOPE:
+                    return 400, {"error": f"知识库已满（上限 {MAX_DOCS_PER_SCOPE} 篇），先删一些再加"}
+                doc = kb.ingest_document(
+                    s, scope=SCOPE_USER, scope_id=user_id,
+                    title=title, source="upload", text=content,
+                )
+                # 在 session 内取出需要的标量值返回（关闭后惰性加载会报错）
+                return 200, {"ok": True, "id": doc.id, "title": doc.title, "chunks": len(doc.chunks)}
+        except Exception:
+            logger.exception("知识库入库失败（UI 添加）")
+            return 500, {"error": "入库失败（数据库不可用？）"}
+
+    def handle_kb_delete(
+        self, access_token: str, body: Dict[str, Any]
+    ) -> Tuple[int, Dict[str, Any]]:
+        """「知识库管理」UI：删除本人个人知识库里的一篇文档（按 id）。需登录。
+
+        **越权防护**：只能删 scope=user 且 scope_id==本人 的文档，删不到别人的库/群库。
+        删自己的数据不设 knowledge 门控（即便门槛被调高，用户也应能清理自己的数据）。
+        """
+        user_id = self.client.whoami(access_token)
+        if not user_id:
+            return 401, {"error": "登录已失效，请重新登录"}
+        try:
+            doc_id = int((body or {}).get("id"))
+        except (TypeError, ValueError):
+            return 400, {"error": "文档 id 无效"}
+        try:
+            from cosmac.db import kb, session_scope
+            from cosmac.db.models import SCOPE_USER, KnowledgeDoc
+
+            with session_scope() as s:
+                doc = s.get(KnowledgeDoc, doc_id)
+                if doc is None or doc.scope != SCOPE_USER or doc.scope_id != user_id:
+                    return 404, {"error": "没找到该文档（或不属于你）"}
+                kb.delete_doc(s, doc_id)
+                return 200, {"ok": True}
+        except Exception:
+            logger.exception("知识库删除失败（UI）")
+            return 500, {"error": "删除失败"}
 
     def handle_pay_checkout(
         self, access_token: str, body: Dict[str, Any]
@@ -2106,7 +2174,7 @@ class _Handler(BaseHTTPRequestHandler):
                 or p.startswith("/cosmac/reset/")
                 or p.startswith("/cosmac/login/")
                 or p.startswith("/cosmac/onboard/")
-                or p == "/cosmac/kb/list"):
+                or p.startswith("/cosmac/kb/")):  # list/add/delete 都走浏览器，需预检
             origin = os.environ.get("COSMAC_APP_ORIGIN", "") or "*"
             self.send_response(204)
             self.send_header("Access-Control-Allow-Origin", origin)
@@ -2317,6 +2385,30 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(400, {"error": "请求无效"}, cors=True)
                 return
             code, payload = self.bot.handle_onboard_ingest_kb(token, body)
+            self._send_json(code, payload, cors=True)
+            return
+
+        # 知识库管理（个人库）：添加一篇文档（带本人 token、浏览器调，需 CORS）。
+        if path == "/cosmac/kb/add":
+            auth = self.headers.get("Authorization", "")
+            token = auth[len("Bearer "):] if auth.startswith("Bearer ") else ""
+            body = self._read_json_body(_MAX_CALLBACK_BODY)
+            if body is None:
+                self._send_json(400, {"error": "请求无效"}, cors=True)
+                return
+            code, payload = self.bot.handle_kb_add(token, body)
+            self._send_json(code, payload, cors=True)
+            return
+
+        # 知识库管理（个人库）：删除一篇文档（按 id，越权防护在 handler 内）。
+        if path == "/cosmac/kb/delete":
+            auth = self.headers.get("Authorization", "")
+            token = auth[len("Bearer "):] if auth.startswith("Bearer ") else ""
+            body = self._read_json_body(_MAX_CALLBACK_BODY)
+            if body is None:
+                self._send_json(400, {"error": "请求无效"}, cors=True)
+                return
+            code, payload = self.bot.handle_kb_delete(token, body)
             self._send_json(code, payload, cors=True)
             return
 

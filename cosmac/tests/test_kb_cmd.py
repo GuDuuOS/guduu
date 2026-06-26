@@ -120,5 +120,67 @@ class TestKbSearchTool(unittest.TestCase):
         self.assertIn("没找到", out)
 
 
+class TestKbHttpHandlers(unittest.TestCase):
+    """个人知识库管理 HTTP 端点（add/list/delete）+ 越权防护。"""
+
+    def setUp(self) -> None:
+        _force_hashing_embedder(self)
+        init_engine("sqlite://", create_all=True)
+
+    def _bot(self):
+        from cosmac.bots.appservice_bot import CosmacBot
+        from cosmac.config import CosmacConfig
+
+        bot = CosmacBot(CosmacConfig(llm_provider="echo"))
+        # 假身份：token "alice"→@alice，"bob"→@bob，其它→未登录；门控放行
+        bot.client.whoami = lambda t: {  # type: ignore
+            "alice": "@alice:h", "bob": "@bob:h"
+        }.get(t)
+        bot._gate_allows = lambda u, c: True  # type: ignore
+        return bot
+
+    def test_add_requires_login(self) -> None:
+        code, _ = self._bot().handle_kb_add("", {"content": "x"})
+        self.assertEqual(code, 401)
+
+    def test_add_rejects_empty_content(self) -> None:
+        code, p = self._bot().handle_kb_add("alice", {"title": "t", "content": "  "})
+        self.assertEqual(code, 400)
+        self.assertIn("正文", p["error"])
+
+    def test_add_then_list_with_id(self) -> None:
+        bot = self._bot()
+        code, p = bot.handle_kb_add("alice", {"title": "报价规则", "content": "商单按粉丝量定价。"})
+        self.assertEqual(code, 200)
+        self.assertTrue(p["ok"])
+        self.assertGreaterEqual(p["chunks"], 1)
+        code, p = bot.handle_kb_list_mine("alice")
+        self.assertEqual(code, 200)
+        self.assertEqual(len(p["docs"]), 1)
+        self.assertIn("id", p["docs"][0])  # 列表带 id，供删除用
+        self.assertEqual(p["docs"][0]["title"], "报价规则")
+
+    def test_delete_blocks_other_user(self) -> None:
+        bot = self._bot()
+        _, p = bot.handle_kb_add("alice", {"title": "私密", "content": "alice 的资料"})
+        did = p["id"]
+        # bob 删 alice 的文档 → 404（越权防护）
+        code, _ = bot.handle_kb_delete("bob", {"id": did})
+        self.assertEqual(code, 404)
+        # alice 自己删 → 200
+        code, _ = bot.handle_kb_delete("alice", {"id": did})
+        self.assertEqual(code, 200)
+        _, p = bot.handle_kb_list_mine("alice")
+        self.assertEqual(len(p["docs"]), 0)
+
+    def test_add_gate_denied(self) -> None:
+        bot = self._bot()
+        bot._gate_allows = lambda u, c: False  # type: ignore
+        bot._gate_denied_text = lambda c: "需升级会员"  # type: ignore
+        code, p = bot.handle_kb_add("alice", {"title": "t", "content": "正文"})
+        self.assertEqual(code, 403)
+        self.assertIn("升级", p["error"])
+
+
 if __name__ == "__main__":
     unittest.main()
