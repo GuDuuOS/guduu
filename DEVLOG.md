@@ -7,6 +7,15 @@
 
 ---
 
+## 2026-06-26 — 模块3.5 档2·拆任务的类型化执行者匹配
+- **做了什么**:把拆出来的子任务从"自由文本负责人"升级成**类型化执行者**——主AI 读能力名册(档1)后，给每条子任务标清"谁来干、怎么干"，为档3 派发铺路。
+- **后端**:Task 模型加 `executor_kind`(human/agent/workflow/none) + `executor_ref`(@user/agent-slug/workflow-slug) 两列;engine `_heal_business_schema` 给旧 cosmac_task 补这两列(非破坏);task_repo.create_tasks 收并校验(非法 kind/none 一律回落 none 且清空 ref，防悬空引用);create_tasks 工具 schema 加这两字段 + 说明"**先调 list_capabilities** 看有谁可用再按能力指派，拿不准用 none 别臆造";handle_tasks_list 返回 executor。
+- **前端**:TaskItem 加 executor 字段;任务看板卡片显示执行者小标签(👤真人/🤖AI/⚙工作流)。
+- **边界提醒**:档2 只是"**记录**指派"(任务卡知道该派给谁)，真正"**派出去执行 + 审核回填**"是档3(一键建专班 assemble_team)/档4。
+- **测试**:新增 test_task_repo.py(类型化存取/非法回落/none清ref/旧式兼容)。264 通过、ruff 全绿;10 失败仍是 manual 支付缺 env、无关。
+- **部署**:动了 client + cosmac → **发 dist + 重启 bot**。新 hash index-Dso5cHq8.js。新列靠 _heal_business_schema 自动补、无需手动迁移。
+- **下一步**:档3 一键建专班 `assemble_team`(建项目频道→拉人+绑多Agent(lead=项目主AI)→装 room 级任务RULE/Skill→关联KB→派单)。
+
 ## 2026-06-26 — 模块3.5 开工·能力名册（档1；AI 任务编排地基）
 - **背景/设计**:负责人敲定模块3.5「AI 任务编排 + 能力名册」(企业通用,非影视)。主AI 拆任务→读"能力名册"匹配执行者→一键建专班(项目级频道+拉人+多AI+room级RULE/KB/Skill)→派单+审核回填。**两层主AI**:全局中枢AI 拆解+建专班;每专班的项目主AI 被频道任务RULE约束、只做分配+审核。完整设计基线 + 进度追踪存 memory `task-orchestration-design`。
 - **本次做了档1「能力名册」**(地基:让主AI 拆任务时"知道找谁",不再凭空编负责人):

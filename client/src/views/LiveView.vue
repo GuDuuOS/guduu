@@ -179,6 +179,16 @@ const projects = computed(() => {
 const visibleTasks = computed(() =>
   activeGoal.value ? taskList.value.filter((t) => (t.goal || '未归类') === activeGoal.value) : taskList.value)
 function tasksByStatus(s: string) { return visibleTasks.value.filter((t) => t.status === s) }
+// 档2 类型化执行者 → 看板小标签（人/AI/工作流）；none 或无 ref 返回空、不显示
+function execLabel(t: TaskItem): string {
+  const ref = (t.executor_ref || '').trim()
+  if (!ref) return ''
+  const k = t.executor_kind
+  if (k === 'human') return '👤 ' + ref
+  if (k === 'agent') return '🤖 ' + ref
+  if (k === 'workflow') return '⚙ ' + ref
+  return ''
+}
 function nextStatus(s: string) { return s === 'todo' ? 'doing' : 'done' }
 function prevStatus(s: string) { return s === 'done' ? 'doing' : 'todo' }
 async function moveTask(t: TaskItem, status: string) {
@@ -1493,10 +1503,11 @@ onBeforeUnmount(() => {
                 <div class="kan-cards">
                   <div v-for="t in tasksByStatus(col.key)" :key="t.id" class="kan-card" :class="{ done: t.status === 'done' }">
                     <div class="kan-title">{{ t.title }}</div>
-                    <div v-if="t.assignee || t.progress > 0" class="kan-foot">
+                    <div v-if="t.assignee || execLabel(t) || t.progress > 0" class="kan-foot">
                       <span v-if="t.assignee" class="kan-who">
                         <span class="kan-who-ava">{{ t.assignee.slice(0, 1) }}</span>{{ t.assignee }}
                       </span>
+                      <span v-if="execLabel(t)" class="kan-exec" :title="execLabel(t)">{{ execLabel(t) }}</span>
                       <span v-if="t.progress > 0" class="kan-prog">{{ t.progress }}%</span>
                     </div>
                     <div v-if="t.progress > 0 && t.status !== 'done'" class="kan-barwrap">
@@ -2215,6 +2226,7 @@ onBeforeUnmount(() => {
 .kan-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 11px; }
 .kan-who { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-75); color: var(--text-2); background: var(--bg-soft); border-radius: 999px; padding: 2px 10px 2px 2px; }
 .kan-who-ava { width: 19px; height: 19px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 10px; font-weight: var(--fw-bold); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.kan-exec { font-size: var(--fs-75); color: var(--text-2); background: var(--bg-soft); border-radius: 999px; padding: 2px 9px; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kan-prog { font-size: var(--fs-75); color: var(--accent); font-weight: var(--fw-bold); margin-left: auto; }
 .kan-barwrap { height: 5px; background: var(--bg-soft); border-radius: 3px; margin-top: 10px; overflow: hidden; }
 .kan-bar { height: 100%; background: linear-gradient(90deg, var(--accent), var(--warn, #e0883a)); border-radius: 3px; }

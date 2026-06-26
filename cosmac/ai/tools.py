@@ -263,13 +263,19 @@ class Toolbox:
             fn=self._tool_run_workflow,
         )
 
-        # 6) 拆解目标 → 登记任务到任务看板（AI 任务编排 P1）
+        # 6) 拆解目标 → 登记任务到任务看板（AI 任务编排；档2 起支持类型化执行者）
         self._register(
             name="create_tasks",
             description=(
-                "把一个目标拆解成若干可执行的子任务，登记到『任务看板』，每个子任务指定一个负责人。"
+                "把一个目标拆解成若干可执行的子任务，登记到『任务看板』，并给每条**指派执行者**。"
                 "当用户『下达目标/让你拆解任务/安排分工/拆成几步』时调用。"
-                "负责人填人名/角色/@某人/某智能体（如『编剧』『@anqi:host』『分镜Agent』）；拿不准就填角色。"
+                "**强烈建议先调用 list_capabilities** 看清有哪些人/AI Agent/工作流可用，再据其能力指派：\n"
+                "每条子任务填 executor_kind + executor_ref：\n"
+                "  • human —— 派给真人，ref 填其完整 user_id（如 @anqi:host）\n"
+                "  • agent —— 交给 AI Agent，ref 填其 slug（如 copywriter）\n"
+                "  • workflow —— 跑某工作流，ref 填其 slug\n"
+                "  • none —— 暂不指派（拿不准就用它，别瞎编一个不存在的人/agent）\n"
+                "assignee 另填一个给人看的负责人标签（人名/角色）。"
             ),
             parameters={
                 "type": "object",
@@ -289,7 +295,19 @@ class Toolbox:
                                 },
                                 "assignee": {
                                     "type": "string",
-                                    "description": "负责人：人名/角色/@某人/某智能体。",
+                                    "description": "给人看的负责人标签：人名/角色（如『编剧』）。",
+                                },
+                                "executor_kind": {
+                                    "type": "string",
+                                    "enum": ["human", "agent", "workflow", "none"],
+                                    "description": "执行者类型；拿不准用 none，别臆造。",
+                                },
+                                "executor_ref": {
+                                    "type": "string",
+                                    "description": (
+                                        "执行者标识：human→@user_id / agent→slug / "
+                                        "workflow→slug；none 留空。须来自 list_capabilities。"
+                                    ),
                                 },
                             },
                             "required": ["title"],
@@ -551,10 +569,18 @@ class Toolbox:
                     room_id=ctx.room_id, sender=ctx.sender,
                 )
                 n = len(created)
-                lines = [
-                    f"• {t.title}" + (f" —— {t.assignee}" if t.assignee else "")
-                    for t in created
-                ]
+                # 给模型回灌时把指派情况也带上（类型化执行者 + 人读标签），便于它据此继续编排
+                _kind_label = {
+                    "human": "派给", "agent": "交AI", "workflow": "跑工作流",
+                }
+                lines = []
+                for t in created:
+                    seg = f"• {t.title}"
+                    if t.executor_kind != "none" and t.executor_ref:
+                        seg += f" —— {_kind_label.get(t.executor_kind, '')}{t.executor_ref}"
+                    elif t.assignee:
+                        seg += f" —— {t.assignee}"
+                    lines.append(seg)
         except Exception:
             logger.exception("登记任务到看板失败")
             return "登记任务到看板失败（数据库不可用？）。"

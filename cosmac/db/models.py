@@ -275,8 +275,14 @@ class Task(Base, TimestampMixin):
     # 这批子任务所属的总目标原文（便于分组/溯源"这是哪次下达拆出来的"）
     goal: Mapped[str] = mapped_column(Text, nullable=False, default="")
     title: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    # 负责人：P1 是自由文本（人名/角色/@某人/某智能体），AI 拆解时自己填；P2 再细化为类型化
+    # 负责人（人类可读标签，给看板展示）：人名/角色/@某人/某智能体，AI 拆解时填。
     assignee: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    # 类型化执行者（模块3.5 档2：让任务真的能"派"出去）——主AI 读能力名册后填：
+    #   executor_kind: human(派给真人) / agent(交 AI Agent) / workflow(跑工作流) / none(暂不指派)
+    #   executor_ref:  对应的 @user_id / agent-slug / workflow-slug（none 时为空）
+    # 档3 的"建专班/派发"与档4 的"回填"据这两列把活路由到正确的执行者。
+    executor_kind: Mapped[str] = mapped_column(String(16), nullable=False, default="none")
+    executor_ref: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     # todo（待办）/ doing（进行中）/ done（已完成）；进度 0-100
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="todo", index=True)
     progress: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

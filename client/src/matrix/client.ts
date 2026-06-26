@@ -1849,10 +1849,11 @@ export async function getPlatformStats(): Promise<PlatformStats | null> {
   } catch { return null }
 }
 
-/** 任务看板的一条任务（AI 任务编排 P1）。 */
+/** 任务看板的一条任务（AI 任务编排）。executor_kind/ref 是档2 的类型化执行者。 */
 export interface TaskItem {
   id: number; title: string; assignee: string
   status: string; progress: number; goal: string; result: string
+  executor_kind?: string; executor_ref?: string
 }
 
 export async function getTasks(): Promise<TaskItem[]> {

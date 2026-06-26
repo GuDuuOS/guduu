@@ -14,8 +14,15 @@ from sqlalchemy.orm import Session
 from cosmac.db.models import Task
 
 _VALID_STATUS = ("todo", "doing", "done")
+_VALID_KIND = ("human", "agent", "workflow", "none")  # 类型化执行者（档2）
 _MAX_TITLE = 2000
 _MAX_TASKS = 30  # 一次拆解最多落这么多子任务，防失控
+
+
+def _norm_kind(kind: Any) -> str:
+    """规范化执行者类型：不在白名单的一律回落 none（防模型瞎填）。"""
+    k = str(kind or "none").strip().lower()
+    return k if k in _VALID_KIND else "none"
 
 
 def create_tasks(
@@ -26,8 +33,9 @@ def create_tasks(
     room_id: str = "",
     sender: str = "",
 ) -> List[Task]:
-    """把一批子任务落库。items: [{"title","assignee"}]。返回创建的 Task 列表。
+    """把一批子任务落库。items: [{"title","assignee","executor_kind","executor_ref"}]。
 
+    executor_kind/ref（档2）是主AI 读能力名册后填的类型化执行者；缺省/非法 kind 回落 none。
     脏数据兜底：title 空的丢弃；超量截断到 _MAX_TASKS。
     """
     out: List[Task] = []
@@ -37,10 +45,16 @@ def create_tasks(
         title = str(it.get("title") or "").strip()[:_MAX_TITLE]
         if not title:
             continue
+        kind = _norm_kind(it.get("executor_kind"))
+        ref = str(it.get("executor_ref") or "").strip()[:255]
+        if kind == "none":
+            ref = ""  # 未指派就不留 ref，避免悬空引用
         t = Task(
             goal=str(goal or "")[:_MAX_TITLE],
             title=title,
             assignee=str(it.get("assignee") or "").strip()[:255],
+            executor_kind=kind,
+            executor_ref=ref,
             status="todo",
             progress=0,
             room_id=room_id or "",
