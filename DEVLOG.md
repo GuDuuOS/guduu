@@ -7,6 +7,11 @@
 
 ---
 
+## 2026-06-26 — 人员能力对齐用户管理（停用灰显不可设 + 排序）
+- **反馈**:人员能力要和用户管理状态对齐；停用账号灰显且不能设置能力；两页默认「在用在前、停用在后」。
+- **改法(纯前端)**:peopleRows 带 `deactivated`(来自 listUsers) + 行 `.off` 灰显 + 「已停用」标 + 「设置/编辑能力」按钮对停用账号禁用(startEditPersonForUser 加防御 guard);peopleRows 与用户管理 filteredUsers 都加 `.sort(在用在前、停用在后)`。
+- client build OK、preview 零报错。新 hash index-DWpvyZaU.js。**只发 dist**。
+
 ## 2026-06-26 — 配额增强·更多计量项 + 我的额度展示
 - **增强1·更多计量项**:QUOTA_CATALOG 加 `teams`「专班数」(免费1/付费20/创作者不限,单调计数)、`workflow_runs`「工作流运行/月」(免费0/付费200/不限)。加 track 字段(usage 走计数表 / existing 数存量)。强制:Toolbox 加 `quota_check` 钩子(execute 门控后调)，bot `_tool_quota_check`(assemble_team→teams、run_workflow→workflow_runs)注入。
 - **增强2·我的额度**:bot 端点 `/cosmac/usage/mine`(各计量项 已用/上限,usage 类查计数表、existing 类数知识库存量)。前端 client.ts `getMyUsage` + `useMyUsage` + `MyUsageModal.vue`(进度条,超额标红,-1 显示"不限");入口用户菜单「我的额度」。QUOTA_CATALOG 前端补齐 4 项(后台「用量配额」也自动多出 teams/workflow_runs 可配)。

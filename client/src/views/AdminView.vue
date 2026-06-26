@@ -553,8 +553,11 @@
               <tr><th>用户</th><th>角色</th><th>擅长</th><th>能力</th><th>操作</th></tr>
             </thead>
             <tbody>
-              <tr v-for="r in peopleFiltered" :key="r.id">
-                <td><code>{{ r.id }}</code><template v-if="r.name"> · {{ r.name }}</template></td>
+              <tr v-for="r in peopleFiltered" :key="r.id" :class="{ off: r.deactivated }">
+                <td>
+                  <code>{{ r.id }}</code><template v-if="r.name"> · {{ r.name }}</template>
+                  <span v-if="r.deactivated" class="adm-tag off">已停用</span>
+                </td>
                 <td>{{ r.role || '—' }}</td>
                 <td class="adm-skill-desc">{{ r.expertise || '—' }}</td>
                 <td>
@@ -563,7 +566,8 @@
                   </span>
                 </td>
                 <td class="adm-row-actions">
-                  <button class="adm-btn ghost sm" :disabled="plSaving" @click="startEditPersonForUser(r)">
+                  <!-- 停用账号灰显且不可设置能力（账号都停了，没必要再给它配派单能力）-->
+                  <button class="adm-btn ghost sm" :disabled="plSaving || r.deactivated" @click="startEditPersonForUser(r)">
                     {{ r.hasProfile ? '编辑能力' : '设置能力' }}
                   </button>
                   <button v-if="r.hasProfile" class="adm-btn ghost sm danger" :disabled="plSaving" @click="removePersonById(r.id)">清除</button>
@@ -1280,15 +1284,17 @@ const filterTier = ref('all')   // 'all' 或某会员等级 slug
 const filterStatus = ref<'all' | 'ok' | 'off'>('all')
 const filteredUsers = computed(() => {
   const q = userSearch.value.toLowerCase()
-  return users.value.filter((u) => {
-    if (q && !(u.id.toLowerCase().includes(q) || (u.name || '').toLowerCase().includes(q))) return false
-    if (filterRole.value === 'admin' && !u.admin) return false
-    if (filterRole.value === 'member' && u.admin) return false
-    if (filterTier.value !== 'all' && memberTier(u.id) !== filterTier.value) return false
-    if (filterStatus.value === 'ok' && u.deactivated) return false
-    if (filterStatus.value === 'off' && !u.deactivated) return false
-    return true
-  })
+  return users.value
+    .filter((u) => {
+      if (q && !(u.id.toLowerCase().includes(q) || (u.name || '').toLowerCase().includes(q))) return false
+      if (filterRole.value === 'admin' && !u.admin) return false
+      if (filterRole.value === 'member' && u.admin) return false
+      if (filterTier.value !== 'all' && memberTier(u.id) !== filterTier.value) return false
+      if (filterStatus.value === 'ok' && u.deactivated) return false
+      if (filterStatus.value === 'off' && !u.deactivated) return false
+      return true
+    })
+    .sort((a, b) => Number(a.deactivated) - Number(b.deactivated))  // 在用在前、停用在后
 })
 
 const domain = computed(() => serverName())
@@ -1834,19 +1840,23 @@ const peopleMap = computed(() => {
   for (const p of people.value) m[p.user_id] = p
   return m
 })
-// 表格行 = 真实账号 + 叠加其能力（没设的 hasProfile=false）
+// 表格行 = 真实账号 + 叠加其能力（没设的 hasProfile=false）。
+// 与用户管理对齐：带 deactivated（停用账号灰显、不可设置）；排序「在用在前、停用在后」。
 const peopleRows = computed(() =>
-  peopleUsers.value.map((u) => {
-    const p = peopleMap.value[u.id]
-    return {
-      id: u.id,
-      name: p?.name || u.name || '',
-      role: p?.role || '',
-      expertise: p?.expertise || '',
-      enabled: p ? p.enabled : true,
-      hasProfile: !!p,
-    }
-  }),
+  peopleUsers.value
+    .map((u) => {
+      const p = peopleMap.value[u.id]
+      return {
+        id: u.id,
+        name: p?.name || u.name || '',
+        role: p?.role || '',
+        expertise: p?.expertise || '',
+        enabled: p ? p.enabled : true,
+        hasProfile: !!p,
+        deactivated: u.deactivated,
+      }
+    })
+    .sort((a, b) => Number(a.deactivated) - Number(b.deactivated)),  // 停用排后
 )
 const peopleSearch = ref('')
 const peopleCap = ref<'all' | 'set' | 'unset'>('all')  // 按是否已设能力筛
@@ -1860,7 +1870,8 @@ const peopleFiltered = computed(() => {
   })
 })
 
-function startEditPersonForUser(r: { id: string; name: string }) {
+function startEditPersonForUser(r: { id: string; name: string; deactivated?: boolean }) {
+  if (r.deactivated) return  // 停用账号不可设置能力（防御：按钮已禁用）
   const ex = peopleMap.value[r.id]
   Object.assign(plForm, {
     user_id: r.id,
