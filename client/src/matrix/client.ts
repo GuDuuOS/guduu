@@ -1810,6 +1810,55 @@ export async function kbDeleteMine(id: number): Promise<void> {
   if (!r.ok || !j?.ok) throw new Error(j?.error || '删除失败')
 }
 
+/* ===== 个人协作人能力名册（模块3.5：普通用户在前台维护，主 AI 派单时合并进名册）===== */
+export interface MyPerson {
+  user_id: string; name: string; role: string; expertise: string; note: string; enabled: boolean
+}
+
+/** 列本人维护的协作人；失败/未登录返回 []。 */
+export async function myPeopleList(): Promise<MyPerson[]> {
+  const token = (mx as any)?.getAccessToken?.() || ''
+  if (!token) return []
+  try {
+    const r = await fetch(`${payBase()}/cosmac/people/mine`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!r.ok) return []
+    const j = await r.json().catch(() => ({}))
+    return Array.isArray(j?.people) ? j.people : []
+  } catch {
+    return []
+  }
+}
+
+/** 新增/更新一个协作人的能力备注。失败抛出带文案的错误。 */
+export async function myPeopleAdd(p: {
+  person_id: string; name?: string; role?: string; expertise?: string; note?: string; enabled?: boolean
+}): Promise<void> {
+  const token = (mx as any)?.getAccessToken?.() || ''
+  if (!token) throw new Error('登录已失效，请重新登录')
+  const r = await fetch(`${payBase()}/cosmac/people/add`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(p),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok || !j?.ok) throw new Error(j?.error || '保存失败')
+}
+
+/** 从本人名册删除某协作人（按完整 user_id）。失败抛出带文案的错误。 */
+export async function myPeopleDelete(personId: string): Promise<void> {
+  const token = (mx as any)?.getAccessToken?.() || ''
+  if (!token) throw new Error('登录已失效，请重新登录')
+  const r = await fetch(`${payBase()}/cosmac/people/delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ person_id: personId }),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok || !j?.ok) throw new Error(j?.error || '删除失败')
+}
+
 /** 验码 + 重置密码。成功无返回；失败抛出带文案的错误。 */
 export async function resetVerify(
   baseUrl: string,

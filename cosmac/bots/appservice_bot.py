@@ -817,6 +817,20 @@ class CosmacBot:
             logger.debug("读取人员能力名册失败（忽略）：%s", e)
             return []
 
+    def _personal_people_items(self, owner: str) -> List[Dict[str, Any]]:
+        """读某用户（owner）在前台维护的个人协作人名册（cosmac DB，启用的）。失败/无 DB 返回空。"""
+        if not owner:
+            return []
+        try:
+            from cosmac.db import session_scope
+            from cosmac.db.person_repo import list_people, to_dict
+
+            with session_scope() as s:
+                return [to_dict(p) for p in list_people(s, owner) if p.enabled]
+        except Exception:
+            logger.debug("读取个人协作人名册失败（忽略）", exc_info=True)
+            return []
+
     def _list_capabilities_for_tool(self, ctx: ToolContext) -> str:
         """能力名册（list_capabilities 工具的执行体，注入 Toolbox.list_capabilities）。
 
@@ -825,9 +839,13 @@ class CosmacBot:
         全程兜异常，任一来源失败只是少列一类、绝不抛出。
         """
         lines: List[str] = []
-        # — 真人 —
+        # — 真人 —（admin 全局名册 + 下达者自己的个人协作人名册，合并去重）
         try:
-            people = self._people_items()
+            people = list(self._people_items())
+            seen_uid = {str(p.get("user_id") or "") for p in people}
+            for p in self._personal_people_items(ctx.sender):
+                if str(p.get("user_id") or "") not in seen_uid:
+                    people.append(p)
         except Exception:
             people = []
         if people:
@@ -1945,6 +1963,74 @@ class CosmacBot:
             logger.exception("知识库删除失败（UI）")
             return 500, {"error": "删除失败"}
 
+    # —— 个人协作人能力名册（模块3.5：普通用户在前台维护，按 owner=本人 隔离）——
+
+    def handle_people_list_mine(self, access_token: str) -> Tuple[int, Dict[str, Any]]:
+        """列本人维护的协作人能力名册。需登录。"""
+        user_id = self.client.whoami(access_token)
+        if not user_id:
+            return 401, {"error": "登录已失效，请重新登录"}
+        out: List[Dict[str, Any]] = []
+        try:
+            from cosmac.db import session_scope
+            from cosmac.db.person_repo import list_people, to_dict
+
+            with session_scope() as s:
+                out = [to_dict(p) for p in list_people(s, user_id)]
+        except Exception:
+            logger.debug("列个人协作人失败", exc_info=True)
+        return 200, {"people": out}
+
+    def handle_people_add(
+        self, access_token: str, body: Dict[str, Any]
+    ) -> Tuple[int, Dict[str, Any]]:
+        """新增/更新本人名册里某个协作人的能力备注。需登录。person_id 必须是完整 user_id。"""
+        user_id = self.client.whoami(access_token)
+        if not user_id:
+            return 401, {"error": "登录已失效，请重新登录"}
+        person_id = str((body or {}).get("person_id") or "").strip()
+        if not person_id.startswith("@") or ":" not in person_id:
+            return 400, {"error": "请填写完整的用户 ID（如 @bob:cosmac.cc）"}
+        try:
+            from cosmac.db import session_scope
+            from cosmac.db.person_repo import to_dict, upsert_person
+
+            with session_scope() as s:
+                p = upsert_person(
+                    s, owner=user_id, person_id=person_id,
+                    name=str(body.get("name") or ""), role=str(body.get("role") or ""),
+                    expertise=str(body.get("expertise") or ""),
+                    note=str(body.get("note") or ""),
+                    enabled=body.get("enabled", True) is not False,
+                )
+                return 200, {"ok": True, "person": to_dict(p)}
+        except ValueError as e:
+            return 400, {"error": str(e)}
+        except Exception:
+            logger.exception("保存个人协作人失败")
+            return 500, {"error": "保存失败（数据库不可用？）"}
+
+    def handle_people_delete(
+        self, access_token: str, body: Dict[str, Any]
+    ) -> Tuple[int, Dict[str, Any]]:
+        """从本人名册删除某协作人（按 person_id）。需登录。只能删自己名册里的（owner=本人）。"""
+        user_id = self.client.whoami(access_token)
+        if not user_id:
+            return 401, {"error": "登录已失效，请重新登录"}
+        person_id = str((body or {}).get("person_id") or "").strip()
+        if not person_id:
+            return 400, {"error": "person_id 无效"}
+        try:
+            from cosmac.db import session_scope
+            from cosmac.db.person_repo import delete_person
+
+            with session_scope() as s:
+                ok = delete_person(s, user_id, person_id)
+            return (200, {"ok": True}) if ok else (404, {"error": "没找到该协作人"})
+        except Exception:
+            logger.exception("删除个人协作人失败")
+            return 500, {"error": "删除失败"}
+
     def handle_pay_checkout(
         self, access_token: str, body: Dict[str, Any]
     ) -> Tuple[int, Dict[str, Any]]:
@@ -2366,7 +2452,8 @@ class _Handler(BaseHTTPRequestHandler):
                 or p.startswith("/cosmac/reset/")
                 or p.startswith("/cosmac/login/")
                 or p.startswith("/cosmac/onboard/")
-                or p.startswith("/cosmac/kb/")):  # list/add/delete 都走浏览器，需预检
+                or p.startswith("/cosmac/kb/")
+                or p.startswith("/cosmac/people/")):  # 都走浏览器，需预检
             origin = os.environ.get("COSMAC_APP_ORIGIN", "") or "*"
             self.send_response(204)
             self.send_header("Access-Control-Allow-Origin", origin)
@@ -2460,6 +2547,13 @@ class _Handler(BaseHTTPRequestHandler):
             auth = self.headers.get("Authorization", "")
             token = auth[len("Bearer "):] if auth.startswith("Bearer ") else ""
             code, payload = self.bot.handle_kb_list_mine(token)
+            self._send_json(code, payload, cors=True)
+            return
+        # 个人协作人能力名册：列本人维护的协作人（带本人 token）
+        if self.path.split("?", 1)[0] == "/cosmac/people/mine":
+            auth = self.headers.get("Authorization", "")
+            token = auth[len("Bearer "):] if auth.startswith("Bearer ") else ""
+            code, payload = self.bot.handle_people_list_mine(token)
             self._send_json(code, payload, cors=True)
             return
         # Synapse 查询"这个用户/别名是否归你管"，回 200 表示存在
@@ -2601,6 +2695,30 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(400, {"error": "请求无效"}, cors=True)
                 return
             code, payload = self.bot.handle_kb_delete(token, body)
+            self._send_json(code, payload, cors=True)
+            return
+
+        # 个人协作人能力名册：添加/更新一条（带本人 token、浏览器调，需 CORS）。
+        if path == "/cosmac/people/add":
+            auth = self.headers.get("Authorization", "")
+            token = auth[len("Bearer "):] if auth.startswith("Bearer ") else ""
+            body = self._read_json_body(_MAX_CALLBACK_BODY)
+            if body is None:
+                self._send_json(400, {"error": "请求无效"}, cors=True)
+                return
+            code, payload = self.bot.handle_people_add(token, body)
+            self._send_json(code, payload, cors=True)
+            return
+
+        # 个人协作人能力名册：删除一条（按 person_id）。
+        if path == "/cosmac/people/delete":
+            auth = self.headers.get("Authorization", "")
+            token = auth[len("Bearer "):] if auth.startswith("Bearer ") else ""
+            body = self._read_json_body(_MAX_CALLBACK_BODY)
+            if body is None:
+                self._send_json(400, {"error": "请求无效"}, cors=True)
+                return
+            code, payload = self.bot.handle_people_delete(token, body)
             self._send_json(code, payload, cors=True)
             return
 

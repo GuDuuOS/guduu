@@ -324,6 +324,33 @@ class ConversationMemory(Base, TimestampMixin):
         return f"<ConversationMemory {self.scope}:{self.scope_id} turns={self.total_turns}>"
 
 
+class PersonProfile(Base, TimestampMixin):
+    """个人维护的「协作人能力名册」（模块3.5：普通用户给 TA 认识的人加能力备注）。
+
+    与 admin 的**全局**名册（控制室 `cosmac.people` state event）互补：普通用户够不到控制室，
+    所以存 cosmac DB，按 ``owner``（谁加的 = 下达目标的用户）隔离。主AI 给某用户拆任务时，
+    把全局名册 + 该用户的这份个人名册**合并**，据此匹配执行者。
+    (owner, person_id) 唯一——同一用户对同一个人只一条画像。
+    """
+
+    __tablename__ = "cosmac_person"
+    __table_args__ = (
+        UniqueConstraint("owner", "person_id", name="uq_person_owner_pid"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    person_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    role: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    expertise: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    note: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    def __repr__(self) -> str:
+        return f"<PersonProfile {self.owner}→{self.person_id}>"
+
+
 class RegisteredEmail(Base, TimestampMixin):
     """注册时把「邮箱 ↔ 用户名」存一份，给「找回密码」按邮箱定位账号用。
 

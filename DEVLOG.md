@@ -7,6 +7,13 @@
 
 ---
 
+## 2026-06-26 — 新增·普通用户的「我的协作人」能力名册（个人级）
+- **需求**:普通用户(非 admin)也想给自己常合作的人加能力备注，但 admin 的「人员能力」写控制室、普通用户够不到。负责人定**个人级 v1**:每人维护自己的协作人名册。
+- **后端**:新表 `cosmac_person`(按 owner 隔离, create_all 自动建);`db/person_repo.py`(list/upsert/delete);bot 3 个端点 `/cosmac/people/{mine,add,delete}`(本人 token 鉴权、owner=本人);`_personal_people_items(owner)` 读 DB;`list_capabilities` 把 **admin 全局名册 + 下达者个人名册合并去重** —— 主AI 给某用户拆任务时就能用上 TA 自己加的人。**隔离**:A 的个人协作人 B 看不到(单测验证)。
+- **前端**:client.ts `myPeopleList/Add/Delete`;`useMyPeople` 单例 + `MyPeopleModal.vue`(列表/增改删, 用户名走 normalizeUserId 容错);入口在**用户菜单「我的协作人」**(普通用户可见, 非 admin 后台)。
+- **测试**:新增 test_person.py(repo 增改删/owner隔离 + 端点鉴权/合并/跨用户隔离);281 通过、ruff 全绿、client build OK。
+- **部署**:动了 client + cosmac → **发 dist + 重启 bot**。新 hash index-XgaFVwzP.js。
+
 ## 2026-06-26 — 改进·人员能力页同步真实账号（不再重敲 user_id）
 - **反馈**:人员能力页让你重新敲一遍 user_id 填备注，应该直接同步「用户管理」的真实账号。
 - **改法(纯前端)**:人员能力页改为 `listUsers()`(真实账号) + `getPeople()`(能力名册) 合并展示——**表格列出所有真实账号**(排除中枢AI)，每行叠加其能力备注(角色/擅长)，未设的标"未设"。编辑时 **user_id 固定取自账号、只读不可改**，只填 角色/擅长/备注/启用;保存写回 cosmac.people。去掉了"添加成员"(自由敲 user_id)，改成每个账号"设置能力/编辑能力";"清除"只移除能力备注、不删账号。
