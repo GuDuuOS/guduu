@@ -164,6 +164,35 @@ class TestAgentTools(unittest.TestCase):
         self.assertIn("测试人设", systems[0].content)  # 常驻人设
         self.assertIn("技能说明X", systems[0].content)  # 注入的技能
 
+    def test_search_knowledge_forwards_to_injected_callback(self) -> None:
+        # search_knowledge 工具应把 query + ctx 转发给 bot 注入的 kb_search 回调
+        client = FakeClient()
+        toolbox = Toolbox(client)
+        captured = {}
+        toolbox.kb_search = lambda query, ctx: (  # type: ignore
+            captured.update(query=query, room=ctx.room_id) or "命中：《手册》一段资料"
+        )
+        out = toolbox.execute(
+            ToolCall(id="k", name="search_knowledge", arguments={"query": "退款政策"}),
+            ToolContext("!cur:test", "@alice:test"),
+        )
+        self.assertEqual(captured["query"], "退款政策")
+        self.assertEqual(captured["room"], "!cur:test")
+        self.assertIn("命中", out)
+
+    def test_search_knowledge_graceful_without_callback(self) -> None:
+        # 未注入 kb_search（单测/未接 bot）时不报错，返回"不可用"文案
+        out = Toolbox(FakeClient()).execute(
+            ToolCall(id="k", name="search_knowledge", arguments={"query": "x"}),
+            ToolContext("!c:test", "@a:test"),
+        )
+        self.assertIn("不可用", out)
+
+    def test_search_knowledge_is_default_on(self) -> None:
+        # 智能问答核心工具：默认出现在喂给模型的工具清单里
+        names = [s.name for s in Toolbox(FakeClient()).specs()]
+        self.assertIn("search_knowledge", names)
+
     def test_max_steps_guard(self) -> None:
         # 模型一直要求调工具（不收敛），Agent 应在 max_steps 后兜底退出，不死循环
         loop = TurnResult(

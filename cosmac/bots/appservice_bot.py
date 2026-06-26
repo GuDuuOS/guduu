@@ -109,6 +109,9 @@ class CosmacBot:
             self.toolbox.dispatch_async = self._dispatch_async
         # 功能门控：把工具调用也接进会员门控（"让 AI 帮我建群/跑工作流"与命令同一道闸）。
         self.toolbox.gate_check = self._tool_gate_check
+        # 知识库检索工具化：把 bot 的检索逻辑注入 Toolbox，让主 AI 能主动调 search_knowledge
+        # 工具（在每轮盲塞 RAG 之外，模型还能用精准关键词多次深挖）。门控走 knowledge 闸。
+        self.toolbox.kb_search = self._kb_search_for_tool
         self.agent = Agent(
             llm=self.llm,
             toolbox=self.toolbox,
@@ -445,43 +448,73 @@ class CosmacBot:
             logger.debug("读取全局规则失败（忽略）：%s", e)
             return ""
 
-    def _kb_context(self, room_id: str, sender: str, query: str) -> str:
-        """RAG：按 query 检索本群+个人知识库 top-K 片段，渲染成「参考资料」块。
+    def _kb_retrieve(
+        self, room_id: str, sender: str, query: str,
+        room_k: int = 3, user_k: int = 2,
+    ) -> List[Tuple[str, str, float]]:
+        """检索本群+个人知识库，返回 [(标题, 片段, 相关度), ...] 降序。无命中/出错返回 []。
 
-        cosmac.db 懒导入 + 全程兜异常：没装 SQLAlchemy / 无文档 / 出错都返回空串。
-        min_score 过滤掉太不相关的（哈希兜底嵌入下尤其重要，避免硬塞无关内容）。
+        这是 RAG 的共享底座：自动注入(`_kb_context`)和 search_knowledge 工具(`_kb_search_for_tool`)
+        都走它，避免两份检索逻辑漂移。**不在此做门控**——调用方各自负责(自动注入走 knowledge
+        闸；工具走 execute 的 gate_check)。cosmac.db 懒导入 + 全程兜异常，绝不抛出。
+        必须在 session 内就把 title/text 取成普通值——session 关了再读惰性的 ch.doc 会报错。
         """
         q = (query or "").strip()
         if not q:
-            return ""
-        # 知识库门控：低于门槛的用户在普通对话里也不享受 RAG 注入（与知识命令同一道闸）
-        if not self._gate_allows(sender, "knowledge"):
-            return ""
+            return []
         try:
             from cosmac.ai.embeddings import get_embedder
             from cosmac.db import session_scope
             from cosmac.db.kb import search
             from cosmac.db.models import SCOPE_ROOM, SCOPE_USER
 
-            # #3：查询向量只算一次（embed_one 可能要打网络），群库/个人库共用，省一半请求
+            # 查询向量只算一次（embed_one 可能要打网络），群库/个人库共用，省一半请求
             emb = get_embedder()
             qvec = emb.embed_one(q)
             with session_scope() as s:
-                hits = search(s, query=q, scope=SCOPE_ROOM, scope_id=room_id, k=3,
+                hits = search(s, query=q, scope=SCOPE_ROOM, scope_id=room_id, k=room_k,
                               min_score=0.05, embedder=emb, qvec=qvec)
-                hits += search(s, query=q, scope=SCOPE_USER, scope_id=sender, k=2,
+                hits += search(s, query=q, scope=SCOPE_USER, scope_id=sender, k=user_k,
                                min_score=0.05, embedder=emb, qvec=qvec)
-                if not hits:
-                    return ""
                 hits.sort(key=lambda t: t[1], reverse=True)
-                lines = ["参考以下「知识库」资料作答（与问题相关，未必完整）："]
-                for i, (ch, _score) in enumerate(hits[:4], 1):
-                    title = (ch.doc.title or "").strip()
-                    lines.append(f"[{i}] 《{title}》 {ch.text}")
-            return "\n".join(lines)
+                # session 内就物化成普通值，避免关闭后惰性加载 ch.doc.title 报错
+                return [((ch.doc.title or "").strip(), ch.text, score) for ch, score in hits]
         except Exception as e:
-            logger.debug("知识库检索失败（忽略，无 RAG 继续）：%s", e)
+            logger.debug("知识库检索失败（忽略）：%s", e)
+            return []
+
+    def _kb_context(self, room_id: str, sender: str, query: str) -> str:
+        """RAG 自动注入：按 query 检索知识库 top-K 片段，渲染成「参考资料」块塞进 system。
+
+        每轮都跑、给一条 baseline；模型若想深挖再自行调 search_knowledge 工具。
+        min_score 过滤太不相关的（哈希兜底嵌入下尤其重要，避免硬塞无关内容）。
+        """
+        if not (query or "").strip():
             return ""
+        # 知识库门控：低于门槛的用户在普通对话里也不享受 RAG 注入（与知识命令同一道闸）
+        if not self._gate_allows(sender, "knowledge"):
+            return ""
+        hits = self._kb_retrieve(room_id, sender, query)
+        if not hits:
+            return ""
+        lines = ["参考以下「知识库」资料作答（与问题相关，未必完整）："]
+        for i, (title, text, _score) in enumerate(hits[:4], 1):
+            lines.append(f"[{i}] 《{title}》 {text}")
+        return "\n".join(lines)
+
+    def _kb_search_for_tool(self, query: str, ctx: ToolContext) -> str:
+        """search_knowledge 工具的执行体（注入 Toolbox.kb_search）。
+
+        门控由 execute() 的 gate_check 统一裁决(search_knowledge→knowledge)，这里不重复判。
+        给模型读的结构化结果：命中按相关度降序列出，无命中明确说"没找到"（提示别编造）。
+        """
+        hits = self._kb_retrieve(ctx.room_id, ctx.sender, query, room_k=4, user_k=3)
+        if not hits:
+            return "知识库里没找到与此相关的资料（可以换个关键词再试，或据常识作答并说明未引用知识库）。"
+        lines = ["知识库检索结果（相关度降序）："]
+        for i, (title, text, score) in enumerate(hits[:5], 1):
+            lines.append(f"[{i}] 《{title}》(相关度 {score:.2f}) {text}")
+        return "\n".join(lines)
 
     def _group_context(self, room_id: str) -> Dict[str, Any]:
         """读本群频道配置**一次**，得出 {persona, skill_slugs, model}。
@@ -1785,6 +1818,7 @@ class CosmacBot:
     _TOOL_GATE_MAP = {
         "create_room": "create_room",
         "run_workflow": "workflow_run",
+        "search_knowledge": "knowledge",  # 与「知识」命令、RAG 自动注入同一道 knowledge 门
     }
 
     def _tool_gate_check(self, sender: str, tool_name: str) -> Optional[str]:

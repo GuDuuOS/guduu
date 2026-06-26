@@ -61,6 +61,10 @@ class Toolbox:
         # 在 execute() 里、真正跑工具前调用——让"让 AI 帮我建群/跑工作流"也受会员门控约束
         # （与聊天命令同一道闸，防止绕过命令直接走自然语言）。None = 不做门控（如单测）。
         self.gate_check: Optional[Callable[[str, str], Optional[str]]] = None
+        # 知识库检索回调：由 bot 注入 self._kb_search_for_tool。签名 (query, ctx) -> 结果文本。
+        # 让 search_knowledge 工具的检索逻辑(embedder/DB/作用域)留在 bot 一侧，Toolbox 保持薄。
+        # None（如单测/未注入）→ search_knowledge 工具返回"暂不可用"，绝不报错。
+        self.kb_search: Optional[Callable[["str", ToolContext], str]] = None
         # 工具名 → (说明书, 执行函数)。执行函数签名: (arguments, ctx) -> 结果文本
         self._tools: Dict[str, Dict[str, Any]] = {}
         # 启用集合：None = 全部启用（默认）；否则只启用集合内的工具。
@@ -85,7 +89,9 @@ class Toolbox:
     # 核心能力，**永远启用**、不受后台「工具开关」约束。
     # 为什么：后台 AI 配置存的是"勾选的工具名列表"，新加的工具(如 create_tasks)不在旧配置里，
     # 会被当成"未勾选=禁用"。这类核心、低风险工具放这里，避免旧配置一存就把它们关掉。
-    _ALWAYS_ON: Set[str] = {"create_tasks"}
+    # search_knowledge 只读、按 knowledge 门控、且是"智能问答"的核心，也放这里默认常开
+    # （旧 AI 配置的工具白名单里没有它，不放这会被当未勾选=禁用）。
+    _ALWAYS_ON: Set[str] = {"create_tasks", "search_knowledge"}
 
     def _is_enabled(self, name: str) -> bool:
         if name in self._ALWAYS_ON:
@@ -289,6 +295,28 @@ class Toolbox:
             fn=self._tool_create_tasks,
         )
 
+        # 7) 主动检索知识库（RAG 工具化）：从"每轮盲塞参考资料"升级为"模型自己决定
+        #    何时查、用什么词查、可多次查"——这是"像会查会答的助手"的核心手感。
+        self._register(
+            name="search_knowledge",
+            description=(
+                "检索『知识库』里与某个问题相关的资料片段（本群知识库 + 你的个人知识库）。"
+                "当用户的问题可能涉及已沉淀的文档/资料/规范/历史结论时调用；"
+                "可以换更精准的关键词多次检索。检索不到会明确告诉你，不要编造。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "检索用的查询语句/关键词，尽量具体、围绕要找的知识点。",
+                    },
+                },
+                "required": ["query"],
+            },
+            fn=self._tool_search_knowledge,
+        )
+
     # —— 各工具的具体执行（转发到 MatrixClient）——
 
     def _tool_create_room(self, args: Dict[str, Any], ctx: ToolContext) -> str:
@@ -487,6 +515,20 @@ class Toolbox:
         if not n:
             return "没有有效的子任务可登记。"
         return f"已把目标拆成 {n} 个任务、登记到「任务看板」：\n" + "\n".join(lines)
+
+    def _tool_search_knowledge(self, args: Dict[str, Any], ctx: ToolContext) -> str:
+        """主动检索知识库（转发到 bot 注入的 kb_search）。门控由 execute 的 gate_check
+        统一裁决(search_knowledge→knowledge)，这里不重复判。"""
+        query = (args.get("query") or "").strip()
+        if not query:
+            return "请给出要检索的关键词或问题。"
+        if self.kb_search is None:
+            return "（知识库检索当前不可用。）"
+        try:
+            return self.kb_search(query, ctx)
+        except Exception:
+            logger.exception("知识库检索工具执行出错")
+            return "检索知识库时出错了。"
 
     def _record_workflow_run(self, slug, platform, ctx, user_input, result) -> None:
         """尽力把运行记录落库；DB 不可用就跳过（不影响已拿到的结果）。"""

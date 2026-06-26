@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-06-26 — 模块2增强·知识库检索工具化（search_knowledge）
+- **背景**:核对"注册后 AI 能否像 Claude Code 那样问答"——链路已通(注册→引导写频道人设→bot 读人设回应)、真·ReAct Agent、短期记忆、RAG 自动注入都在;线上模型已接 **DeepSeek(走方舟/ARK)**、非 echo。负责人定下一步"问答智能增强"逐项推,先做最高性价比且零新依赖的一项。
+- **做了什么(增量①)**:把知识库 RAG 从"每轮盲塞参考资料"升级为**模型可主动调用的 `search_knowledge` 工具**——AI 自己决定何时查、用什么词查、可多次深挖(Claude-Code 式问答的核心手感)。**保留**原自动注入做 baseline,二者互补(自动给底、工具深挖)。
+- **实现**:① bot 抽出共享检索 `_kb_retrieve`(本群+个人库、session 内物化 title/text 防惰性加载报错),`_kb_context`(自动注入)与 `_kb_search_for_tool`(工具)都复用它,避免两份逻辑漂移;② 仿 `dispatch_async`/`gate_check` 注入模式,新增 `Toolbox.kb_search` 回调(检索逻辑/embedder/DB 留 bot 侧、Toolbox 保持薄);③ 注册只读工具 `search_knowledge`,挂 `knowledge` 门控(与「知识」命令、RAG 同闸),设为 `_ALWAYS_ON` 默认常开(旧 AI 配置白名单没有它、不放这会被当禁用)。
+- **关键决策**:不删自动注入——DeepSeek 工具调用可靠性未实测,留 baseline 防"模型不调工具→KB 失灵";门控集中在 execute 的 gate_check、工具执行体不重复判。
+- **测试**:新增 5 个(工具转发/未注入兜底/默认常开 + bot 侧检索命中/无命中);更新 3 个 runtime_config 工具集断言(多了 search_knowledge)。相关套件全过、ruff 全绿。trading 9 错是缺 env 的既有问题、无关。**纯后端、无需发 dist;部署=重启 bot**。
+- **下一步队列**(都属模块2增强,逐个推):② 联网搜索 `web_search`(需选搜索服务商+key)③ 流式回复 ④ 长期记忆/对话摘要 ⑤ 知识库上传UI+pgvector。
+
 ## 2026-06-26 — 代码审查·第五批（私聊装哑 / 事务重发二重回复 / 工作流池满残留）
 - 又一轮整体审查(后端 bot/AI + DB/交易 + 前端三路并行评审)后，挑出 3 个**真实 bug** 修掉（其余命中的 SSRF·DNS-rebinding / SQLite 回退幂等 / manual 支付 = 既定"够用即止"边界，不动；见 memory wf-reliability-scope、trading-payment-status）：
   - **私聊里 bot 临时装哑(可用性)**:`joined_member_count` 查不到成员数时直接 fail-open 返回 99→私聊被误判群聊→没被 @ 就彻底沉默(最难排查的"bot 不回话")。改成**每房间缓存上次成功值 + 一次重试**:瞬时抖动靠重试吸收;仍失败回退缓存(私聊见过就是 2、不会被误判);从没查到过的才保守按群聊。

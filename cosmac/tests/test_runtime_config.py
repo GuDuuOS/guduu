@@ -51,7 +51,7 @@ class TestRuntimeConfig(unittest.TestCase):
         before = bot._applied_sig
         bot._apply_runtime_config()
         self.assertEqual(bot._applied_sig, before)
-        self.assertEqual(len(bot.toolbox.specs()), 6)  # 全部 6 个工具(含 run_workflow/create_tasks)
+        self.assertEqual(len(bot.toolbox.specs()), 7)  # 全部 7 个(含 run_workflow/create_tasks/search_knowledge)
 
     def test_persona_override_rebuilds_agent(self) -> None:
         # 下发新人设 → 签名变、Agent 被换成新对象、system_prompt 生效
@@ -90,11 +90,11 @@ class TestRuntimeConfig(unittest.TestCase):
         self.assertNotIn("api_key", bot._read_overrides())
 
     def test_tool_toggle_filters_specs(self) -> None:
-        # 只启用 create_room → specs 只剩它(+ 永远在线的核心 create_tasks)；停用的工具执行被拒
+        # 只启用 create_room → specs 只剩它(+ 永远在线的核心 create_tasks/search_knowledge)；停用的工具执行被拒
         bot = _bot("!ctrl:host", {"enabled_tools": ["create_room"]})
         bot._apply_runtime_config()
         names = [s.name for s in bot.toolbox.specs()]
-        self.assertEqual(names, ["create_room", "create_tasks"])  # create_tasks 不受开关约束
+        self.assertEqual(names, ["create_room", "create_tasks", "search_knowledge"])  # always-on 不受开关约束
         out = bot.toolbox.execute(
             ToolCall(id="x", name="send_message_to_room", arguments={"text": "hi"}),
             ToolContext("!r:host", "@a:host"),
@@ -126,7 +126,10 @@ class TestRuntimeConfig(unittest.TestCase):
         bot = _bot("!ctrl:host", {"enabled_tools": ["create_room"]})
         bot._apply_runtime_config()
         # create_tasks 是 always-on 核心工具，限制集里也有它；其余受限
-        self.assertEqual([s.name for s in bot.toolbox.specs()], ["create_room", "create_tasks"])
+        self.assertEqual(
+            [s.name for s in bot.toolbox.specs()],
+            ["create_room", "create_tasks", "search_knowledge"],
+        )
 
         def boom(*_a, **_k):
             raise RuntimeError("403")  # 模拟无权限/网络抖动
@@ -135,7 +138,10 @@ class TestRuntimeConfig(unittest.TestCase):
         bot._cfg_cache_ts = float("-inf")  # 让 20s 缓存失效，强制重读
         bot._apply_runtime_config()
         # 关键：仍只剩 create_room(+always-on create_tasks)，没有恢复成全部工具
-        self.assertEqual([s.name for s in bot.toolbox.specs()], ["create_room", "create_tasks"])
+        self.assertEqual(
+            [s.name for s in bot.toolbox.specs()],
+            ["create_room", "create_tasks", "search_knowledge"],
+        )
 
     def test_require_tokens_raises_when_missing(self) -> None:
         # appservice 密钥缺失必须明确报错（不再硬编码、不静默用泄露的旧 key）

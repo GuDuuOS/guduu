@@ -89,5 +89,36 @@ class TestKbCommand(unittest.TestCase):
             self.assertEqual(len(kb.list_docs(s, scope=SCOPE_ROOM, scope_id=ROOM)), 0)
 
 
+class TestKbSearchTool(unittest.TestCase):
+    """search_knowledge 工具的 bot 侧检索（_kb_search_for_tool）集成测试。"""
+
+    def setUp(self) -> None:
+        _force_hashing_embedder(self)
+        init_engine("sqlite://", create_all=True)
+
+    def _bot(self):
+        from cosmac.bots.appservice_bot import CosmacBot
+        from cosmac.config import CosmacConfig
+
+        return CosmacBot(CosmacConfig(llm_provider="echo"))  # 纯离线，不连网
+
+    def test_tool_retrieves_ingested_doc(self) -> None:
+        from cosmac.ai.tools import ToolContext
+
+        # 先往本群知识库入一篇文档
+        run("知识 添加 报价规则 ｜ 商单报价按粉丝量和均播定价，对外报价需筱雨确认。")
+        bot = self._bot()
+        out = bot._kb_search_for_tool("商单报价", ToolContext(ROOM, USER))
+        self.assertIn("报价规则", out)
+        self.assertIn("检索结果", out)
+
+    def test_tool_reports_no_hit(self) -> None:
+        from cosmac.ai.tools import ToolContext
+
+        bot = self._bot()
+        out = bot._kb_search_for_tool("完全不相关的查询", ToolContext(ROOM, USER))
+        self.assertIn("没找到", out)
+
+
 if __name__ == "__main__":
     unittest.main()
