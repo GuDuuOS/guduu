@@ -72,7 +72,9 @@ def _bot():
     from cosmac.bots.appservice_bot import CosmacBot
     from cosmac.config import CosmacConfig
 
-    return CosmacBot(CosmacConfig(llm_provider="echo"))  # 纯离线
+    bot = CosmacBot(CosmacConfig(llm_provider="echo"))  # 纯离线
+    bot._gate_allows = lambda u, c: True  # type: ignore  # 长期记忆默认付费，测试放行
+    return bot
 
 
 class TestBotMemory(unittest.TestCase):
@@ -82,17 +84,17 @@ class TestBotMemory(unittest.TestCase):
     def test_memory_context_renders_summary(self) -> None:
         with session_scope() as s:
             save_summary(s, SCOPE_ROOM, ROOM, "用户叫小雨，做美妆短视频。")
-        out = _bot()._memory_context(ROOM)
+        out = _bot()._memory_context(ROOM, "@u:h")
         self.assertIn("长期记忆", out)
         self.assertIn("小雨", out)
 
     def test_memory_context_empty_when_no_summary(self) -> None:
-        self.assertEqual(_bot()._memory_context(ROOM), "")
+        self.assertEqual(_bot()._memory_context(ROOM, "@u:h"), "")
 
     def test_echo_provider_skips_summary(self) -> None:
         # echo 占位后端不摘要：连计数行都不该建（直接 return）
         bot = _bot()  # provider=echo
-        bot._maybe_update_memory(ROOM, [], "你好", "你好呀")
+        bot._maybe_update_memory(ROOM, [], "你好", "你好呀", "@u:h")
         with session_scope() as s:
             self.assertEqual(get_summary(s, SCOPE_ROOM, ROOM), "")
 
@@ -115,10 +117,24 @@ class TestBotMemory(unittest.TestCase):
         with mock.patch("cosmac.wf.submit_background", side_effect=lambda fn, pool="fast": (fn(), True)[1]):
             # 阈值默认 8：跑 8 轮，第 8 轮触发摘要
             for i in range(8):
-                bot._maybe_update_memory(ROOM, [], f"问题{i}", f"回答{i}")
+                bot._maybe_update_memory(ROOM, [], f"问题{i}", f"回答{i}", "@u:h")
         with session_scope() as s:
             self.assertEqual(get_summary(s, SCOPE_ROOM, ROOM), "小雨偏好简洁；正在做第一支短视频。")
         self.assertEqual(bot.llm.calls, 1)  # 8 轮只摘要 1 次
+
+
+class TestMemoryGating(unittest.TestCase):
+    """长期记忆是付费功能：低于门槛的用户不注入、不积累。"""
+
+    def setUp(self) -> None:
+        init_engine("sqlite://", create_all=True)
+
+    def test_free_user_no_memory_injection(self) -> None:
+        with session_scope() as s:
+            save_summary(s, SCOPE_ROOM, ROOM, "记忆内容X")
+        bot = _bot()
+        bot._gate_allows = lambda u, c: c != "memory"  # type: ignore  # 没有 memory 权限
+        self.assertEqual(bot._memory_context(ROOM, "@free:h"), "")
 
 
 if __name__ == "__main__":

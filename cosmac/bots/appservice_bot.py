@@ -359,7 +359,7 @@ class CosmacBot:
             finally:
                 self.client.set_typing(room_id, False)  # 关掉"正在输入…"
             # 长期记忆：回复发完后推进本群滚动摘要（到阈值才后台重摘要，绝不阻塞本次回复）。
-            self._maybe_update_memory(room_id, history, text or user_text, reply)
+            self._maybe_update_memory(room_id, history, text or user_text, reply, sender)
 
     # 短期记忆窗口：最多带最近这么多条历史；单条正文截断长度（控 token）。
     _HISTORY_LIMIT = 12
@@ -369,15 +369,19 @@ class CosmacBot:
     _MEMORY_SUMMARY_CHARS = 400
 
     def _maybe_update_memory(
-        self, room_id: str, history: List[Message], user_text: str, reply: str
+        self, room_id: str, history: List[Message], user_text: str, reply: str,
+        sender: str = "",
     ) -> None:
         """推进本群长期记忆：累计轮数到阈值就**后台**用 LLM 重摘要（不阻塞回复）。
 
+        长期记忆是付费功能（memory 门控）：低于门槛的用户不积累/不摘要。
         全程兜异常 + DB 懒导入：没装 DB / 出错都静默跳过，绝不影响已发出的回复。
         echo 占位后端不做摘要（complete 只是回显、摘不出东西、反而污染记忆）。
         """
         if getattr(self.llm, "name", "") == "echo":
             return  # 占位后端：摘要无意义，跳过
+        if sender and not self._gate_allows(sender, "memory"):
+            return  # 长期记忆是付费功能：低于门槛不积累
         try:
             from cosmac.db import session_scope
             from cosmac.db.memory_repo import bump_and_check
@@ -532,7 +536,7 @@ class CosmacBot:
                 seen.add(slug)
                 deduped.append(it)
             skills_text = render_skills(deduped)
-            mem_text = self._memory_context(room_id)
+            mem_text = self._memory_context(room_id, sender)
             kb_text = self._kb_context(room_id, sender, query)
             # 平台规则 → 本专班任务RULE → 人设 → 长期记忆 → 技能 → 知识库，依次拼成本轮 addendum
             return "\n\n".join(
@@ -600,11 +604,14 @@ class CosmacBot:
             logger.debug("知识库检索失败（忽略）：%s", e)
             return []
 
-    def _memory_context(self, room_id: str) -> str:
+    def _memory_context(self, room_id: str, sender: str) -> str:
         """长期记忆注入：读本群滚动摘要，渲染成「长期记忆」块塞进 system（无则空串）。
 
+        长期记忆是付费功能（memory 门控）：低于门槛的用户不注入长期记忆。
         cosmac.db 懒导入 + 全程兜异常：没装 DB / 无摘要 / 出错都返回空串，绝不阻断回复。
         """
+        if not self._gate_allows(sender, "memory"):
+            return ""
         try:
             from cosmac.db import session_scope
             from cosmac.db.memory_repo import get_summary
