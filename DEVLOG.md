@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-06-27 — 入驻模板 P2 引导接入：模板真生效（含默认工作流）
+- **背景**:核查发现 P2 大部分早已落地——引导向导(`useOnboarding`)选模板后已真建工作区+频道、把人设/RULE/模型/技能写进每个频道 `cosmac.channel_config.persona`、灌知识库；bot 的 `_group_context` 也已读 persona.prompt/model/skill_slugs（之前标 P2b 其实已实现）。**唯一没绑的字段是模板的「默认工作流 workflowSlugs」**。
+- **本次补齐**:
+  - 前端 `useOnboarding`:OnbPickTemplate/OnbAnswers 加 `workflowSlugs`，fromBackend 映射，pickTemplate 预填，runCreate 把它写进 channel_config 顶层 `workflowSlugs`。
+  - bot `_group_context` 读 `cfg.workflowSlugs`→`workflow_slugs`；新 `_preset_workflows_text()` 把 slug 经 `_workflow_defs()` 解析成名字，在 `_skill_addendum` 末尾注入「本工作区预置的工作流，可用 run_workflow 调用」引导（不改权限，只是告知）。
+  - 引导确认页加 模型/技能/知识库/工作流 概览行，让用户看清模板真在配东西。
+- test_onboarding_binding.py（model/skill/workflow 读取 + 预置工作流解析/跳过缺失 + addendum 注入）。全套 300 测试通过、ruff 干净、前端 build 零报错。新 hash index-YuazBr7J.js。**改了前端+bot → 发 dist + 重启 bot**。
+
 ## 2026-06-27 — 专班收尾闭环：节点审核 + 完成度 + 归档关闭 + 清记忆
 - **需求**:专班建好后，频道里的项目主AI 要逐个审核每个成员/AI 完成的任务节点，盯住整体完成度；全部完成后提醒是否归档关闭频道，并把项目存进记录、清掉频道的 AI 长期记忆（不浪费 Agent 记忆）。
 - **做法(纯后端)**:

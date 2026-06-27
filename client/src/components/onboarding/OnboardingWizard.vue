@@ -63,6 +63,10 @@
             <div class="onb-rv"><span>工作区</span><b>{{ answers.workspace }}</b></div>
             <div class="onb-rv"><span>频道</span><b>{{ answers.channels.join('、') || '（无）' }}</b></div>
             <div class="onb-rv"><span>中枢 AI</span><b>{{ answers.aiName }}</b></div>
+            <div v-if="answers.model" class="onb-rv"><span>模型</span><b>{{ answers.model }}</b></div>
+            <div v-if="answers.skillSlugs.length" class="onb-rv"><span>技能</span><b>{{ answers.skillSlugs.length }} 项</b></div>
+            <div v-if="answers.kbDocs.length" class="onb-rv"><span>知识库</span><b>{{ answers.kbDocs.length }} 篇</b></div>
+            <div v-if="answers.workflowSlugs.length" class="onb-rv"><span>工作流</span><b>{{ answers.workflowSlugs.length }} 个</b></div>
           </div>
           <div class="onb-row">
             <button class="onb-back" @click="goStep('template')">重来</button>

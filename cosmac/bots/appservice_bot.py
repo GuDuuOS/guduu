@@ -550,9 +550,10 @@ class CosmacBot:
             skills_text = render_skills(deduped)
             mem_text = self._memory_context(room_id, sender)
             kb_text = self._kb_context(room_id, sender, query)
-            # 平台规则 → 本专班任务RULE → 人设 → 长期记忆 → 技能 → 知识库，依次拼成本轮 addendum
+            wf_text = self._preset_workflows_text(gctx.get("workflow_slugs") or [])
+            # 平台规则 → 任务RULE → 人设 → 长期记忆 → 技能 → 知识库 → 预置工作流，拼成本轮 addendum
             return "\n\n".join(
-                p for p in (rules_text, task_rule_text, persona, mem_text, skills_text, kb_text) if p
+                p for p in (rules_text, task_rule_text, persona, mem_text, skills_text, kb_text, wf_text) if p
             )
         except Exception as e:
             # 兜住**最终组装**：脏数据绝不能让这条消息收不到回复（docstring 的承诺）
@@ -680,7 +681,7 @@ class CosmacBot:
         """
         out: Dict[str, Any] = {
             "persona": "", "skill_slugs": [], "model": "", "task_rule": "",
-            "worker_slugs": [],
+            "worker_slugs": [], "workflow_slugs": [],
         }
         try:
             cfg = self.client.get_state_event(room_id, CHANNEL_CONFIG_EVENT_TYPE) or {}
@@ -689,6 +690,8 @@ class CosmacBot:
             out["task_rule"] = str(cfg.get("taskRule") or "").strip()
             # 本专班绑定的协作 Agent slug（档3b @名路由用）；一并取出避免重复读 state。
             out["worker_slugs"] = [str(s) for s in (cfg.get("agentSlugs") or []) if s]
+            # 入驻模板预置的默认工作流 slug（P2）：让本工作区的 AI 知道有哪些现成工作流可跑。
+            out["workflow_slugs"] = [str(s) for s in (cfg.get("workflowSlugs") or []) if s]
             persona = cfg.get("persona") or {}
             slug = (persona.get("agentSlug") or "").strip()
             if slug:
@@ -1382,6 +1385,34 @@ class CosmacBot:
         except Exception as e:
             logger.debug("读取工作流连接器失败（忽略）：%s", e)
             return []
+
+    def _preset_workflows_text(self, slugs: List[str]) -> str:
+        """入驻模板给本工作区预置的默认工作流（P2）：渲染成一段引导，让 AI 知道有现成工作流可跑。
+
+        只是「告诉 AI 有这些、可用 run_workflow 调用」，不改变 run_workflow 的权限（它本就能跑
+        任意全局工作流）。把 slug 解析成名字更友好；解析不到的 slug 跳过（可能已被后台删）。
+        失败返回空，绝不阻断回复。
+        """
+        if not slugs:
+            return ""
+        try:
+            by_slug = {str(w.get("slug")): w for w in self._workflow_defs()}
+            lines: List[str] = []
+            for sl in slugs:
+                w = by_slug.get(str(sl))
+                if not w:
+                    continue  # 模板引用的工作流已不存在/被停用，跳过
+                name = str(w.get("name") or sl).strip()
+                lines.append(f"- {name}（slug：{sl}）")
+            if not lines:
+                return ""
+            return (
+                "【本工作区预置的工作流】：用户选的入驻模板预置了以下现成工作流，"
+                "需要时可用 run_workflow 直接调用：\n" + "\n".join(lines)
+            )
+        except Exception as e:
+            logger.debug("渲染预置工作流失败（忽略）：%s", e)
+            return ""
 
     def _run_wf_command(
         self, room_id: str, sender: str, text: str, source_key: str = ""

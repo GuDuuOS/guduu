@@ -40,6 +40,7 @@ export interface OnbPickTemplate {
   model: string
   skillSlugs: string[]
   kbDocs: { title: string; content: string }[]
+  workflowSlugs: string[]
   tier: string
   paid: boolean
 }
@@ -54,6 +55,7 @@ interface OnbAnswers {
   model: string
   skillSlugs: string[]
   kbDocs: { title: string; content: string }[]
+  workflowSlugs: string[]
 }
 
 /* ===== 模块级单例 ===== */
@@ -67,7 +69,7 @@ const templates = ref<OnbPickTemplate[]>([])
 const userTier = ref('free') // 当前用户会员等级（用于付费模板门控）
 const answers = reactive<OnbAnswers>({
   templateKey: '', workspace: '', channels: [], aiName: '', aiPersona: '', rules: '',
-  model: '', skillSlugs: [], kbDocs: [],
+  model: '', skillSlugs: [], kbDocs: [], workflowSlugs: [],
 })
 
 function ai(text: string) { messages.value.push({ role: 'ai', text }) }
@@ -84,6 +86,7 @@ function fromBackend(t: OnboardingTemplateDef): OnbPickTemplate {
     model: t.model,
     skillSlugs: [...t.skillSlugs],
     kbDocs: t.kbDocs.map((d) => ({ ...d })),
+    workflowSlugs: [...t.workflowSlugs],
     tier: t.tier || 'free',
     paid: (t.tier || 'free') !== 'free',
   }
@@ -94,7 +97,7 @@ function builtinTemplates(): OnbPickTemplate[] {
   return ONBOARDING_TEMPLATES.map((t) => ({
     key: t.key, label: t.label, icon: t.icon, desc: t.desc,
     channels: [...t.channels], aiName: t.aiName, aiPersona: t.aiPersona,
-    rules: '', model: '', skillSlugs: [], kbDocs: [], tier: 'free', paid: false,
+    rules: '', model: '', skillSlugs: [], kbDocs: [], workflowSlugs: [], tier: 'free', paid: false,
   }))
 }
 
@@ -141,6 +144,7 @@ function reset() {
   answers.model = ''
   answers.skillSlugs = []
   answers.kbDocs = []
+  answers.workflowSlugs = []
   ai('👋 欢迎来到 CosMac Star！我是你的中枢 AI。')
   ai('先花一分钟把你的工作台搭起来——你主要做哪个方向？')
 }
@@ -178,6 +182,7 @@ export function useOnboarding() {
       answers.model = t.model
       answers.skillSlugs = [...t.skillSlugs]
       answers.kbDocs = t.kbDocs.map((d) => ({ ...d }))
+      answers.workflowSlugs = [...t.workflowSlugs]
       user(`${t.icon} ${t.label}`)
       ai(`好的，按「${t.label}」给你预置了一套频道和助手人设，后面都能改。`)
       ai('给你的工作区起个名字吧？这个名字会显示在左上角。')
@@ -244,12 +249,14 @@ export function useOnboarding() {
         const prompt = answers.rules
           ? `${answers.aiPersona}\n\n[平台规则]\n${answers.rules}`
           : answers.aiPersona
-        // 人设 + 模型 + 技能一起写进频道配置；bot 的 _group_context 会读 model/skill_slugs（P2b）
+        // 人设 + 模型 + 技能 + 默认工作流一起写进频道配置；bot 的 _group_context 会读
+        // persona.model/skill_slugs 与顶层 workflowSlugs（让模板的模型/技能/工作流在本群真生效）。
         const personaPatch = {
           persona: {
             aiName: answers.aiName, prompt,
             model: answers.model, skill_slugs: answers.skillSlugs,
           },
+          workflowSlugs: answers.workflowSlugs,
         }
         for (const cid of channelIds) {
           try { await setChannelConfig(cid, personaPatch) } catch { /* 单频道写失败不阻断 */ }
