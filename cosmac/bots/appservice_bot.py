@@ -1831,6 +1831,189 @@ class CosmacBot:
             return 500, {"error": "更新失败"}
         return (200, {"ok": True}) if ok else (404, {"error": "任务不存在"})
 
+    # —— 文档教学频道（类云文档）：页面树 CRUD ——
+    # 鉴权统一：读 = 该房间成员(is_joined_member)；写 = 该房间 power≥50(_is_room_admin)。
+    # 与任务看板同口径，服务端强制，前端只配。
+
+    def _doc_can_read(self, user_id: str, room_id: str) -> bool:
+        """能否读该文档频道：本人是房间成员即可（is_joined_member 自身 fail-closed）。"""
+        return bool(room_id) and self.client.is_joined_member(room_id, user_id)
+
+    def _doc_can_write(self, user_id: str, room_id: str) -> bool:
+        """能否编辑该文档频道：房间 power≥50（创建者天然是）。成员只读。"""
+        return bool(room_id) and self._is_room_admin(room_id, user_id)
+
+    def handle_doc_tree(
+        self, access_token: str, room_id: str
+    ) -> Tuple[int, Dict[str, Any]]:
+        """列出某文档频道的页面树（不含正文，省流量）。需是房间成员。"""
+        user_id = self.client.whoami(access_token)
+        if not user_id:
+            return 401, {"error": "登录已失效，请重新登录"}
+        if not self._doc_can_read(user_id, room_id):
+            return 403, {"error": "你不是该频道成员"}
+        try:
+            from cosmac.db import session_scope
+            from cosmac.db.doc_repo import list_pages, page_to_dict
+
+            with session_scope() as s:
+                pages = [page_to_dict(p) for p in list_pages(s, room_id)]
+        except Exception:
+            logger.exception("读取文档树失败 room=%s", room_id)
+            return 500, {"error": "读取失败"}
+        # 是否可编辑也回给前端，用于决定显不显示「编辑」（真正强制仍在写端点）。
+        return 200, {"pages": pages, "can_write": self._doc_can_write(user_id, room_id)}
+
+    def handle_doc_page(
+        self, access_token: str, page_id: int
+    ) -> Tuple[int, Dict[str, Any]]:
+        """读单页（含正文 Markdown）。需是该页所属频道的成员。"""
+        user_id = self.client.whoami(access_token)
+        if not user_id:
+            return 401, {"error": "登录已失效，请重新登录"}
+        try:
+            from cosmac.db import session_scope
+            from cosmac.db.doc_repo import get_page, page_to_dict
+
+            with session_scope() as s:
+                page = get_page(s, page_id)
+                if page is None:
+                    return 404, {"error": "页面不存在"}
+                if not self._doc_can_read(user_id, page.room_id):
+                    return 403, {"error": "你不是该频道成员"}
+                data = page_to_dict(page, with_content=True)
+                can_write = self._doc_can_write(user_id, page.room_id)
+        except Exception:
+            logger.exception("读取文档页失败 id=%s", page_id)
+            return 500, {"error": "读取失败"}
+        data["can_write"] = can_write
+        return 200, data
+
+    def handle_doc_create(
+        self, access_token: str, body: Dict[str, Any]
+    ) -> Tuple[int, Dict[str, Any]]:
+        """新建页面。需该频道 power≥50。"""
+        user_id = self.client.whoami(access_token)
+        if not user_id:
+            return 401, {"error": "登录已失效，请重新登录"}
+        room_id = str(body.get("room_id") or "")
+        if not self._doc_can_write(user_id, room_id):
+            return 403, {"error": "无权在此频道新建页面"}
+        try:
+            from cosmac.db import session_scope
+            from cosmac.db.doc_repo import create_page, page_to_dict
+
+            with session_scope() as s:
+                page = create_page(
+                    s, room_id=room_id,
+                    title=str(body.get("title") or ""),
+                    parent_id=body.get("parent_id"),
+                    content_md=str(body.get("content_md") or ""),
+                    updated_by=user_id,
+                )
+                if page is None:
+                    return 400, {"error": "新建失败（父页面非法或页面数超限）"}
+                data = page_to_dict(page, with_content=True)
+        except Exception:
+            logger.exception("新建文档页失败 room=%s", room_id)
+            return 500, {"error": "新建失败"}
+        return 200, data
+
+    def _doc_write_op(
+        self, access_token: str, page_id_raw: Any
+    ) -> Tuple[Optional[str], Optional[Any], Optional[Tuple[int, Dict[str, Any]]]]:
+        """改/删/移动的公共前置：验明身份 + 取页面 + 校验写权限。
+
+        成功返回 (user_id, page, None)；失败返回 (None, None, (状态码, body)) 让调用方直接回。
+        """
+        user_id = self.client.whoami(access_token)
+        if not user_id:
+            return None, None, (401, {"error": "登录已失效，请重新登录"})
+        try:
+            page_id = int(page_id_raw)
+        except (TypeError, ValueError):
+            return None, None, (400, {"error": "无效页面 id"})
+        from cosmac.db import session_scope
+        from cosmac.db.doc_repo import get_page
+
+        with session_scope() as s:
+            page = get_page(s, page_id)
+            if page is None:
+                return None, None, (404, {"error": "页面不存在"})
+            room_id = page.room_id
+        if not self._doc_can_write(user_id, room_id):
+            return None, None, (403, {"error": "无权编辑此频道"})
+        return user_id, page_id, None
+
+    def handle_doc_update(
+        self, access_token: str, body: Dict[str, Any]
+    ) -> Tuple[int, Dict[str, Any]]:
+        """改页面标题/正文。需该频道 power≥50。"""
+        user_id, page_id, err = self._doc_write_op(access_token, body.get("id"))
+        if err:
+            return err
+        try:
+            from cosmac.db import session_scope
+            from cosmac.db.doc_repo import page_to_dict, update_page
+
+            with session_scope() as s:
+                page = update_page(
+                    s, page_id,
+                    title=body.get("title"),
+                    content_md=body.get("content_md"),
+                    updated_by=user_id,
+                )
+                if page is None:
+                    return 404, {"error": "页面不存在"}
+                data = page_to_dict(page, with_content=True)
+        except Exception:
+            logger.exception("更新文档页失败 id=%s", page_id)
+            return 500, {"error": "更新失败"}
+        return 200, data
+
+    def handle_doc_delete(
+        self, access_token: str, body: Dict[str, Any]
+    ) -> Tuple[int, Dict[str, Any]]:
+        """删页面（连同其子树）。需该频道 power≥50。"""
+        _user_id, page_id, err = self._doc_write_op(access_token, body.get("id"))
+        if err:
+            return err
+        try:
+            from cosmac.db import session_scope
+            from cosmac.db.doc_repo import delete_page
+
+            with session_scope() as s:
+                deleted = delete_page(s, page_id)
+        except Exception:
+            logger.exception("删除文档页失败 id=%s", page_id)
+            return 500, {"error": "删除失败"}
+        return 200, {"ok": True, "deleted": deleted}
+
+    def handle_doc_move(
+        self, access_token: str, body: Dict[str, Any]
+    ) -> Tuple[int, Dict[str, Any]]:
+        """移动页面到新父级/改排序（拖拽）。需该频道 power≥50。"""
+        _user_id, page_id, err = self._doc_write_op(access_token, body.get("id"))
+        if err:
+            return err
+        try:
+            from cosmac.db import session_scope
+            from cosmac.db.doc_repo import move_page, page_to_dict
+
+            with session_scope() as s:
+                page = move_page(
+                    s, page_id,
+                    parent_id=body.get("parent_id"),
+                    sort=body.get("sort"),
+                )
+                if page is None:
+                    return 400, {"error": "移动失败（目标非法或会形成循环）"}
+                data = page_to_dict(page)
+        except Exception:
+            logger.exception("移动文档页失败 id=%s", page_id)
+            return 500, {"error": "移动失败"}
+        return 200, data
+
     def handle_pay_me(self, access_token: str) -> Tuple[int, Dict[str, Any]]:
         """查"我当前的会员状态"（升级弹窗顶部展示）。验明身份 → 返回当前生效等级 + 到期。"""
         from cosmac.members import active_tier, tier_label
@@ -2599,6 +2782,7 @@ class _Handler(BaseHTTPRequestHandler):
         p = self.path.split("?", 1)[0]
         if (p.startswith("/cosmac/pay/") or p == "/cosmac/stats"
                 or p.startswith("/cosmac/tasks")
+                or p.startswith("/cosmac/doc/")
                 or p.startswith("/cosmac/register/")
                 or p.startswith("/cosmac/reset/")
                 or p.startswith("/cosmac/login/")
@@ -2701,6 +2885,28 @@ class _Handler(BaseHTTPRequestHandler):
             code, payload = self.bot.handle_kb_list_mine(token)
             self._send_json(code, payload, cors=True)
             return
+        # 文档教学频道：列页面树（?room_id=）
+        if self.path.split("?", 1)[0] == "/cosmac/doc/tree":
+            from urllib.parse import parse_qs, urlparse
+            token = self._bearer()
+            qs = parse_qs(urlparse(self.path).query)
+            room_id = (qs.get("room_id") or [""])[0]
+            code, payload = self.bot.handle_doc_tree(token, room_id)
+            self._send_json(code, payload, cors=True)
+            return
+        # 文档教学频道：读单页（?id=）
+        if self.path.split("?", 1)[0] == "/cosmac/doc/page":
+            from urllib.parse import parse_qs, urlparse
+            token = self._bearer()
+            qs = parse_qs(urlparse(self.path).query)
+            try:
+                page_id = int((qs.get("id") or ["0"])[0])
+            except (TypeError, ValueError):
+                self._send_json(400, {"error": "无效页面 id"}, cors=True)
+                return
+            code, payload = self.bot.handle_doc_page(token, page_id)
+            self._send_json(code, payload, cors=True)
+            return
         # 个人协作人能力名册：列本人维护的协作人（带本人 token）
         if self.path.split("?", 1)[0] == "/cosmac/people/mine":
             auth = self.headers.get("Authorization", "")
@@ -2723,6 +2929,11 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(200, {})
             return
         self._send_json(404, {"errcode": "M_UNRECOGNIZED"})
+
+    def _bearer(self) -> str:
+        """从 Authorization 头取 Bearer token（取不到回空串）。"""
+        auth = self.headers.get("Authorization", "")
+        return auth[len("Bearer "):] if auth.startswith("Bearer ") else ""
 
     def _client_ip(self) -> str:
         """取请求方真实 IP（公开注册/登录端点限频用）。
@@ -2768,6 +2979,27 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(400, {"error": "请求无效"}, cors=True)
                 return
             code, payload = self.bot.handle_task_update(token, body)
+            self._send_json(code, payload, cors=True)
+            return
+
+        # 文档教学频道：建/改/删/移动页面（带本人 token；写权限服务端按房间 power 强制）
+        if path in (
+            "/cosmac/doc/page", "/cosmac/doc/page/update",
+            "/cosmac/doc/page/delete", "/cosmac/doc/page/move",
+        ):
+            token = self._bearer()
+            body = self._read_json_body(_MAX_CALLBACK_BODY)
+            if body is None:
+                self._send_json(400, {"error": "请求无效"}, cors=True)
+                return
+            if path == "/cosmac/doc/page":
+                code, payload = self.bot.handle_doc_create(token, body)
+            elif path == "/cosmac/doc/page/update":
+                code, payload = self.bot.handle_doc_update(token, body)
+            elif path == "/cosmac/doc/page/delete":
+                code, payload = self.bot.handle_doc_delete(token, body)
+            else:
+                code, payload = self.bot.handle_doc_move(token, body)
             self._send_json(code, payload, cors=True)
             return
 

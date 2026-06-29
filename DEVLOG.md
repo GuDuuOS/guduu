@@ -264,6 +264,14 @@
 - 关键决策:#2 不去阻止"重跑 LLM",只保证**群里不冒第二条**——按本仓既有 txn_id 去重思路,代价最小、与崩溃恢复一致。
 - 测试:新增 5 个回归(成员数缓存/重试/兜底 3 个 + 池满回滚/已外呼不删 2 个);相关 4 套件 69 通过、ruff 全绿。trading 9 个失败是**缺 `COSMAC_PAY_MANUAL_SECRET` 环境变量**的既有问题、与本次无关(已在干净树复现)。**纯后端、无需发 dist;部署=重启 bot**。
 
+## 2026-06-26 — 文档教学频道(类云文档) · P1 后端地基
+- 新模块:独立「文档频道」类型,主区=多层嵌套页面树(类 Notion)+Markdown 页面。负责人拍板:仅平台管理员可建、有权限者(房间 power≥50)编辑·非实时、成员只读、内容 Markdown+图片(P1 用链接)、AI 答疑走中枢 AI(文档感知 RAG, P2)。
+- 后端地基(本次):
+  - DB 模型 `cosmac_doc_page`(room_id/parent_id/title/content_md/sort/updated_by) + `doc_repo`(树查询/CRUD/移动防环/级联删子树) + 8 单测。
+  - 频道类型标记走 Matrix `cosmac.channel_config.kind='doc'`(前端不查 DB 就知道怎么渲染);正文存 cosmac DB(state event 存不下、要喂 KB)。
+  - 6 个 bot HTTP 端点:GET /cosmac/doc/tree?room_id= 与 /cosmac/doc/page?id=;POST /cosmac/doc/page(建)//update//delete//move。鉴权复用任务看板那套:读=is_joined_member、写=房间 power≥50,服务端强制。
+- 验证:全量 309 测试通过、ruff 全绿。**纯后端、未接前端,无需单独部署**;等 P1 前端(侧栏识别+文档视图+建频道入口+路由)齐了一起发。
+
 ## 2026-06-26 — 代码审查·收尾（引导诚实反馈 + 脏数据校验）
 - **引导不再"假装搭好了"**:useOnboarding.runCreate 里频道是逐个建、失败被吞的;原来无论建成几个都提示"🎉搭好了"。改成按实际结果反馈——全建失败→明确告知"频道没建上、进去手动补",部分失败→报"建成 X/N 个"。工作区本身建成才进入。
 - **useCustomAssets 加载逐项校验**:localStorage 可被手改/旧版遗留,sanitizeAsset 规范化每条(cat 白名单/字段强转字符串/补 id),脏记录不再渗进 UI。

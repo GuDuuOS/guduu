@@ -414,3 +414,34 @@ class RegisteredEmail(Base, TimestampMixin):
 
     def __repr__(self) -> str:
         return f"<RegisteredEmail {self.email} -> {self.username}>"
+
+
+class DocPage(Base, TimestampMixin):
+    """文档教学频道（类云文档）的一个**页面**。
+
+    一个「文档频道」= 一个 Matrix 房间(room_id)，里面是一棵可多层嵌套的页面树（类 Notion）。
+    页面正文是 Markdown，存这里（cosmac DB）——state event 存不下大文档也搜不了，且要喂给
+    知识库做 AI 答疑（见 CLAUDE.md 数据分层表「派生/结构化数据进 cosmac DB」）。
+
+    作用域/权限不在这层判：读=房间成员、写=房间 power≥50，由 bot HTTP 端点服务端强制
+    （复用任务看板那套 is_joined_member / 房间 power 校验）。频道"是不是文档频道"的类型标记
+    放 Matrix 的 cosmac.channel_config.kind='doc'（前端不查 DB 就知道怎么渲染）。
+    """
+
+    __tablename__ = "cosmac_doc_page"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # 所属文档频道（Matrix room_id）。一个房间一棵页面树。
+    room_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    # 父页面 id；None/0 = 顶层页面。靠它+sort 组成多层嵌套树。
+    parent_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    title: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # 正文（Markdown）。可较长，故用 Text。
+    content_md: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # 同层排序（小在前）；移动/拖拽时重排。
+    sort: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # 最后修改人（@user_id），便于展示/审计。
+    updated_by: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+
+    def __repr__(self) -> str:
+        return f"<DocPage #{self.id} room={self.room_id} {self.title[:20]!r}>"
