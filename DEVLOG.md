@@ -264,6 +264,15 @@
 - 关键决策:#2 不去阻止"重跑 LLM",只保证**群里不冒第二条**——按本仓既有 txn_id 去重思路,代价最小、与崩溃恢复一致。
 - 测试:新增 5 个回归(成员数缓存/重试/兜底 3 个 + 池满回滚/已外呼不删 2 个);相关 4 套件 69 通过、ruff 全绿。trading 9 个失败是**缺 `COSMAC_PAY_MANUAL_SECRET` 环境变量**的既有问题、与本次无关(已在干净树复现)。**纯后端、无需发 dist;部署=重启 bot**。
 
+## 2026-06-26 — 图文教程改：全平台一份 + 付费会员可见
+- 负责人定:图文教程**不分工作区**(全平台一份)、且**付费会员才能看**。改:
+  - **全局存储**:所有页面存固定作用域 `_GLOBAL_DOC_ROOM`(不再按 Space)。读端点去掉 room_id 入参。
+  - **付费门控**:gating 新增能力 `doc_read`(默认 TIER_PAID,后台「会员权限」可调);读端点(tree/page)过 `_gate_allows(doc_read)`,非付费回 403+locked;前台 DocReader 显示「🔒 付费会员专享」。
+  - **编辑=平台管理员**:写端点(建/改/删/移)只许平台管理员;后台「图文教程」去掉工作区选择器,直接编辑全局一份。
+  - **AI 答疑**:`_kb_context` 对付费用户(doc_read)自动把全局图文纳入 RAG(不再靠前端传作用域),中枢 AI 即可基于图文答疑。
+  - 前端 docTree()/docCreatePage() 去掉 roomId;DocReader/DocChannelView 去掉 roomId/spaceName 改全局;LiveView 图文教程视图直接 `<DocReader/>`;撤掉 per-Space 的 ensureBotInSpace 调用(createSpace 邀 bot 保留、无害)。
+- 验证:ruff 全绿 + 后端 310 单测通过 + 前端 build + preview 无 console 报错。前后端都变→发 dist + 重启 bot。
+
 ## 2026-06-26 — 改名「图文教程」+ 前台只读(类公众号)/后台编辑 分离
 - 负责人反馈:前台应是**查看**(类公众号:文章列表→点开看详情)、**编辑放管理后台**;「文档」改成 4 个字。
 - 改:

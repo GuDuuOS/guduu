@@ -14,10 +14,14 @@
     <!-- 列表：文章卡片（类公众号）-->
     <template v-else>
       <div class="dr-head">
-        <span class="dr-h-title">📰 {{ spaceName ? spaceName + ' · 图文教程' : '图文教程' }}</span>
+        <span class="dr-h-title">📰 图文教程</span>
         <button class="dr-refresh" title="刷新" :disabled="loading" @click="load">{{ loading ? '加载中…' : '刷新' }}</button>
       </div>
       <div v-if="loading && !articles.length" class="dr-hint">加载中…</div>
+      <div v-else-if="locked" class="dr-hint">
+        🔒 图文教程是<b>付费会员</b>专享内容。<br>
+        <span class="dr-hint-sub">升级会员后即可查看（在「升级会员」里开通）。</span>
+      </div>
       <div v-else-if="!articles.length" class="dr-hint">
         这里还没有内容。<br><span class="dr-hint-sub">内容由管理员在「管理后台 → 图文教程」里编辑发布。</span>
       </div>
@@ -33,20 +37,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { onMounted, ref } from 'vue'
 import { docTree, docGetPage, type DocPage } from '@/matrix/client'
 import { renderMarkdown } from '@/utils/md'
-
-const props = defineProps<{ roomId: string; spaceName?: string }>()
 
 const articles = ref<DocPage[]>([])
 const current = ref<DocPage | null>(null)
 const loading = ref(false)
+const locked = ref(false)   // 被付费门控拦下(非付费会员)
 
 async function load() {
   loading.value = true
   try {
-    const res = await docTree(props.roomId)
+    const res = await docTree()
+    locked.value = res.locked
     // 公众号式：扁平文章列表，按手动排序(sort)再 id 稳定排列
     articles.value = [...res.pages].sort((a, b) => a.sort - b.sort || a.id - b.id)
   } finally {
@@ -66,10 +70,7 @@ function fmtTime(ts?: number): string {
 }
 function shortId(uid: string): string { return uid.replace(/^@/, '').split(':')[0] }
 
-watch(() => props.roomId, () => {
-  current.value = null
-  if (props.roomId) load()
-}, { immediate: true })
+onMounted(load)
 </script>
 
 <style scoped>

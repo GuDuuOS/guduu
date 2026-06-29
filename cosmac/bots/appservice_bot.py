@@ -345,13 +345,10 @@ class CosmacBot:
                 gctx = self._apply_worker_routing(text or user_text, gctx)
                 # 按 (本群, 发起人) 算出本轮 system addendum：人设 + 技能 + 知识库检索片段(RAG)。
                 # 任何失败（DB 没装/没数据/出错）都返回空串、绝不阻断回复（见 _skill_addendum）。
-                # P2 文档答疑：前端在中枢 AI(全局 DM)提问时捎上「当前工作区」(cosmac.doc_space)，
-                # 据此把该工作区的文档(按 Space 存)纳入 RAG，让 AI 基于教程内容作答。
-                doc_space = content.get("cosmac.doc_space")
-                extra_scopes = [doc_space] if isinstance(doc_space, str) and doc_space else None
+                # 图文教程答疑：全局图文(付费可读)会在 _kb_context 里按 doc_read 门控自动纳入 RAG，
+                # 让中枢 AI 也能基于平台图文内容作答（无需前端传作用域）。
                 extra_system = self._skill_addendum(
                     room_id, sender, query=text or user_text, gctx=gctx,
-                    extra_scopes=extra_scopes,
                 )
                 # 短期记忆：把本房间最近的对话(不含当前这条)喂给模型，主 AI 才"记得"上文。
                 history = self._recent_history(room_id, sender, user_text)
@@ -671,7 +668,12 @@ class CosmacBot:
         # 知识库门控：低于门槛的用户在普通对话里也不享受 RAG 注入（与知识命令同一道闸）
         if not self._gate_allows(sender, "knowledge"):
             return ""
-        hits = self._kb_retrieve(room_id, sender, query, extra_scopes=extra_scopes)
+        # 图文教程是全平台一份、付费可读：付费用户的每轮对话(含中枢 AI)自动把全局图文纳入 RAG，
+        # 让 AI 能基于平台图文内容作答；非付费用户不注入（与查看图文同一道 doc_read 闸）。
+        scopes = list(extra_scopes or [])
+        if self._doc_can_read(sender) and self._GLOBAL_DOC_ROOM not in scopes:
+            scopes.append(self._GLOBAL_DOC_ROOM)
+        hits = self._kb_retrieve(room_id, sender, query, extra_scopes=scopes)
         if not hits:
             return ""
         lines = ["参考以下「知识库」资料作答（与问题相关，未必完整）："]
@@ -1852,74 +1854,73 @@ class CosmacBot:
             return 500, {"error": "更新失败"}
         return (200, {"ok": True}) if ok else (404, {"error": "任务不存在"})
 
-    # —— 文档教学频道（类云文档）：页面树 CRUD ——
-    # 鉴权统一：读 = 该房间成员(is_joined_member)；写 = 该房间 power≥50(_is_room_admin)。
-    # 与任务看板同口径，服务端强制，前端只配。
+    # —— 图文教程（全局图文内容，类公众号）：页面树 CRUD ——
+    # 改版后是**全平台一份**(不分工作区)：所有页面存在固定的 _GLOBAL_DOC_ROOM 作用域下。
+    # 鉴权：读 = 付费会员(门控 doc_read，默认 paid)；写 = 平台管理员(后台编辑)。服务端强制。
+    _GLOBAL_DOC_ROOM = "__cosmac_global_docs__"
 
-    def _doc_can_read(self, user_id: str, room_id: str) -> bool:
-        """能否读该文档频道：本人是房间成员即可（is_joined_member 自身 fail-closed）。"""
-        return bool(room_id) and self.client.is_joined_member(room_id, user_id)
+    def _doc_can_read(self, user_id: str) -> bool:
+        """能否查看图文教程：过 doc_read 门控（默认付费会员；平台管理员永远放行）。"""
+        return self._gate_allows(user_id, "doc_read")
 
-    def _doc_can_write(self, user_id: str, room_id: str) -> bool:
-        """能否编辑该文档频道：房间 power≥50（创建者天然是）。成员只读。"""
-        return bool(room_id) and self._is_room_admin(room_id, user_id)
+    def _doc_can_write(self, user_id: str) -> bool:
+        """能否编辑图文教程：仅平台管理员（全局内容，统一在后台编辑）。"""
+        return self._is_platform_admin(user_id)
 
-    def handle_doc_tree(
-        self, access_token: str, room_id: str
-    ) -> Tuple[int, Dict[str, Any]]:
-        """列出某文档频道的页面树（不含正文，省流量）。需是房间成员。"""
+    def handle_doc_tree(self, access_token: str) -> Tuple[int, Dict[str, Any]]:
+        """列出全局图文页面树（不含正文，省流量）。需付费会员可读。"""
         user_id = self.client.whoami(access_token)
         if not user_id:
             return 401, {"error": "登录已失效，请重新登录"}
-        if not self._doc_can_read(user_id, room_id):
-            return 403, {"error": "你不是该频道成员"}
+        if not self._doc_can_read(user_id):
+            return 403, {"error": self._gate_denied_text("doc_read"), "locked": True}
         try:
             from cosmac.db import session_scope
             from cosmac.db.doc_repo import list_pages, page_to_dict
 
             with session_scope() as s:
-                pages = [page_to_dict(p) for p in list_pages(s, room_id)]
+                pages = [page_to_dict(p) for p in list_pages(s, self._GLOBAL_DOC_ROOM)]
         except Exception:
-            logger.exception("读取文档树失败 room=%s", room_id)
+            logger.exception("读取图文树失败")
             return 500, {"error": "读取失败"}
-        # 是否可编辑也回给前端，用于决定显不显示「编辑」（真正强制仍在写端点）。
-        return 200, {"pages": pages, "can_write": self._doc_can_write(user_id, room_id)}
+        # 是否可编辑也回给前端（真正强制仍在写端点）。
+        return 200, {"pages": pages, "can_write": self._doc_can_write(user_id)}
 
     def handle_doc_page(
         self, access_token: str, page_id: int
     ) -> Tuple[int, Dict[str, Any]]:
-        """读单页（含正文 Markdown）。需是该页所属频道的成员。"""
+        """读单页（含正文 Markdown）。需付费会员可读。"""
         user_id = self.client.whoami(access_token)
         if not user_id:
             return 401, {"error": "登录已失效，请重新登录"}
+        if not self._doc_can_read(user_id):
+            return 403, {"error": self._gate_denied_text("doc_read"), "locked": True}
         try:
             from cosmac.db import session_scope
             from cosmac.db.doc_repo import get_page, page_to_dict
 
             with session_scope() as s:
                 page = get_page(s, page_id)
-                if page is None:
+                # 只暴露全局图文里的页面（防越权读到别处遗留的 room 数据）
+                if page is None or page.room_id != self._GLOBAL_DOC_ROOM:
                     return 404, {"error": "页面不存在"}
-                if not self._doc_can_read(user_id, page.room_id):
-                    return 403, {"error": "你不是该频道成员"}
                 data = page_to_dict(page, with_content=True)
-                can_write = self._doc_can_write(user_id, page.room_id)
         except Exception:
-            logger.exception("读取文档页失败 id=%s", page_id)
+            logger.exception("读取图文页失败 id=%s", page_id)
             return 500, {"error": "读取失败"}
-        data["can_write"] = can_write
+        data["can_write"] = self._doc_can_write(user_id)
         return 200, data
 
     def handle_doc_create(
         self, access_token: str, body: Dict[str, Any]
     ) -> Tuple[int, Dict[str, Any]]:
-        """新建页面。需该频道 power≥50。"""
+        """新建页面（写进全局图文）。仅平台管理员。"""
         user_id = self.client.whoami(access_token)
         if not user_id:
             return 401, {"error": "登录已失效，请重新登录"}
-        room_id = str(body.get("room_id") or "")
-        if not self._doc_can_write(user_id, room_id):
-            return 403, {"error": "无权在此频道新建页面"}
+        if not self._doc_can_write(user_id):
+            return 403, {"error": "仅平台管理员可编辑图文教程"}
+        room_id = self._GLOBAL_DOC_ROOM
         try:
             from cosmac.db import session_scope
             from cosmac.db.doc_repo import create_page, page_to_dict
@@ -1936,7 +1937,7 @@ class CosmacBot:
                     return 400, {"error": "新建失败（父页面非法或页面数超限）"}
                 data = page_to_dict(page, with_content=True)
         except Exception:
-            logger.exception("新建文档页失败 room=%s", room_id)
+            logger.exception("新建图文页失败")
             return 500, {"error": "新建失败"}
         self._doc_sync_kb(room_id, data["id"], data["title"], data.get("content_md") or "")
         return 200, data
@@ -1944,13 +1945,15 @@ class CosmacBot:
     def _doc_write_op(
         self, access_token: str, page_id_raw: Any
     ) -> Tuple[Optional[str], Optional[int], str, Optional[Tuple[int, Dict[str, Any]]]]:
-        """改/删/移动的公共前置：验明身份 + 取页面 + 校验写权限。
+        """改/删/移动的公共前置：验明身份(平台管理员) + 取页面 + 校验属于全局图文。
 
         成功返回 (user_id, page_id, room_id, None)；失败返回 (None, None, "", (状态码, body))。
         """
         user_id = self.client.whoami(access_token)
         if not user_id:
             return None, None, "", (401, {"error": "登录已失效，请重新登录"})
+        if not self._doc_can_write(user_id):
+            return None, None, "", (403, {"error": "仅平台管理员可编辑图文教程"})
         try:
             page_id = int(page_id_raw)
         except (TypeError, ValueError):
@@ -1960,11 +1963,9 @@ class CosmacBot:
 
         with session_scope() as s:
             page = get_page(s, page_id)
-            if page is None:
+            if page is None or page.room_id != self._GLOBAL_DOC_ROOM:
                 return None, None, "", (404, {"error": "页面不存在"})
             room_id = page.room_id
-        if not self._doc_can_write(user_id, room_id):
-            return None, None, "", (403, {"error": "无权编辑此频道"})
         return user_id, page_id, room_id, None
 
     # —— 文档页 ↔ 知识库 同步（P2 AI 答疑：把教学文档喂进 KB，按工作区 room 作用域）——
@@ -2944,16 +2945,13 @@ class _Handler(BaseHTTPRequestHandler):
             code, payload = self.bot.handle_kb_list_mine(token)
             self._send_json(code, payload, cors=True)
             return
-        # 文档教学频道：列页面树（?room_id=）
+        # 图文教程：列全局页面树（无需 room_id，全平台一份）
         if self.path.split("?", 1)[0] == "/cosmac/doc/tree":
-            from urllib.parse import parse_qs, urlparse
             token = self._bearer()
-            qs = parse_qs(urlparse(self.path).query)
-            room_id = (qs.get("room_id") or [""])[0]
-            code, payload = self.bot.handle_doc_tree(token, room_id)
+            code, payload = self.bot.handle_doc_tree(token)
             self._send_json(code, payload, cors=True)
             return
-        # 文档教学频道：读单页（?id=）
+        # 图文教程：读单页（?id=）
         if self.path.split("?", 1)[0] == "/cosmac/doc/page":
             from urllib.parse import parse_qs, urlparse
             token = self._bearer()

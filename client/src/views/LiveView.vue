@@ -40,7 +40,6 @@ import {
   roomIdsInSpace,
   createSpace,
   createChannelInSpace,
-  ensureBotInSpace,
   linkRoomToSpace,
   updateSpace,
   updateRoom,
@@ -158,8 +157,6 @@ function openBoard() { board.value = true; tasks.value = false; docs.value = fal
 function openTasks() { tasks.value = true; board.value = false; docs.value = false; currentRoom.value = ''; loadTasks() }
 function openDocs() {
   docs.value = true; board.value = false; tasks.value = false; currentRoom.value = ''
-  // 文档按 Space 存，鉴权要 bot 在 Space 里——打开时兜底确保（新 Space 建时已邀请）
-  if (activeSpace.value) ensureBotInSpace(activeSpace.value)
 }
 
 // 任务看板（AI 任务编排 P1）：主 AI 拆解的真实任务，三列 Kanban + 手动改状态。
@@ -1606,10 +1603,9 @@ onBeforeUnmount(() => {
           </div>
         </template>
 
-        <!-- ===== 图文教程（前台只读·类公众号：文章列表→点开看详情；编辑在管理后台）===== -->
+        <!-- ===== 图文教程（全平台一份·前台只读·类公众号；付费可见；编辑在管理后台）===== -->
         <template v-else-if="docs">
-          <DocReader v-if="activeSpace" :room-id="activeSpace" :space-name="activeSpaceName" />
-          <div v-else class="hint pad">请先选择一个工作区</div>
+          <DocReader />
         </template>
 
         <!-- ===== 频道 ===== -->

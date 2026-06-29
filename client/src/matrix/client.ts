@@ -2071,19 +2071,18 @@ function authHeaders(json = false): Record<string, string> {
   return h
 }
 
-/** 读某文档频道的页面树（不含正文）+ 当前用户能否编辑。 */
-export async function docTree(
-  roomId: string,
-): Promise<{ pages: DocPage[]; canWrite: boolean }> {
+/** 读全局图文页面树（不含正文）+ 当前用户能否编辑。locked=被付费门控拦下(非付费会员)。 */
+export async function docTree(): Promise<{ pages: DocPage[]; canWrite: boolean; locked: boolean }> {
   try {
-    const r = await fetch(
-      `${payBase()}/cosmac/doc/tree?room_id=${encodeURIComponent(roomId)}`,
-      { headers: authHeaders() },
-    )
-    if (!r.ok) return { pages: [], canWrite: false }
+    const r = await fetch(`${payBase()}/cosmac/doc/tree`, { headers: authHeaders() })
+    if (r.status === 403) return { pages: [], canWrite: false, locked: true }
+    if (!r.ok) return { pages: [], canWrite: false, locked: false }
     const j = await r.json()
-    return { pages: Array.isArray(j?.pages) ? j.pages : [], canWrite: !!j?.can_write }
-  } catch { return { pages: [], canWrite: false } }
+    return {
+      pages: Array.isArray(j?.pages) ? j.pages : [],
+      canWrite: !!j?.can_write, locked: false,
+    }
+  } catch { return { pages: [], canWrite: false, locked: false } }
 }
 
 /** 读单页（含 Markdown 正文）。失败返回 null。 */
@@ -2095,13 +2094,13 @@ export async function docGetPage(id: number): Promise<DocPage | null> {
   } catch { return null }
 }
 
-/** 新建页面。需该频道 power≥50。返回新页面（含正文）或抛错。 */
+/** 新建页面（写进全局图文）。需平台管理员。返回新页面（含正文）或抛错。 */
 export async function docCreatePage(
-  roomId: string, opts: { title?: string; parent_id?: number | null; content_md?: string } = {},
+  opts: { title?: string; parent_id?: number | null; content_md?: string } = {},
 ): Promise<DocPage> {
   const r = await fetch(`${payBase()}/cosmac/doc/page`, {
     method: 'POST', headers: authHeaders(true),
-    body: JSON.stringify({ room_id: roomId, ...opts }),
+    body: JSON.stringify(opts),
   })
   const j = await r.json().catch(() => ({}))
   if (!r.ok) throw new Error(j?.error || '新建失败')

@@ -1073,23 +1073,16 @@
         </div>
       </template>
 
-      <!-- 图文教程：编辑各工作区的图文内容(前台只读·类公众号；这里是后台编辑) -->
+      <!-- 图文教程：编辑全平台图文内容(前台只读·类公众号；付费会员可见) -->
       <template v-else-if="tab === 'docs'">
         <header class="adm-head">
           <div>
             <h1 class="adm-h1">图文教程</h1>
-            <p class="adm-hint">在这里编辑各工作区的图文内容；前台「图文教程」只读展示（类公众号）。</p>
-          </div>
-          <div>
-            <select v-model="docSpace" class="adm-fsel">
-              <option value="">选择工作区…</option>
-              <option v-for="s in docSpaces" :key="s.id" :value="s.id">{{ s.name }}</option>
-            </select>
+            <p class="adm-hint">编辑全平台图文内容（全平台一份）；前台「图文教程」只读展示，付费会员可见。</p>
           </div>
         </header>
-        <div v-if="!docSpace" class="adm-center adm-denied">请选择一个工作区开始编辑图文内容。</div>
-        <div v-else class="adm-doc-edit">
-          <DocChannelView :room-id="docSpace" :space-name="docSpaceName" />
+        <div class="adm-doc-edit">
+          <DocChannelView />
         </div>
       </template>
 
@@ -1216,7 +1209,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { rowKey } from '@/utils/rowKey'
 import {
   isServerAdmin,
@@ -1268,14 +1261,11 @@ import {
   AI_TOOL_CATALOG,
   AI_PROVIDERS,
   type AdminUser,
-  listSpaces,
-  ensureBotInSpace,
   type AdminRoom,
   type GlobalSkill,
   type GlobalAgent,
   type GlobalRule,
   type WorkflowDef,
-  type LiveSpace,
 } from '@/matrix/client'
 import DocChannelView from '@/components/doc/DocChannelView.vue'
 import { useToast } from '@/composables/useToast'
@@ -1289,16 +1279,8 @@ const { success, warn } = useToast()
 // 当前管理模块：用户/频道/AI配置/技能库/智能体/规则/工作流/数据概览
 const tab = ref<'users' | 'rooms' | 'ai' | 'skills' | 'agents' | 'people' | 'templates' | 'rules' | 'workflows' | 'gating' | 'quotas' | 'plans' | 'docs' | 'overview'>('users')
 
-/* —— 图文教程（后台编辑各工作区图文内容；前台只读）—— */
-const docSpaces = ref<LiveSpace[]>([])
-const docSpace = ref('')   // 当前在编辑哪个工作区(Space room id)的图文
-const docSpaceName = computed(() => docSpaces.value.find((s) => s.id === docSpace.value)?.name || '')
-function switchToDocs() {
-  tab.value = 'docs'
-  docSpaces.value = listSpaces()
-}
-// 选了工作区 → 确保 bot 在该 Space(文档鉴权需要)
-watch(docSpace, (id) => { if (id) ensureBotInSpace(id) })
+/* —— 图文教程（后台编辑全平台图文；前台只读·付费可见）—— */
+function switchToDocs() { tab.value = 'docs' }
 
 // 页面状态机：checking 校验中 / denied 无权限 / ok 已是管理员
 const state = ref<'checking' | 'denied' | 'ok'>('checking')
