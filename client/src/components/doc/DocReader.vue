@@ -3,12 +3,25 @@
     <!-- 详情：看单篇文章 -->
     <template v-if="current">
       <div class="dr-detail">
-        <button class="dr-back" @click="current = null">← 返回列表</button>
+        <div class="dr-detail-bar">
+          <button class="dr-back" @click="current = null">← 返回列表</button>
+          <!-- 视图切换：图文(HTML 渲染) / Markdown 原文(AI 知识库用的就是这份, 可复制) -->
+          <div class="dr-viewtoggle">
+            <button :class="{ on: !showMd }" @click="showMd = false">图文</button>
+            <button :class="{ on: showMd }" @click="showMd = true">Markdown</button>
+          </div>
+        </div>
         <h1 class="dr-title">{{ current.title || '未命名' }}</h1>
         <div class="dr-meta">{{ fmtTime(current.updated_ts) }}<span v-if="current.updated_by"> · {{ shortId(current.updated_by) }}</span></div>
-        <img v-if="current.cover" class="dr-cover-banner" :src="coverUrl(current.cover)" alt="封面" />
+        <img v-if="current.cover && !showMd" class="dr-cover-banner" :src="coverUrl(current.cover)" alt="封面" />
+        <!-- 图文(HTML)态 -->
         <!-- eslint-disable-next-line vue/no-v-html -->
-        <article class="dr-body md" v-html="renderMarkdown(current.content_md || '')"></article>
+        <article v-if="!showMd" class="dr-body md" v-html="renderMarkdown(current.content_md || '')"></article>
+        <!-- Markdown 原文态：AI 答疑用的就是这份内容；可一键复制喂给别的 AI -->
+        <div v-else class="dr-mdwrap">
+          <button class="dr-copy" @click="copyMd">{{ copied ? '已复制 ✓' : '复制 Markdown' }}</button>
+          <pre class="dr-mdsrc">{{ current.content_md || '（无正文）' }}</pre>
+        </div>
       </div>
     </template>
 
@@ -51,6 +64,8 @@ const articles = ref<DocPage[]>([])
 const current = ref<DocPage | null>(null)
 const loading = ref(false)
 const locked = ref(false)   // 被付费门控拦下(非付费会员)
+const showMd = ref(false)   // 详情视图：false=图文(HTML) / true=Markdown 原文
+const copied = ref(false)
 
 async function load() {
   loading.value = true
@@ -66,7 +81,15 @@ async function load() {
 
 async function open(id: number) {
   const p = await docGetPage(id)
-  if (p) current.value = p
+  if (p) { current.value = p; showMd.value = false; copied.value = false }
+}
+
+async function copyMd() {
+  try {
+    await navigator.clipboard.writeText(current.value?.content_md || '')
+    copied.value = true
+    setTimeout(() => { copied.value = false }, 1500)
+  } catch { /* 剪贴板不可用时忽略 */ }
 }
 
 function fmtTime(ts?: number): string {
@@ -108,9 +131,28 @@ onMounted(load)
 .dr-cover-banner { display: block; width: 100%; max-height: 320px; object-fit: cover; border-radius: 10px; margin: 4px 0 16px; }
 
 .dr-detail { padding: 20px 32px 48px; max-width: 760px; }
+.dr-detail-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .dr-back {
   border: none; background: transparent; color: #c96442; cursor: pointer;
-  font-size: 13px; padding: 4px 0; margin-bottom: 8px;
+  font-size: 13px; padding: 4px 0;
+}
+.dr-viewtoggle { display: inline-flex; border: 1px solid #e0dacd; border-radius: 8px; overflow: hidden; }
+.dr-viewtoggle button {
+  border: none; background: #fff; color: #8a8378; font-size: 12px;
+  padding: 4px 12px; cursor: pointer;
+}
+.dr-viewtoggle button.on { background: #faece7; color: #993c1d; font-weight: 600; }
+.dr-mdwrap { position: relative; }
+.dr-copy {
+  position: absolute; top: 8px; right: 8px; z-index: 1;
+  border: 1px solid #d8d2c8; background: #fff; color: #6b665e; border-radius: 6px;
+  font-size: 12px; padding: 4px 10px; cursor: pointer;
+}
+.dr-mdsrc {
+  white-space: pre-wrap; word-break: break-word; background: #faf9f6;
+  border: 1px solid #eae6df; border-radius: 10px; padding: 16px 18px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
+  line-height: 1.6; color: #2c2a26;
 }
 .dr-title { font-size: 26px; font-weight: 700; color: #2c2a26; margin: 4px 0 6px; }
 .dr-meta { font-size: 12px; color: #ada699; margin-bottom: 18px; }

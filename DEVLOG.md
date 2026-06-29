@@ -264,6 +264,12 @@
 - 关键决策:#2 不去阻止"重跑 LLM",只保证**群里不冒第二条**——按本仓既有 txn_id 去重思路,代价最小、与崩溃恢复一致。
 - 测试:新增 5 个回归(成员数缓存/重试/兜底 3 个 + 池满回滚/已外呼不删 2 个);相关 4 套件 69 通过、ruff 全绿。trading 9 个失败是**缺 `COSMAC_PAY_MANUAL_SECRET` 环境变量**的既有问题、与本次无关(已在干净树复现)。**纯后端、无需发 dist;部署=重启 bot**。
 
+## 2026-06-26 — 图文教程前台：图文(HTML)/Markdown 视图切换
+- 后台编辑本就是 Markdown(可让 AI 写文章直接贴);前台默认渲染成 HTML 图文。
+- 前台文章详情加「图文 / Markdown」切换:Markdown 态显示原文(可一键复制)——这份 MD 就是
+  AI 知识库(RAG)用的内容,等于把"AI 能调用的知识"显式暴露出来。
+- 纯前端;AI 答疑(MD→KB→RAG)早已生效。验证:build + preview 无 console 报错。**只发 dist、无需重启 bot**。
+
 ## 2026-06-26 — 图文教程：文章封面图
 - 后台编辑可给每篇图文加**封面**(类公众号):上传图片→存 Matrix 媒体库(mxc://)。
   - DB:`cosmac_doc_page` 加 `cover` 列(engine `_heal_business_schema` 给旧库补列);doc_repo create/update 接 cover、page_to_dict 回 cover。
