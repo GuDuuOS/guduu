@@ -438,6 +438,9 @@ class DocPage(Base, TimestampMixin):
     title: Mapped[str] = mapped_column(Text, nullable=False, default="")
     # 封面图（类公众号文章封面）：存 mxc://(上传到 Matrix 媒体库)或 http(s) URL；空=无封面。
     cover: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # 是否已发布：新建默认草稿(False)，发布后才在前台展示、才进 AI 知识库。
+    # （旧库补列时 DEFAULT 1，让历史页面保持可见——见 engine._heal_business_schema。）
+    published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # 正文（Markdown）。可较长，故用 Text。
     content_md: Mapped[str] = mapped_column(Text, nullable=False, default="")
     # 同层排序（小在前）；移动/拖拽时重排。

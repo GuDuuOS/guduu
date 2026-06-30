@@ -1874,17 +1874,21 @@ class CosmacBot:
             return 401, {"error": "登录已失效，请重新登录"}
         if not self._doc_can_read(user_id):
             return 403, {"error": self._gate_denied_text("doc_read"), "locked": True}
+        can_write = self._doc_can_write(user_id)
         try:
             from cosmac.db import session_scope
             from cosmac.db.doc_repo import list_pages, page_to_dict
 
             with session_scope() as s:
-                pages = [page_to_dict(p) for p in list_pages(s, self._GLOBAL_DOC_ROOM)]
+                # 后台编辑(可写)能看草稿；前台只读用户只看已发布。
+                rows = list_pages(
+                    s, self._GLOBAL_DOC_ROOM, published_only=not can_write
+                )
+                pages = [page_to_dict(p) for p in rows]
         except Exception:
             logger.exception("读取图文树失败")
             return 500, {"error": "读取失败"}
-        # 是否可编辑也回给前端（真正强制仍在写端点）。
-        return 200, {"pages": pages, "can_write": self._doc_can_write(user_id)}
+        return 200, {"pages": pages, "can_write": can_write}
 
     def handle_doc_page(
         self, access_token: str, page_id: int
@@ -1895,6 +1899,7 @@ class CosmacBot:
             return 401, {"error": "登录已失效，请重新登录"}
         if not self._doc_can_read(user_id):
             return 403, {"error": self._gate_denied_text("doc_read"), "locked": True}
+        can_write = self._doc_can_write(user_id)
         try:
             from cosmac.db import session_scope
             from cosmac.db.doc_repo import get_page, page_to_dict
@@ -1904,11 +1909,14 @@ class CosmacBot:
                 # 只暴露全局图文里的页面（防越权读到别处遗留的 room 数据）
                 if page is None or page.room_id != self._GLOBAL_DOC_ROOM:
                     return 404, {"error": "页面不存在"}
+                # 草稿只有可编辑者(管理员)能看；前台读者看不到未发布的。
+                if not page.published and not can_write:
+                    return 404, {"error": "页面不存在"}
                 data = page_to_dict(page, with_content=True)
         except Exception:
             logger.exception("读取图文页失败 id=%s", page_id)
             return 500, {"error": "读取失败"}
-        data["can_write"] = self._doc_can_write(user_id)
+        data["can_write"] = can_write
         return 200, data
 
     def handle_doc_create(
@@ -1940,7 +1948,7 @@ class CosmacBot:
         except Exception:
             logger.exception("新建图文页失败")
             return 500, {"error": "新建失败"}
-        self._doc_sync_kb(room_id, data["id"], data["title"], data.get("content_md") or "")
+        # 新建页默认是草稿，不进知识库；发布(handle_doc_update published=true)时才入库。
         return 200, data
 
     def _doc_write_op(
@@ -2021,6 +2029,7 @@ class CosmacBot:
                     title=body.get("title"),
                     content_md=body.get("content_md"),
                     cover=body.get("cover"),
+                    published=body.get("published"),
                     updated_by=user_id,
                 )
                 if page is None:
@@ -2029,7 +2038,11 @@ class CosmacBot:
         except Exception:
             logger.exception("更新文档页失败 id=%s", page_id)
             return 500, {"error": "更新失败"}
-        self._doc_sync_kb(room_id, data["id"], data["title"], data.get("content_md") or "")
+        # 知识库随发布状态同步：已发布→入库(供 AI 答疑)；草稿→从库移除。
+        if data.get("published"):
+            self._doc_sync_kb(room_id, data["id"], data["title"], data.get("content_md") or "")
+        else:
+            self._doc_remove_kb(room_id, [data["id"]])
         return 200, data
 
     def handle_doc_delete(

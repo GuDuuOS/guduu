@@ -15,7 +15,9 @@
           class="doc-node" :class="{ active: n.id === currentId }"
           :style="{ paddingLeft: 8 + n.depth * 14 + 'px' }"
         >
-          <span class="doc-node-title" @click="select(n.id)">{{ n.title || '未命名页面' }}</span>
+          <span class="doc-node-title" @click="select(n.id)">
+            <span v-if="!n.published" class="doc-draft-tag">草稿</span>{{ n.title || '未命名页面' }}
+          </span>
           <span v-if="canWrite" class="doc-node-ops">
             <button class="doc-mini" title="新建子页" @click.stop="createPage(n.id)">＋</button>
             <button class="doc-mini danger" title="删除(含子页)" @click.stop="removePage(n)">×</button>
@@ -39,10 +41,14 @@
           <div class="doc-head-ops" v-if="canWrite">
             <template v-if="editing">
               <button class="doc-btn ghost" :disabled="aiBusy || saving" @click="aiWrite">{{ aiBusy ? 'AI 写作中…' : '✨ AI 写' }}</button>
+              <button class="doc-btn ghost" :class="{ pubon: editPublished }" :disabled="saving" @click="editPublished = !editPublished" :title="editPublished ? '点此改为草稿' : '点此设为发布'">{{ editPublished ? '已发布 ●' : '草稿 ○' }}</button>
               <button class="doc-btn" :disabled="saving || aiBusy" @click="save">{{ saving ? '保存中…' : '保存' }}</button>
               <button class="doc-btn ghost" :disabled="saving" @click="cancelEdit">取消</button>
             </template>
-            <button v-else class="doc-btn ghost" @click="startEdit">编辑</button>
+            <template v-else>
+              <span class="doc-status" :class="{ on: current?.published }">{{ current?.published ? '已发布' : '草稿' }}</span>
+              <button class="doc-btn ghost" @click="startEdit">编辑</button>
+            </template>
           </div>
         </header>
         <div v-if="err" class="doc-err">{{ err }}</div>
@@ -100,6 +106,7 @@ const editBody = ref('')
 const editCover = ref('')        // 封面(mxc:// 或 url)
 const coverUploading = ref(false)
 const aiBusy = ref(false)        // AI 写作中
+const editPublished = ref(false) // 编辑中的发布状态(草稿/已发布)
 
 // 扁平化成「带层级深度」的有序列表（按 parent + sort 组织），避免递归组件。
 interface FlatNode extends DocPage { depth: number }
@@ -174,6 +181,7 @@ function startEdit() {
   editTitle.value = current.value.title
   editBody.value = current.value.content_md || ''
   editCover.value = current.value.cover || ''
+  editPublished.value = current.value.published ?? false
   editing.value = true
 }
 function cancelEdit() { editing.value = false; err.value = '' }
@@ -219,6 +227,7 @@ async function save() {
       title: editTitle.value.trim() || '未命名页面',
       content_md: editBody.value,
       cover: editCover.value,
+      published: editPublished.value,
     })
     current.value = updated
     editing.value = false
@@ -282,6 +291,13 @@ onMounted(loadTree)
   padding: 6px 14px; font-size: 13px; cursor: pointer;
 }
 .doc-btn.ghost { background: #fff; color: #6b665e; border-color: #d8d2c8; }
+.doc-btn.ghost.pubon { color: #3a7a3a; border-color: #bcdcbc; background: #f0f7f0; }
+.doc-status { font-size: 12px; color: #b58932; align-self: center; }
+.doc-status.on { color: #3a7a3a; }
+.doc-draft-tag {
+  display: inline-block; font-size: 11px; color: #b58932; background: #fbf2dd;
+  border-radius: 4px; padding: 0 4px; margin-right: 4px;
+}
 .doc-btn:disabled { opacity: .6; cursor: default; }
 .doc-err { margin: 0 32px; color: #993c1d; font-size: 13px; }
 

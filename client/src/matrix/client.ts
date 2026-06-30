@@ -2058,6 +2058,7 @@ export interface DocPage {
   parent_id: number | null
   title: string
   cover?: string        // 封面图(mxc:// 或 http(s) URL)；空=无封面
+  published?: boolean   // 是否已发布(草稿=false，仅后台可见)
   sort: number
   updated_by: string
   excerpt?: string      // 列表卡片摘要(类公众号)
@@ -2116,7 +2117,7 @@ export async function docCreatePage(
 
 /** 改页面标题/正文。需 power≥50。 */
 export async function docUpdatePage(
-  id: number, patch: { title?: string; content_md?: string; cover?: string },
+  id: number, patch: { title?: string; content_md?: string; cover?: string; published?: boolean },
 ): Promise<DocPage> {
   const r = await fetch(`${payBase()}/cosmac/doc/page/update`, {
     method: 'POST', headers: authHeaders(true),

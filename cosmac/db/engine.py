@@ -171,11 +171,17 @@ def _heal_business_schema(engine: Engine) -> None:
         # UndefinedColumn。
         if insp.has_table(DocPage.__tablename__):
             have = {c["name"] for c in insp.get_columns(DocPage.__tablename__)}
-            if "cover" not in have:
-                with engine.begin() as conn:
+            with engine.begin() as conn:
+                if "cover" not in have:
                     conn.execute(text(
                         "ALTER TABLE cosmac_doc_page "
                         "ADD COLUMN cover TEXT NOT NULL DEFAULT ''"
+                    ))
+                if "published" not in have:
+                    # 旧库已有页面默认 1(已发布)，保持历史内容可见；新建页面由 ORM 默认草稿。
+                    conn.execute(text(
+                        "ALTER TABLE cosmac_doc_page "
+                        "ADD COLUMN published BOOLEAN NOT NULL DEFAULT 1"
                     ))
     except Exception:
         logger.warning("补齐业务表列失败（不致命，相关新功能可能降级）", exc_info=True)

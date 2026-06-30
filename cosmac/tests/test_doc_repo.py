@@ -102,6 +102,21 @@ class DocRepoTest(unittest.TestCase):
             # 防环：不能把页面移到自己下
             self.assertIsNone(dr.move_page(s, aid, parent_id=aid))
 
+    def test_publish_filter(self) -> None:
+        # 新建默认草稿；published_only 只返回已发布；update 可切换发布状态。
+        with session_scope() as s:
+            d = dr.create_page(s, room_id=ROOM, title="草稿页")
+            self.assertFalse(d.published)  # 新建即草稿
+            did = d.id
+        with session_scope() as s:
+            self.assertEqual(len(dr.list_pages(s, ROOM, published_only=True)), 0)
+            self.assertEqual(len(dr.list_pages(s, ROOM)), 1)  # 后台看得到草稿
+        with session_scope() as s:
+            dr.update_page(s, did, published=True)
+        with session_scope() as s:
+            pub = dr.list_pages(s, ROOM, published_only=True)
+            self.assertEqual([p.title for p in pub], ["草稿页"])  # 发布后前台可见
+
     def test_room_isolation(self) -> None:
         with session_scope() as s:
             dr.create_page(s, room_id=ROOM, title="r1")
