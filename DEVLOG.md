@@ -7,6 +7,15 @@
 
 ---
 
+## 2026-06-30 — 修主AI「建群显示成功却看不到」
+- 现象:主 AI 建群回「已成功创建」,但用户频道树里没有新群。根因:`create_room` 工具建房后
+  ① 用户只是被 invite(没自动 join) ② 新房没挂进任何工作区(Space);前端频道树按「当前工作区
+  的子房间(m.space.child)」过滤——所以服务端房间确实建了(bot 是成员),用户却看不到。
+- 修:`_tool_create_room` 成功后复用 `team_created` 信号卡(同 assemble_team)。前端 processTeamCards
+  收到会自动 join 新房 + linkRoomToSpace 挂进当前工作区,频道树立刻出现。bot 无权写 Space 的
+  m.space.child,故由客户端补这一步(既有机制)。
+- 纯后端(tools.py);全量 317 单测通过、ruff 全绿。**只需重启 bot,无需发 dist**。
+
 ## 2026-06-30 — 用户「AI 偏好画像」(About me / Outputs)：每个用户自己设置，主 AI 注入
 - **背景/需求**:负责人提出要不要给主 AI 做 About_me/Outputs/Templates。核对存量——AI **人设**(控制室/群级 Agent)、模板(onboarding_templates/skills/workflows)都已有；真缺口是**人端**画像：主 AI 对话时并不知道「现在面对的是谁、TA 希望怎样的回答」。定调：只补这一块，且**每个用户自管**。
 - **关键架构决策**:画像**不进** per-user account data。原因——bot 注入时要读**别人的**画像，而 Matrix per-user account data 是用户私有、appservice 读不到他人的。故走「浏览器够不到 DB → 经 bot HTTP 端点写、bot 直接读 DB」这套（与个人协作人名册 `cosmac_person` 同套路）。

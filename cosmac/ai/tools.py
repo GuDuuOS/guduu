@@ -566,6 +566,18 @@ class Toolbox:
         room_id = self.client.create_room(name, invitees=invitees)
         if not room_id:
             return f"建群「{name}」失败了（创建房间接口返回错误）。"
+        # 关键：bot 建房后用户只是被「邀请」、且新房没挂进任何工作区(Space)——前端频道树按
+        # 「当前工作区的子房间」过滤，所以不发信号卡的话，用户那边根本看不到这个群（=显示成功却
+        # "没建成"的真相）。复用 team_created 信号卡：前端收到会自动 join 新房 + 挂进当前工作区，
+        # 频道树立刻出现。bot 自己没权限写 Space 的 m.space.child，故交给客户端补这一步。
+        try:
+            self.client.send_card(
+                ctx.room_id,
+                f"群「{name}」已建好（room_id={room_id}）。",
+                {"kind": "team_created", "team_room": room_id, "project": name},
+            )
+        except Exception:
+            logger.debug("发送建群信号卡失败（忽略）", exc_info=True)
         return (
             f"已成功创建群「{name}」（room_id={room_id}），"
             f"并已邀请：{', '.join(invitees)}。"
