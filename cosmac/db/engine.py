@@ -178,10 +178,11 @@ def _heal_business_schema(engine: Engine) -> None:
                         "ADD COLUMN cover TEXT NOT NULL DEFAULT ''"
                     ))
                 if "published" not in have:
-                    # 旧库已有页面默认 1(已发布)，保持历史内容可见；新建页面由 ORM 默认草稿。
+                    # 旧库已有页面默认已发布，保持历史内容可见；新建页面由 ORM 默认草稿。
+                    # 用 DEFAULT TRUE（Postgres 不接受 boolean 列用整数 1 作默认；SQLite 也支持 TRUE）。
                     conn.execute(text(
                         "ALTER TABLE cosmac_doc_page "
-                        "ADD COLUMN published BOOLEAN NOT NULL DEFAULT 1"
+                        "ADD COLUMN published BOOLEAN NOT NULL DEFAULT TRUE"
                     ))
     except Exception:
         logger.warning("补齐业务表列失败（不致命，相关新功能可能降级）", exc_info=True)

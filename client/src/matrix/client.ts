@@ -1313,6 +1313,7 @@ export const GATE_CATALOG: { key: string; label: string; default: string; group:
   { key: 'assemble_team', label: '一键建专班（AI 组队 + 派单）', default: 'paid', group: '任务编排与协作' },
   { key: 'people_manage', label: '个人协作人名册（给常合作的人加能力，供 AI 派单）', default: 'paid', group: '任务编排与协作' },
   { key: 'workflow_run', label: '跑工作流（外部/付费、共享凭据）', default: 'admin', group: '自动化' },
+  { key: 'doc_read', label: '图文教程（查看平台图文内容）', default: 'paid', group: '内容' },
 ]
 
 /** 门控策略 map：能力 key → 门槛 slug。 */

@@ -264,6 +264,16 @@
 - 关键决策:#2 不去阻止"重跑 LLM",只保证**群里不冒第二条**——按本仓既有 txn_id 去重思路,代价最小、与崩溃恢复一致。
 - 测试:新增 5 个回归(成员数缓存/重试/兜底 3 个 + 池满回滚/已外呼不删 2 个);相关 4 套件 69 通过、ruff 全绿。trading 9 个失败是**缺 `COSMAC_PAY_MANUAL_SECRET` 环境变量**的既有问题、与本次无关(已在干净树复现)。**纯后端、无需发 dist;部署=重启 bot**。
 
+## 2026-06-26 — 图文教程自检：修两个上线必崩/缺失项
+- 自查发现并修：
+  - **(严重)Postgres 上 published 补列会失败**:`ADD COLUMN published BOOLEAN NOT NULL DEFAULT 1`
+    在 Postgres 报错(boolean 列不接受整数 1 作默认)→ heal 静默失败 → published 列不存在 → 图文
+    所有读写 SELECT published 全崩。改成 `DEFAULT TRUE`(Postgres/SQLite 都支持,已用本机 sqlite3.51 验证)。
+    本机 SQLite 没暴露是因为本地表由 create_all 直接建、不走 heal。
+  - **前端 GATE_CATALOG 缺 doc_read**:后台「会员权限」页看不到「图文教程」这条、无法在线调门槛
+    (后端默认 paid 仍强制)。补上(default paid, group「内容」),前后端目录对齐。
+- 验证:ruff + 后端 311 单测 + 前端 build + preview 无报错。前后端都变→发 dist + 重启 bot。
+
 ## 2026-06-26 — 图文教程：草稿/发布状态
 - 新建文章默认**草稿**:只有后台(管理员)能看到,前台付费用户看不到、也不进 AI 知识库;
   在编辑器点「草稿○/已发布●」切换+保存才发布。发布后才前台可见 + 入库供 AI 答疑。
