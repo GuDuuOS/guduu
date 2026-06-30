@@ -80,9 +80,12 @@ class TestCapabilityRegistry(unittest.TestCase):
         self.assertIn("真人", out)
         self.assertIn("AI Agent", out)
 
-    def test_empty_registry_message(self) -> None:
+    def test_presets_present_when_no_config(self) -> None:
+        # 即使没配任何真人/控制室智能体，名册也含内置预置 Agent（开箱即用的 AI 班底）。
         out = _bot({})._list_capabilities_for_tool(ToolContext("!r:h", "@u:h"))
-        self.assertIn("空", out)  # "能力名册暂时是空的…"
+        self.assertIn("AI Agent", out)
+        self.assertIn("copywriter", out)  # 预置之一：文案
+        self.assertNotIn("空", out)        # 不再是"空名册"
 
     def test_people_reader_filters_disabled(self) -> None:
         states = {PEOPLE_EVENT_TYPE: {"people": [

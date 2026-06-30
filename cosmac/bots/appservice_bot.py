@@ -838,18 +838,13 @@ class CosmacBot:
             return self.agent
 
     def _find_global_agent(self, slug: str) -> Optional[Dict[str, Any]]:
-        """在控制室「全局智能体」里按 slug 找一个**启用**的智能体（找不到返回 None）。"""
+        """按 slug 找一个**启用**的全局智能体（含内置预置库 + 控制室配置）；找不到返回 None。
+
+        走 _global_agent_items（已合并预置+控制室），这样 @预置Agent / 绑定预置Agent 都能解析。
+        """
         try:
-            ctrl = self.client.resolve_alias(self.config.control_room_alias)
-            if not ctrl:
-                return None
-            ev = self.client.get_state_event(ctrl, AGENTS_EVENT_TYPE) or {}
-            for a in ev.get("agents") or []:
-                if (
-                    isinstance(a, dict)
-                    and a.get("slug") == slug
-                    and a.get("enabled", True)
-                ):
+            for a in self._global_agent_items():
+                if a.get("slug") == slug:
                     return a
             return None
         except Exception as e:
@@ -864,19 +859,26 @@ class CosmacBot:
         return [s for s in self._global_skill_items() if str(s.get("slug")) in want]
 
     def _global_agent_items(self) -> List[Dict[str, Any]]:
-        """读控制室「全局智能体」，返回启用的智能体字典列表（失败空）。给能力名册用。"""
+        """全局智能体列表（启用的）= **内置预置库打底 + 控制室配置覆盖/追加**。给能力名册/绑群用。
+
+        内置预置 Agent（presets.preset_agents）让零配置租户也有一队"AI 同事"可派/可 @；管理员在
+        后台配的同 slug 覆盖预置、新 slug 追加、把 enabled 设 false 可停用某个（含覆盖掉预置的）。
+        """
+        from cosmac.ai.presets import preset_agents
+
+        # 预置打底：slug → item
+        merged: Dict[str, Dict[str, Any]] = {a["slug"]: a for a in preset_agents()}
+        # 控制室配置覆盖/追加（不论 enabled，先并进来，最后按 enabled 过滤——这样后台可停用预置）
         try:
             ctrl = self.client.resolve_alias(self.config.control_room_alias)
-            if not ctrl:
-                return []
-            ev = self.client.get_state_event(ctrl, AGENTS_EVENT_TYPE) or {}
-            return [
-                a for a in (ev.get("agents") or [])
-                if isinstance(a, dict) and a.get("enabled", True)
-            ]
+            if ctrl:
+                ev = self.client.get_state_event(ctrl, AGENTS_EVENT_TYPE) or {}
+                for a in (ev.get("agents") or []):
+                    if isinstance(a, dict) and a.get("slug"):
+                        merged[str(a["slug"])] = a
         except Exception as e:
-            logger.debug("读取全局智能体列表失败（忽略）：%s", e)
-            return []
+            logger.debug("读取全局智能体列表失败（仅用预置）：%s", e)
+        return [a for a in merged.values() if a.get("enabled", True)]
 
     def _people_items(self) -> List[Dict[str, Any]]:
         """读控制室「人员能力名册」(cosmac.people)，返回启用的人员画像列表（失败空）。
