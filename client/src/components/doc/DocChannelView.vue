@@ -38,7 +38,8 @@
           <h1 v-else class="doc-title">{{ current?.title || '未命名页面' }}</h1>
           <div class="doc-head-ops" v-if="canWrite">
             <template v-if="editing">
-              <button class="doc-btn" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存' }}</button>
+              <button class="doc-btn ghost" :disabled="aiBusy || saving" @click="aiWrite">{{ aiBusy ? 'AI 写作中…' : '✨ AI 写' }}</button>
+              <button class="doc-btn" :disabled="saving || aiBusy" @click="save">{{ saving ? '保存中…' : '保存' }}</button>
               <button class="doc-btn ghost" :disabled="saving" @click="cancelEdit">取消</button>
             </template>
             <button v-else class="doc-btn ghost" @click="startEdit">编辑</button>
@@ -78,7 +79,7 @@
 import { onMounted, ref } from 'vue'
 import {
   docTree, docGetPage, docCreatePage, docUpdatePage, docDeletePage,
-  docCoverUrl, uploadMedia,
+  docCoverUrl, uploadMedia, docDraft,
   type DocPage,
 } from '@/matrix/client'
 import { renderMarkdown } from '@/utils/md'
@@ -98,6 +99,7 @@ const editTitle = ref('')
 const editBody = ref('')
 const editCover = ref('')        // 封面(mxc:// 或 url)
 const coverUploading = ref(false)
+const aiBusy = ref(false)        // AI 写作中
 
 // 扁平化成「带层级深度」的有序列表（按 parent + sort 组织），避免递归组件。
 interface FlatNode extends DocPage { depth: number }
@@ -187,6 +189,25 @@ async function onPickCover(e: Event) {
   } finally {
     coverUploading.value = false
     ;(e.target as HTMLInputElement).value = ''  // 允许重复选同一文件
+  }
+}
+
+async function aiWrite() {
+  const topic = window.prompt('给 AI 一个主题/要求，它会写成 Markdown 填入正文（已有正文会作为改进基础）：')
+  if (!topic || !topic.trim()) return
+  aiBusy.value = true; err.value = ''
+  try {
+    const md = await docDraft(topic.trim(), editBody.value)
+    editBody.value = md
+    // 标题还空着/还是默认「新页面」→ 用正文首个一级标题自动填
+    if (!editTitle.value.trim() || editTitle.value === '新页面') {
+      const m = md.match(/^#\s+(.+)$/m)
+      if (m) editTitle.value = m[1].trim()
+    }
+  } catch (e: any) {
+    err.value = e?.message || 'AI 生成失败'
+  } finally {
+    aiBusy.value = false
   }
 }
 

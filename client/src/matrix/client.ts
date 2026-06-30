@@ -2137,6 +2137,17 @@ export async function docDeletePage(id: number): Promise<boolean> {
   } catch { return false }
 }
 
+/** 让 AI 按主题写一篇图文草稿（Markdown）。需平台管理员。existing=在已有正文上改进。 */
+export async function docDraft(topic: string, existing = ''): Promise<string> {
+  const r = await fetch(`${payBase()}/cosmac/doc/draft`, {
+    method: 'POST', headers: authHeaders(true),
+    body: JSON.stringify({ topic, existing }),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(j?.error || 'AI 生成失败')
+  return String(j?.markdown || '')
+}
+
 /** 移动页面到新父级/改排序。需 power≥50。 */
 export async function docMovePage(
   id: number, opts: { parent_id?: number | null; sort?: number },

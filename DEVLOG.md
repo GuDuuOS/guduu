@@ -264,6 +264,14 @@
 - 关键决策:#2 不去阻止"重跑 LLM",只保证**群里不冒第二条**——按本仓既有 txn_id 去重思路,代价最小、与崩溃恢复一致。
 - 测试:新增 5 个回归(成员数缓存/重试/兜底 3 个 + 池满回滚/已外呼不删 2 个);相关 4 套件 69 通过、ruff 全绿。trading 9 个失败是**缺 `COSMAC_PAY_MANUAL_SECRET` 环境变量**的既有问题、与本次无关(已在干净树复现)。**纯后端、无需发 dist;部署=重启 bot**。
 
+## 2026-06-26 — 图文教程后台：一键「AI 写文章」
+- 后台编辑器加「✨ AI 写」按钮:输入主题→AI 生成整篇 Markdown 填入正文(已有正文作为改进基础),
+  并自动用首个 # 标题填到标题框。省去去别处让 AI 写再复制粘贴。
+  - 后端 `POST /cosmac/doc/draft`(仅平台管理员):用后台下发的运行时模型 self.llm.complete 生成,
+    系统提示设定为"公众号图文作者、输出 Markdown 正文"。
+  - 前端 `docDraft(topic, existing)`;DocChannelView aiWrite()。
+- 验证:ruff 全绿 + 后端 310 单测 + 前端 build + preview 无 console 报错。前后端都变→发 dist + 重启 bot。
+
 ## 2026-06-26 — 图文教程前台：图文(HTML)/Markdown 视图切换
 - 后台编辑本就是 Markdown(可让 AI 写文章直接贴);前台默认渲染成 HTML 图文。
 - 前台文章详情加「图文 / Markdown」切换:Markdown 态显示原文(可一键复制)——这份 MD 就是

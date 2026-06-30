@@ -2076,6 +2076,42 @@ class CosmacBot:
             return 500, {"error": "移动失败"}
         return 200, data
 
+    def handle_doc_draft(
+        self, access_token: str, body: Dict[str, Any]
+    ) -> Tuple[int, Dict[str, Any]]:
+        """让 AI 按主题写一篇图文草稿（Markdown），返回给后台编辑器填入。仅平台管理员。"""
+        user_id = self.client.whoami(access_token)
+        if not user_id:
+            return 401, {"error": "登录已失效，请重新登录"}
+        if not self._doc_can_write(user_id):
+            return 403, {"error": "仅平台管理员可用"}
+        topic = str(body.get("topic") or "").strip()[:2000]
+        if not topic:
+            return 400, {"error": "请填写文章主题"}
+        existing = str(body.get("existing") or "").strip()[:8000]
+        # 用后台下发的运行时模型（provider/model 热配置）
+        self._apply_runtime_config()
+        sys = (
+            "你是专业的公众号图文作者。根据用户给的主题写一篇结构清晰、可读性强的中文文章，"
+            "用 Markdown 输出：以 # 一级标题开头，配 ## 小标题、要点列表、必要的示例/代码块。"
+            "排版利落、信息密度高；只输出文章正文本身，不要寒暄、不要额外说明。"
+        )
+        user = f"主题：{topic}"
+        if existing:
+            user += f"\n\n请在以下已有内容基础上改进/续写（保留有用部分）：\n{existing}"
+        try:
+            from cosmac.ai.base import Message
+            out = self.llm.complete(
+                [Message(role="system", content=sys), Message(role="user", content=user)]
+            )
+        except Exception:
+            logger.exception("AI 写图文草稿失败")
+            return 502, {"error": "AI 生成失败，请稍后重试"}
+        md = (out or "").strip()
+        if not md:
+            return 502, {"error": "AI 没有返回内容，请重试"}
+        return 200, {"markdown": md}
+
     def handle_pay_me(self, access_token: str) -> Tuple[int, Dict[str, Any]]:
         """查"我当前的会员状态"（升级弹窗顶部展示）。验明身份 → 返回当前生效等级 + 到期。"""
         from cosmac.members import active_tier, tier_label
@@ -3059,6 +3095,17 @@ class _Handler(BaseHTTPRequestHandler):
                 code, payload = self.bot.handle_doc_delete(token, body)
             else:
                 code, payload = self.bot.handle_doc_move(token, body)
+            self._send_json(code, payload, cors=True)
+            return
+
+        # 图文教程：让 AI 按主题写草稿（返回 Markdown，后台编辑器填入）
+        if path == "/cosmac/doc/draft":
+            token = self._bearer()
+            body = self._read_json_body(_MAX_CALLBACK_BODY)
+            if body is None:
+                self._send_json(400, {"error": "请求无效"}, cors=True)
+                return
+            code, payload = self.bot.handle_doc_draft(token, body)
             self._send_json(code, payload, cors=True)
             return
 
