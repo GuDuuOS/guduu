@@ -107,9 +107,13 @@ class TestGroupAgent(unittest.TestCase):
         self.assertIn("本群人设", out)
         self.assertIn("本群只聊技术", out)
 
-    def test_no_config_empty(self) -> None:
+    def test_no_config_only_interaction_policy(self) -> None:
+        # 没有任何人设/规则/技能时，addendum 仍含内置「交互行为准则」基线（其它部分为空）。
         bot = _bot(channel_cfg=None, agents=None, skills=None)
-        self.assertEqual(bot._skill_addendum(ROOM, "@u:host"), "")
+        out = bot._skill_addendum(ROOM, "@u:host")
+        self.assertIn("交互行为准则", out)
+        # 除了准则不应再有别的内容块（用分隔符数量粗略验证：只有一段）
+        self.assertNotIn("【必须严格遵守", out)
 
     def test_custom_persona_carries_model_and_skills(self) -> None:
         # 入驻模板 P2b：自定义人设里带 model/skill_slugs（引导写入），_group_context 应读出来
@@ -164,8 +168,9 @@ class TestGroupAgent(unittest.TestCase):
         self.assertIn("对外报价必须经负责人确认", out)
         self.assertIn("不得编造数据", out)
         self.assertNotIn("这条停用的不该出现", out)
-        # 规则块应在最前（优先级最高）
-        self.assertTrue(out.startswith("【必须严格遵守"))
+        # 顺序：内置「交互行为准则」基线在最前，平台硬规则紧随其后（仍高于人设/技能等）
+        self.assertTrue(out.startswith("【交互行为准则"))
+        self.assertLess(out.index("【交互行为准则"), out.index("【必须严格遵守"))
 
     def test_rag_injects_relevant_kb_chunk(self) -> None:
         # 本群知识库里有文档 → 提问相关问题时，addendum 注入检索到的片段

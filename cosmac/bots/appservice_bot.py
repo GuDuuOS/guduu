@@ -65,6 +65,19 @@ _MAX_WF_MSG = 4000
 # Synapse 事务推送请求体上限（纵深防御；批量事件给足余量）。
 _MAX_TXN_BODY = 8 * 1024 * 1024
 
+# 主 AI 的「交互行为准则」——内置基线，每轮对话都注入（在管理员人设/RULE 之上做底）。
+# 目的：把"含糊指令"这类问题统一处理成「先推断+直接做+说假设+给下一步」，而不是反问干等。
+# 放在 _skill_addendum 最前段；它是行为风格，不与平台硬约束冲突（硬约束随后注入、优先级更高）。
+_INTERACTION_POLICY = (
+    "【交互行为准则（始终遵守）】\n"
+    "1. 指令信息不全时：先用最近对话、当前工作区、用户画像推断意图，给出合理默认并**直接执行**；"
+    "执行后简要说明你的假设，并主动给出下一步可选项。不要用开放式反问让用户干等。\n"
+    "2. 仅当动作代价高、不可逆、或存在真正歧义时，才提出**一个**最关键的澄清问题。\n"
+    "3. 建群/建频道/拆任务等轻量、可撤销的动作：一律先做、再让用户调整，不要先追问名字。\n"
+    "4. 凡是能用工具真正完成的事，就调用工具去做，而不是只用文字描述步骤。\n"
+    "5. 每次回复尽量落一个明确的「下一步」，把事情向前推进。"
+)
+
 
 def _token_hash(token: str) -> str:
     """回调 token 只在 DB 里存**哈希**（#4）：DB/日志泄露也拿不到可用的明文 token。
@@ -556,9 +569,10 @@ class CosmacBot:
             mem_text = self._memory_context(room_id, sender)
             kb_text = self._kb_context(room_id, sender, query, extra_scopes)
             wf_text = self._preset_workflows_text(gctx.get("workflow_slugs") or [])
-            # 平台规则 → 任务RULE → 人设 → 用户偏好 → 长期记忆 → 技能 → 知识库 → 预置工作流
+            # 交互准则(内置基线) → 平台规则 → 任务RULE → 人设 → 用户偏好 → 长期记忆 → 技能 → 知识库 → 预置工作流
             return "\n\n".join(
                 p for p in (
+                    _INTERACTION_POLICY,
                     rules_text, task_rule_text, persona, user_pref_text,
                     mem_text, skills_text, kb_text, wf_text,
                 ) if p
