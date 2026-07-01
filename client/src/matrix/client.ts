@@ -97,6 +97,17 @@ export function removeCachedAccount(userId: string): void {
   writeAccounts(readAccounts().filter((a) => a.userId !== userId))
 }
 
+/** 当前登录者的真实资料（个人主页展示用）：id / 显示名 / 头像 http 地址。未登录返回空。 */
+export function myProfileInfo(): { userId: string; name: string; avatarUrl: string } {
+  const uid = mx?.getUserId() || ''
+  if (!uid) return { userId: '', name: '', avatarUrl: '' }
+  const u: any = mx?.getUser?.(uid)
+  const localpart = uid.replace(/^@/, '').split(':')[0]
+  const name = (u?.displayName && u.displayName !== uid) ? u.displayName : localpart
+  const mxc = u?.avatarUrl || ''
+  return { userId: uid, name, avatarUrl: mxc ? mxcToHttp(mxc, 96) : '' }
+}
+
 async function startFrom(opts: {
   baseUrl: string
   accessToken: string

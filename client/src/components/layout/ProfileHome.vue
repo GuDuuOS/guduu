@@ -32,7 +32,10 @@
       <div class="ph-body">
         <!-- 左：资料卡 -->
         <aside class="ph-side">
-          <div class="ph-avatar">{{ user.avatar }}</div>
+          <div class="ph-avatar">
+            <img v-if="user.avatar" :src="user.avatar" alt="" class="ph-avatar-img" />
+            <template v-else>{{ (user.name[0] || '我') }}</template>
+          </div>
           <div class="ph-name">{{ user.name }}</div>
           <div class="ph-handle">{{ user.handle }}</div>
           <div class="ph-bio">这里是介绍</div>
@@ -128,17 +131,29 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useProfileHome } from '@/composables/useProfileHome'
 import { useUserProfile } from '@/composables/useUserProfile'
 import { useToast } from '@/composables/useToast'
-import { currentUser, channelMembers } from '@/data/channels'
+import { channelMembers } from '@/data/channels'
+import { myProfileInfo } from '@/matrix/client'
 
 const { visible, close } = useProfileHome()
 const { openSettings } = useUserProfile()
 const { success, toast } = useToast()
 
-const user = { name: currentUser.name, handle: '@xiaoyu', avatar: currentUser.avatar }
+// 个人主页展示**当前登录者本人**的资料（名/句柄/头像），而不是写死的演示人物。
+// 面板打开(visible=true)时刷新——此时 Matrix 已登录、能拿到真实信息。
+const user = ref<{ name: string; handle: string; avatar: string }>({ name: '我', handle: '', avatar: '' })
+function loadUser() {
+  const info = myProfileInfo()
+  user.value = {
+    name: info.name || '我',
+    handle: info.userId,               // @user:cosmac.cc
+    avatar: info.avatarUrl,            // 有头像=http 地址；没有=空串(模板回退首字母)
+  }
+}
+watch(visible, (v) => { if (v) loadUser() }, { immediate: true })
 
 const expanded = ref(false)
 const tabs = ['我的上架', '我的购买', '我的团队', '我的收益']
@@ -266,6 +281,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey))
   padding-right: 28px;
 }
 /* 头像嵌入白色面板的圆形凹槽 */
+.ph-avatar-img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
 .ph-avatar {
   position: relative; z-index: 2;
   width: 120px; height: 120px; border-radius: 50%;
