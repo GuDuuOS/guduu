@@ -63,13 +63,22 @@ function writeAccounts(list: StoredAccount[]): void {
   try { localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(list)) } catch { /* 存储不可用忽略 */ }
 }
 
+/**
+ * 把一个账号会话写进多账号缓存（供以后免密切换）。同 userId 覆盖（去重）。
+ * name 缺省时**保留原有缓存里的显示名**，避免复活会话时把名字退化成裸 userId。
+ */
+function upsertAccount(sess: StoredAccount, name?: string): void {
+  const prev = readAccounts()
+  const keptName = name || prev.find((a) => a.userId === sess.userId)?.name || sess.userId
+  const list = prev.filter((a) => a.userId !== sess.userId)
+  list.push({ ...sess, name: keptName })
+  writeAccounts(list)
+}
+
 function saveSession(baseUrl: string, res: any, name?: string): void {
   const sess = { baseUrl, accessToken: res.access_token, userId: res.user_id, deviceId: res.device_id }
   localStorage.setItem(SESSION_KEY, JSON.stringify(sess))
-  // 顺带存进多账号缓存（同 userId 覆盖），供以后免密切换
-  const list = readAccounts().filter((a) => a.userId !== sess.userId)
-  list.push({ ...sess, name: name || sess.userId })
-  writeAccounts(list)
+  upsertAccount(sess, name) // 顺带进多账号缓存
 }
 
 /** 已缓存可切换的账号列表（不暴露 token；name 缺省用 userId）。 */
@@ -248,7 +257,12 @@ export async function restoreSession(): Promise<string | null> {
       localStorage.removeItem(SESSION_KEY)
       return null
     }
-    return await startFrom(s)
+    const uid = await startFrom(s)
+    // 关键：把"通过 restore 复活的当前账号"也补进多账号缓存。否则功能上线前就登录过、
+    // 或只靠 SESSION_KEY 活着的账号永远进不了"切换账号"列表——表现就是：加了新号后
+    // 看不到旧号、无法一键切回。upsert 幂等，同号覆盖、保留原显示名。
+    if (uid) upsertAccount(s)
+    return uid
   } catch {
     localStorage.removeItem(SESSION_KEY)
     return null
