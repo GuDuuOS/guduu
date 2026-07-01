@@ -7,6 +7,20 @@
 
 ---
 
+## 2026-07-02 — 管理后台用户列表显示邮箱地址
+- 需求：管理后台用户列表要能看到每个账号的注册邮箱。
+- 数据链路：邮箱只在 cosmac DB 的 `RegisteredEmail`（Synapse 不存），而管理后台是浏览器、够不到
+  DB → 必须经 bot 的 HTTP 端点拿。
+- 后端 `appservice_bot.py`：新增 `handle_admin_emails(token)` + `GET /cosmac/admin/emails`。**仅平台
+  管理员**（whoami → `_is_platform_admin`，非管理员 403——邮箱是个人敏感信息、且是全平台一次性
+  拉取，普通用户不该看别人邮箱）。读 `RegisteredEmail` 返回 `{用户名localpart: 邮箱}`；读失败返回空表
+  优雅降级。照抄 `handle_stats` 的鉴权模式。
+- 前端：`client.ts` 加 `listUserEmails()`（走 `/cosmac/admin/emails`）+ `AdminUser` 加 `email?` 字段 +
+  `listUsers()` 拉完用户后按 localpart 合并邮箱；`AdminView.vue` 在用户 id 下显示 `✉ 邮箱`。
+- 验证：`npm run build` 通过；全量 329 测试过 + ruff 过；preview 登录页无回归无报错。真实"管理员进
+  后台看到邮箱列"需线上用管理员账号验（本地无 admin 会话）。
+- ⚠️ **全栈改动，部署要两步**：① 前端 dist → `/var/www/cosmac-app`；② **重启 guduu-bot**（后端加了端点）。
+
 ## 2026-07-01 — 登录注册抽成独立页面（方案A：治"不流畅"+ 给安全增强铺路）
 - 背景：负责人反馈登录注册"太不流畅"。查明根因：认证 UI 原来是塞在 **199KB 的巨石 LiveView.vue**
   里一段 `v-if="!loggedIn"`——登录页必须先加载整个 app 才显示、已登录用户刷新还"闪一下登录框"、

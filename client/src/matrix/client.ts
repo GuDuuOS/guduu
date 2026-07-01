@@ -974,6 +974,7 @@ export interface AdminUser {
   admin: boolean        // 是否服务器管理员
   deactivated: boolean  // 是否已停用
   isBot: boolean        // 是否中枢 AI（按 botId() 判定）
+  email?: string       // 注册邮箱(cosmac DB 反查;仅管理员可见,可能没有)
 }
 
 /**
@@ -1016,7 +1017,32 @@ export async function listUsers(): Promise<AdminUser[]> {
     if (data.next_token === undefined || data.next_token === null) break
     from = Number(data.next_token)
   }
+  // 附加邮箱(仅管理员能拿到;失败则静默不显示)。按 localpart 匹配。
+  try {
+    const emails = await listUserEmails()
+    for (const u of out) {
+      const lp = u.id.replace(/^@/, '').split(':')[0].toLowerCase()
+      if (emails[lp]) u.email = emails[lp]
+    }
+  } catch { /* 拿不到邮箱不影响用户列表 */ }
   return out
+}
+
+/**
+ * 拉「用户名 localpart → 邮箱」映射(走 cosmac 后端 /cosmac/admin/emails,仅管理员)。
+ * 邮箱只在 cosmac DB(Synapse 不存),故经 bot 端点取。失败/无权限返回空表(不影响用户列表)。
+ */
+export async function listUserEmails(): Promise<Record<string, string>> {
+  const token = (mx as any)?.getAccessToken?.() || ''
+  if (!token) return {}
+  try {
+    const r = await fetch(`${payBase()}/cosmac/admin/emails`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!r.ok) return {}
+    const j = await r.json()
+    return (j && j.emails) || {}
+  } catch { return {} }
 }
 
 /**

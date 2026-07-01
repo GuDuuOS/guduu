@@ -147,6 +147,7 @@
                       <span v-if="u.isBot" class="adm-tag bot">中枢AI</span>
                     </div>
                     <div class="adm-u-handle">{{ u.id }}</div>
+                    <div class="adm-u-email" v-if="u.email">✉ {{ u.email }}</div>
                   </div>
                 </div>
               </td>
@@ -2667,6 +2668,7 @@ onMounted(check)
 }
 .adm-u-name { font-weight: var(--fw-bold); display: flex; align-items: center; gap: 6px; }
 .adm-u-handle { font-size: var(--fs-75); color: var(--text-3); font-family: var(--mono); margin-top: 1px; }
+.adm-u-email { font-size: var(--fs-75); color: var(--text-3); margin-top: 1px; }
 
 .adm-tag { font-size: 11px; padding: 2px 8px; border-radius: 8px; }
 .adm-tag.admin { color: var(--accent); background: var(--accent-soft); }

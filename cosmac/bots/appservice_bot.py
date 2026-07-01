@@ -1797,6 +1797,34 @@ class CosmacBot:
             logger.debug("统计 DB 指标失败", exc_info=True)
         return 200, out
 
+    def handle_admin_emails(self, access_token: str) -> Tuple[int, Dict[str, Any]]:
+        """管理后台:列「用户名 localpart → 邮箱」映射(给用户列表显示邮箱)。**仅平台管理员**。
+
+        邮箱是个人敏感信息、且这是全平台一次性拉取(普通用户不该看到别人邮箱),故限管理员;
+        非管理员回 403。邮箱只在 cosmac DB 的 RegisteredEmail 里(Synapse 不存),浏览器够不到
+        DB,只能经这个 bot 端点拿。读失败不报错、返回空表(前端优雅降级为"不显示邮箱")。
+        """
+        user_id = self.client.whoami(access_token)
+        if not user_id:
+            return 401, {"error": "登录已失效，请重新登录"}
+        if not self._is_platform_admin(user_id):
+            return 403, {"error": "仅平台管理员可查看用户邮箱"}
+        emails: Dict[str, str] = {}
+        try:
+            from sqlalchemy import select
+
+            from cosmac.db import session_scope
+            from cosmac.db.models import RegisteredEmail
+
+            with session_scope() as s:
+                for row in s.execute(select(RegisteredEmail)).scalars():
+                    if row.username and row.email:
+                        # 键统一用小写 localpart,与前端按 localpart 匹配一致
+                        emails[row.username.strip().lower()] = row.email
+        except Exception:
+            logger.debug("读取邮箱映射失败", exc_info=True)
+        return 200, {"emails": emails}
+
     def _can_access_task(self, user_id: str, task: Any) -> bool:
         """判断 user_id 是否有权读/改这条任务。
 
@@ -3065,6 +3093,12 @@ class _Handler(BaseHTTPRequestHandler):
             auth = self.headers.get("Authorization", "")
             token = auth[len("Bearer "):] if auth.startswith("Bearer ") else ""
             code, payload = self.bot.handle_stats(token)
+            self._send_json(code, payload, cors=True)
+            return
+
+        # 管理后台：用户名→邮箱 映射（仅平台管理员;用户列表显示邮箱用）
+        if self.path.split("?", 1)[0] == "/cosmac/admin/emails":
+            code, payload = self.bot.handle_admin_emails(self._bearer())
             self._send_json(code, payload, cors=True)
             return
 
