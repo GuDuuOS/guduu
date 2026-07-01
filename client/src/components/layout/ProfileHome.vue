@@ -73,8 +73,8 @@
                 </div>
                 <button class="ph-add" @click="success('新增上架', '把你的模板 / 服务 / 课程上架到主页（演示）')">＋ 上架</button>
               </div>
-              <div v-if="listMode === 'now'" class="ph-grid">
-                <div v-for="it in listings" :key="it.title" class="ph-card" @click="toast('查看上架作品', `${it.title}（演示）`)">
+              <div v-if="listMode === 'now' && listings.length" class="ph-grid">
+                <div v-for="it in listings" :key="it.title" class="ph-card">
                   <div class="ph-card-img" :style="{ background: it.bg }">
                     <span class="ph-card-badge">{{ it.cat }}</span>
                   </div>
@@ -85,13 +85,13 @@
                   <div class="ph-card-price">{{ it.price }}</div>
                 </div>
               </div>
-              <div v-else class="ph-empty">暂无下架内容</div>
+              <div v-else class="ph-empty">你还没有上架任何内容（模板/服务/课程上架功能开发中）</div>
             </template>
 
             <!-- 我的购买 -->
             <template v-else-if="tab === '我的购买'">
-              <div class="ph-grid">
-                <div v-for="it in purchases" :key="it.title" class="ph-card" @click="toast('查看已购内容', `${it.title}（演示）`)">
+              <div v-if="purchases.length" class="ph-grid">
+                <div v-for="it in purchases" :key="it.title" class="ph-card">
                   <div class="ph-card-img" :style="{ background: it.bg }"><span class="ph-card-badge">{{ it.cat }}</span></div>
                   <div class="ph-card-info">
                     <div class="ph-card-title">{{ it.title }}</div>
@@ -100,27 +100,24 @@
                   <div class="ph-card-price done">已拥有</div>
                 </div>
               </div>
+              <div v-else class="ph-empty">你还没有购买任何内容</div>
             </template>
 
-            <!-- 我的团队 -->
+            <!-- 我的团队 = 真实协作人名册 -->
             <template v-else-if="tab === '我的团队'">
-              <div class="ph-team">
+              <div v-if="team.length" class="ph-team">
                 <div v-for="m in team" :key="m.name" class="ph-team-row">
                   <span class="ph-team-ava" :style="m.color ? { background: m.color } : undefined">{{ m.avatar }}</span>
                   <span class="ph-team-name">{{ m.name }}</span>
                   <span class="ph-team-role">{{ m.role }}</span>
                 </div>
               </div>
+              <div v-else class="ph-empty">还没有协作人。去「我的协作人」里添加常合作的人，AI 派单时能用上。</div>
             </template>
 
-            <!-- My Earnings -->
+            <!-- 我的收益（交易/分成后端未接，先不显示假数据）-->
             <template v-else>
-              <div class="ph-earn">
-                <div class="ph-earn-card"><div class="ph-earn-v">¥ 12,480</div><div class="ph-earn-l">累计收益</div></div>
-                <div class="ph-earn-card"><div class="ph-earn-v">¥ 2,360</div><div class="ph-earn-l">本月收益</div></div>
-                <div class="ph-earn-card"><div class="ph-earn-v">86</div><div class="ph-earn-l">总销量</div></div>
-                <div class="ph-earn-card"><div class="ph-earn-v">¥ 1,920</div><div class="ph-earn-l">可提现</div></div>
-              </div>
+              <div class="ph-empty">收益统计功能开发中，敬请期待。</div>
             </template>
           </div>
         </main>
@@ -131,15 +128,16 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useProfileHome } from '@/composables/useProfileHome'
 import { useUserProfile } from '@/composables/useUserProfile'
+import { useMyPeople } from '@/composables/useMyPeople'
 import { useToast } from '@/composables/useToast'
-import { channelMembers } from '@/data/channels'
 import { myProfileInfo } from '@/matrix/client'
 
 const { visible, close } = useProfileHome()
 const { openSettings } = useUserProfile()
+const { load: loadPeople, rows: peopleRows } = useMyPeople()
 const { success, toast } = useToast()
 
 // 个人主页展示**当前登录者本人**的资料（名/句柄/头像），而不是写死的演示人物。
@@ -153,7 +151,7 @@ function loadUser() {
     avatar: info.avatarUrl,            // 有头像=http 地址；没有=空串(模板回退首字母)
   }
 }
-watch(visible, (v) => { if (v) loadUser() }, { immediate: true })
+watch(visible, (v) => { if (v) { loadUser(); loadPeople() } }, { immediate: true })
 
 const expanded = ref(false)
 const tabs = ['我的上架', '我的购买', '我的团队', '我的收益']
@@ -162,18 +160,16 @@ const listMode = ref<'now' | 'removed'>('now')
 
 const socialLinks = ['Lark', '网站', 'Discord', 'Twitter', 'Facebook', 'Telegram']
 
-const listings = [
-  { title: '爆款标题 Agent', sub: 'AI Agent · 已上架', cat: 'Agent', price: '¥99', bg: 'linear-gradient(135deg,#f59e0b,#ea580c)' },
-  { title: '短视频脚本模板', sub: 'Prompt · 已上架', cat: 'Prompt', price: '免费', bg: 'linear-gradient(135deg,#4a7a8c,#2f5a6b)' },
-  { title: '数据复盘 Agent', sub: 'AI Agent · 已上架', cat: 'Agent', price: '¥69', bg: 'linear-gradient(135deg,#6b8e4e,#3f5a2e)' },
-  { title: '评论区回复 Agent', sub: 'AI Agent · 已上架', cat: 'Agent', price: '免费', bg: 'linear-gradient(135deg,#8a6a8a,#5a4060)' }
-]
-const purchases = [
-  { title: '素材库问答检索', sub: 'Skill · /kb', cat: 'Skill', bg: 'linear-gradient(135deg,#4a7a8c,#33606f)' },
-  { title: '抖音数据连接器', sub: 'MCP 连接器', cat: 'MCP', bg: 'linear-gradient(135deg,#5a7a8a,#3a5560)' },
-  { title: '爆款选题方法库', sub: '知识库', cat: 'KB', bg: 'linear-gradient(135deg,#b58932,#8a6622)' }
-]
-const team = channelMembers
+// 上架/购买/收益对应的市场·交易后端还没接（模块5），先不放假数据 → 空态，等接了再填真数。
+const listings: { title: string; sub: string; cat: string; price: string; bg: string }[] = []
+const purchases: { title: string; sub: string; cat: string; bg: string }[] = []
+// 我的团队 = 当前登录者真实的「协作人名册」（cosmac DB），不再用写死的演示团队。
+const team = computed(() => peopleRows.value.map((p: any) => ({
+  name: p.name || p.id,
+  role: p.role || p.expertise || '协作人',
+  avatar: (p.name || p.id || '?').replace(/^@/, '')[0] || '?',
+  color: undefined as string | undefined,
+})))
 
 function onShare() {
   success('已复制主页链接', '链接已复制到剪贴板（演示）')

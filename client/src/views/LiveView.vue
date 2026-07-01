@@ -339,7 +339,8 @@ const spaces = ref<LiveSpace[]>([])
 const activeSpace = ref('')                       // 当前工作区 id
 const spaceChildIds = ref<Set<string>>(new Set()) // 当前工作区下的频道 id
 const activeSpaceName = computed(
-  () => spaces.value.find((s) => s.id === activeSpace.value)?.name || tenant.hqTitle,
+  // 没有工作区/尚未 sync 时用中性名，别拿具体租户名(安其影视)兜底、误当成用户自己的工作区
+  () => spaces.value.find((s) => s.id === activeSpace.value)?.name || '我的工作区',
 )
 // 工作区切换 → 看板数据源跟着切到该工作区的配置（每个工作区一份）
 watch(activeSpace, (id) => { setBoardSpace(id); setSocialSpace(id) }, { immediate: true })
