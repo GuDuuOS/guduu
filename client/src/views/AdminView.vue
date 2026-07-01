@@ -118,6 +118,13 @@
             <span class="adm-filter-n">{{ filteredUsers.length }} / {{ users.length }}</span>
           </div>
 
+          <!-- 会员等级读取失败提示：用户列表照常显示，但等级列不可信、已禁用改档，
+               避免管理员在"全员误显示免费"的错数据上操作。多为尚未加入控制室，刷新即好。 -->
+          <div v-if="membersLoadFailed" class="adm-warnbar">
+            ⚠️ 会员等级暂时读取失败（通常是你刚被设为管理员、还没加入控制室）。用户列表正常，
+            但“会员等级”列不准确、已暂时禁用修改。请点上方「刷新」重试一次即可恢复。
+          </div>
+
         <table class="adm-table">
           <thead>
             <tr>
@@ -156,7 +163,7 @@
                   class="adm-tier"
                   :class="u.admin ? 'admin' : memberTier(u.id)"
                   :value="u.admin ? 'admin' : memberTier(u.id)"
-                  :disabled="tierBusy === u.id || busy === u.id"
+                  :disabled="tierBusy === u.id || busy === u.id || membersLoadFailed"
                   @change="onLevelChange(u, ($event.target as HTMLSelectElement).value)"
                 >
                   <option v-for="t in MEMBER_TIERS" :key="t.slug" :value="t.slug">
@@ -1219,6 +1226,7 @@ import {
   reactivateUser,
   resetPassword,
   setUserAdmin,
+  ensureControlRoomMembership,
   serverName,
   listAdminRooms,
   getRoomMembers,
@@ -1291,6 +1299,9 @@ const busy = ref<string | null>(null)
 // 会员等级 map（userId→slug，只含非免费的）+ 正在调整的用户 id（禁用对应下拉防抖）
 const members = ref<MemberMap>({})
 const tierBusy = ref<string | null>(null)
+// 会员等级读取是否失败（读控制室 state event，需已加入控制室）。为真时：等级列不可信，
+// 禁用等级下拉 + 顶部提示，**绝不**把读不到伪装成"全员免费"让管理员在错数据上误操作。
+const membersLoadFailed = ref(false)
 
 /** 取某用户的会员等级 slug（map 里没有即免费）。 */
 function memberTier(userId: string): string {
@@ -1344,13 +1355,25 @@ async function check() {
 async function loadUsers() {
   loading.value = true
   try {
-    // 会员读取失败不能伪装成“全员免费”，否则管理员会在错误数据上继续操作。
-    const [list, mp] = await Promise.all([
-      listUsers(),
-      getMembers(),
-    ])
+    // ① 用户列表是关键数据（走 /_synapse/admin，服务器管理员就能读）——失败=真错误。
+    //    **必须与会员等级解耦**：以前用 Promise.all 一起读，getMembers 一失败就整张列表变空，
+    //    这正是"第二个管理员看得到频道、看不到用户"的根因（他还没加入控制室、读不了会员事件）。
+    const list = await listUsers()
     users.value = list
-    members.value = mp
+    // ② 会员等级单独读：它读的是控制室 state event，需要"已加入控制室"。
+    membersLoadFailed.value = false
+    try {
+      members.value = await getMembers()
+    } catch {
+      // 多半是还没加入控制室 → 自愈：接受控制室邀请并重试一次
+      await ensureControlRoomMembership()
+      try {
+        members.value = await getMembers()
+      } catch {
+        members.value = {}
+        membersLoadFailed.value = true // 等级不可信：禁用下拉 + 顶部提示，绝不伪装成"全员免费"
+      }
+    }
   } catch (e: any) {
     warn('加载失败', e?.message || '无法获取用户列表')
   } finally {
@@ -2562,6 +2585,12 @@ onMounted(check)
 .adm-head { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 18px; padding-right: 44px; }
 .adm-h1 { font-size: 20px; font-weight: var(--fw-bold); }
 .adm-hint { font-size: var(--fs-75); color: var(--text-3); margin-top: 4px; }
+/* 会员等级读取失败的警示条：橙黄底、不刺眼但明显，提示数据不可信 */
+.adm-warnbar {
+  margin: 0 0 12px; padding: 10px 14px; border-radius: 8px;
+  background: rgba(201, 100, 66, 0.1); border: 1px solid rgba(201, 100, 66, 0.3);
+  color: var(--text-2); font-size: var(--fs-75); line-height: 1.5;
+}
 .adm-actions { display: flex; gap: 8px; }
 
 .adm-btn {
