@@ -749,6 +749,36 @@ export async function kickFromRoom(roomId: string, userId: string, reason?: stri
   await (mx as any).kick(roomId, userId, reason)
 }
 
+/** 我在某房间/服务器(Space)的 power level（决定我能做什么）。读不到默认 0。 */
+export function myPowerIn(roomId: string): number {
+  const room = mx?.getRoom(roomId)
+  const me = mx?.getUserId() || ''
+  const pl: any = room?.currentState?.getStateEvents?.('m.room.power_levels', '')?.getContent?.() || {}
+  return (pl.users?.[me]) ?? (pl.users_default ?? 0)
+}
+
+/** 设某成员在服务器(Space)的 power level（=角色）。保留 power_levels 其它字段、只改 users。
+ *  power<=0 视为"成员"(删除显式赋权)。需当前用户权限足够(通常所有者)，否则服务器会拒。 */
+export async function setMemberPower(spaceId: string, userId: string, power: number): Promise<void> {
+  if (!mx) throw new Error('未登录')
+  const room = mx.getRoom(spaceId)
+  const pl: any = room?.currentState?.getStateEvents?.('m.room.power_levels', '')?.getContent?.()
+  if (!pl || typeof pl !== 'object') throw new Error('读取权限信息失败，请稍后重试')
+  const users: Record<string, number> = { ...(pl.users || {}) }
+  if (power <= 0) delete users[userId]
+  else users[userId] = power
+  await (mx as any).sendStateEvent(spaceId, 'm.room.power_levels', { ...pl, users }, '')
+}
+
+/** 把某成员移出服务器：踢出 Space 本身 + 其下各频道（尽力而为）。 */
+export async function kickFromSpace(spaceId: string, userId: string, reason?: string): Promise<void> {
+  if (!mx) throw new Error('未登录')
+  for (const cid of roomIdsInSpace(spaceId)) {
+    try { await (mx as any).kick(cid, userId, reason) } catch { /* 某频道踢不了跳过 */ }
+  }
+  await (mx as any).kick(spaceId, userId, reason)
+}
+
 /**
  * 用 Synapse Admin API 新建一个账号（需当前登录者是服务器管理员，如 @admin）。
  * 返回完整用户 id。失败抛错（含状态码/原因）。

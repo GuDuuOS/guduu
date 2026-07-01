@@ -7,6 +7,15 @@
 
 ---
 
+## 2026-07-01 — 社区服务器 P2：成员列表 + 角色管理
+- 工作区设置里加「👥 成员与角色管理」→ 成员弹窗：列出服务器(Space)全部成员+角色(群主/管理员/成员，
+  由 Matrix power level 推)+头像+待接受标记。
+- 操作(权限内)：群主(power≥100)可「设为管理员/取消管理员」(setMemberPower 改 Space power_levels，
+  保留其它字段只改 users)；管理员+(power≥50)可「移出」(kickFromSpace 踢 Space+其下频道)。
+  只能管 power 比自己低的、非本人、非 bot。
+- 复用已有 listChannelMembers(带 role/power)；新增 myPowerIn/setMemberPower/kickFromSpace。纯前端。
+- 顺带修 P1「复制链接」按钮换行错位(flex-shrink/nowrap)。验证:build + preview 无 console 报错。只发 dist。
+
 ## 2026-07-01 — 工作区→社区服务器 P1：开放加入 + 可分享邀请链接
 - 负责人定:工作区(左侧服务器栏 制作/运营/明星…)要做成"真社区"——外人凭链接就能加入(像 Discord)。
   底层无需重建:工作区本就是 Matrix Space = Discord 服务器;只加"社区"功能。

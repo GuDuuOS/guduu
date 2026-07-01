@@ -45,6 +45,11 @@ import {
   setSpaceOpenJoin,
   spaceJoinLink,
   joinSpaceByLink,
+  listChannelMembers,
+  myPowerIn,
+  setMemberPower,
+  kickFromSpace,
+  type ChannelMember,
   updateSpace,
   updateRoom,
   leaveAndForget,
@@ -365,6 +370,55 @@ async function copyWsJoinLink() {
     wsLinkCopied.value = true
     setTimeout(() => { wsLinkCopied.value = false }, 1500)
   } catch { toast('复制失败', '请手动复制链接') }
+}
+
+// ── 社区服务器：成员列表 + 角色管理 ──
+const memberMgrOpen = ref(false)
+const serverMembers = ref<ChannelMember[]>([])
+const myServerPower = ref(0)          // 我在这个服务器的 power（决定能做什么）
+const memberMgrBusy = ref('')          // 正在操作的 user id（禁用该行按钮）
+function reloadServerMembers() {
+  if (!activeSpace.value) return
+  serverMembers.value = listChannelMembers(activeSpace.value).filter((m) => !m.pending || myServerPower.value >= 50)
+  myServerPower.value = myPowerIn(activeSpace.value)
+}
+function openServerMembers() {
+  if (!activeSpace.value) return
+  myServerPower.value = myPowerIn(activeSpace.value)
+  reloadServerMembers()
+  wsSetOpen.value = false
+  memberMgrOpen.value = true
+}
+// 我能不能管理某成员：我≥50、且对方 power 比我低、且不是我自己/bot
+function canManage(m: ChannelMember): boolean {
+  return myServerPower.value >= 50 && m.power < myServerPower.value && m.id !== me.value && !m.isBot
+}
+async function setMemberRole(m: ChannelMember, power: number) {
+  if (!activeSpace.value || memberMgrBusy.value) return
+  memberMgrBusy.value = m.id
+  try {
+    await setMemberPower(activeSpace.value, m.id, power)
+    toast('已更新', `${m.name} → ${power >= 50 ? '管理员' : '成员'}`)
+    setTimeout(reloadServerMembers, 500)
+  } catch (e: any) {
+    toast('操作失败', e?.message || '可能权限不足')
+  } finally {
+    memberMgrBusy.value = ''
+  }
+}
+async function removeServerMember(m: ChannelMember) {
+  if (!activeSpace.value || memberMgrBusy.value) return
+  if (!confirm(`把「${m.name}」移出这个服务器（含其下频道）？`)) return
+  memberMgrBusy.value = m.id
+  try {
+    await kickFromSpace(activeSpace.value, m.id)
+    toast('已移出', m.name)
+    setTimeout(reloadServerMembers, 500)
+  } catch (e: any) {
+    toast('移出失败', e?.message || '可能权限不足')
+  } finally {
+    memberMgrBusy.value = ''
+  }
 }
 async function onPickWsImage(e: Event) {
   const file = (e.target as HTMLInputElement).files?.[0]
@@ -2098,6 +2152,7 @@ onBeforeUnmount(() => {
             <input class="nw-input" :value="wsJoinLink" readonly @focus="($event.target as HTMLInputElement).select()" />
             <button class="nw-btn" @click="copyWsJoinLink">{{ wsLinkCopied ? '已复制 ✓' : '复制链接' }}</button>
           </div>
+          <button class="nw-btn ws-members-btn" @click="openServerMembers">👥 成员与角色管理</button>
         </div>
 
         <div class="nw-foot nw-foot-split">
@@ -2114,6 +2169,35 @@ onBeforeUnmount(() => {
             <button class="nw-btn" :disabled="wsSetBusy" @click="wsSetOpen = false">取消</button>
             <button class="nw-btn primary" :disabled="!wsSetName.trim() || wsSetBusy" @click="saveWsSettings">{{ wsSetBusy ? '保存中…' : '保存' }}</button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 社区服务器：成员与角色管理 -->
+    <div v-if="memberMgrOpen" class="nw-overlay" @click.self="memberMgrOpen = false">
+      <div class="nw-modal">
+        <div class="nw-title">成员与角色</div>
+        <div class="nw-sub">「{{ activeSpaceName }}」的成员（{{ serverMembers.length }} 人）· {{ myServerPower >= 100 ? '你是群主' : myServerPower >= 50 ? '你是管理员' : '你是成员' }}</div>
+        <div class="mmg-list">
+          <div v-for="m in serverMembers" :key="m.id" class="mmg-row">
+            <span class="mmg-ava" :class="{ bot: m.isBot }">
+              <img v-if="m.avatar" :src="m.avatar" alt="" /><template v-else>{{ initials(m.name) }}</template>
+            </span>
+            <div class="mmg-info">
+              <div class="mmg-name">{{ m.name }}<span v-if="m.id === me" class="mmg-you">你</span></div>
+              <div class="mmg-role" :class="m.role">{{ m.isBot ? '主 AI' : m.roleLabel }}{{ m.pending ? ' · 待接受' : '' }}</div>
+            </div>
+            <div class="mmg-ops" v-if="canManage(m)">
+              <button v-if="myServerPower >= 100 && m.power < 50" class="nw-btn sm" :disabled="memberMgrBusy === m.id" @click="setMemberRole(m, 50)">设为管理员</button>
+              <button v-if="myServerPower >= 100 && m.power >= 50" class="nw-btn sm" :disabled="memberMgrBusy === m.id" @click="setMemberRole(m, 0)">取消管理员</button>
+              <button class="nw-btn sm danger-outline" :disabled="memberMgrBusy === m.id" @click="removeServerMember(m)">移出</button>
+            </div>
+          </div>
+          <p v-if="!serverMembers.length" class="mmg-empty">还没有成员</p>
+        </div>
+        <div class="nw-foot">
+          <button class="nw-btn" @click="reloadServerMembers">刷新</button>
+          <button class="nw-btn primary" @click="memberMgrOpen = false">完成</button>
         </div>
       </div>
     </div>
@@ -2819,6 +2903,22 @@ onBeforeUnmount(() => {
 .ws-join-link { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
 .ws-join-link .nw-input { flex: 1; min-width: 0; font-size: 12px; font-family: ui-monospace, Menlo, monospace; }
 .ws-join-link .nw-btn { flex-shrink: 0; white-space: nowrap; }
+.ws-members-btn { width: 100%; margin-top: 12px; }
+/* 成员与角色管理列表 */
+.mmg-list { max-height: 44vh; overflow-y: auto; margin: 6px 0 4px; }
+.mmg-row { display: flex; align-items: center; gap: 10px; padding: 8px 2px; border-bottom: 1px solid var(--border); }
+.mmg-ava { flex-shrink: 0; width: 32px; height: 32px; border-radius: 50%; overflow: hidden; background: var(--accent); color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; }
+.mmg-ava img { width: 100%; height: 100%; object-fit: cover; }
+.mmg-ava.bot { background: #4a7a8c; }
+.mmg-info { flex: 1; min-width: 0; }
+.mmg-name { font-size: 14px; color: var(--text); font-weight: 500; }
+.mmg-you { font-size: 11px; color: var(--text-3); background: var(--accent-soft); border-radius: 4px; padding: 0 4px; margin-left: 6px; }
+.mmg-role { font-size: 12px; color: var(--text-3); margin-top: 1px; }
+.mmg-role.owner { color: #b58932; }
+.mmg-role.admin { color: #3a7a3a; }
+.mmg-ops { display: flex; gap: 6px; flex-shrink: 0; }
+.nw-btn.sm { padding: 4px 10px; font-size: 12px; }
+.mmg-empty { text-align: center; color: var(--text-3); padding: 20px; font-size: 13px; }
 .nw-note { margin-top: 14px; background: var(--accent-soft); border: 1px solid #f4e0bd; border-radius: 10px; padding: 10px 12px; font-size: 12px; line-height: 1.6; color: var(--text-2); }
 .nw-mem-list { max-height: 200px; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; }
 .nw-mem { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border-soft); }
