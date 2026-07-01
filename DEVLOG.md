@@ -7,6 +7,20 @@
 
 ---
 
+## 2026-07-01 — 工作区→社区服务器 P1：开放加入 + 可分享邀请链接
+- 负责人定:工作区(左侧服务器栏 制作/运营/明星…)要做成"真社区"——外人凭链接就能加入(像 Discord)。
+  底层无需重建:工作区本就是 Matrix Space = Discord 服务器;只加"社区"功能。
+- P1(纯前端,用 Matrix state event + joinRoom):
+  - `setSpaceOpenJoin(spaceId, open)`:把 Space 的 join_rules 设 public/invite,并同步其下频道(否则加入
+    服务器却进不去频道);`spaceJoinRule` 读当前;`spaceJoinLink` 生成 `/#/join/:space` 链接;
+    `joinSpaceByLink` 加入 Space + 轮询其子频道逐个 join(Matrix 加入 Space 不自动进子频道)。
+  - 工作区设置弹窗加「🌐开放加入」开关 + 邀请链接复制框(仅开放时显示)。
+  - 路由 `/join/:space`:已登录点开→直接加入并切过去;未登录→记下 pendingJoinSpace,登录/注册
+    (afterLogin/doRegister)后自动加入。冷启动/会话内(applyFromRoute)都覆盖。
+- 权限:开放加入需在该 Space 有改 join_rules 权限(创建者天然有)。关闭=恢复仅邀请(老成员留存)。
+- 验证:build + preview 无 console 报错。纯前端→只发 dist。
+- P2 待做(按需):成员列表/角色管理、链接有效期/吊销、公开发现页。
+
 ## 2026-07-01 — 内置预置 AI Agent 库(拆任务/专班开箱即有"AI 班底")
 - 痛点:拆任务"分配到人"依赖能力名册有数据;真人只能客户自己加、平台预置不了 → 新租户名册空、
   拆出来全是 none、显得不智能。决策:**平台预置一队通用 AI Agent**(代码内置、通用创作/运营方向)。

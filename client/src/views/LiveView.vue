@@ -41,6 +41,10 @@ import {
   createSpace,
   createChannelInSpace,
   linkRoomToSpace,
+  spaceJoinRule,
+  setSpaceOpenJoin,
+  spaceJoinLink,
+  joinSpaceByLink,
   updateSpace,
   updateRoom,
   leaveAndForget,
@@ -324,6 +328,11 @@ const wsSetAvatarChange = ref<string | undefined>(undefined)
 const wsSetAvatarPreview = ref('')
 const wsUploading = ref(false)
 const wsFileInput = ref<HTMLInputElement>()
+// 社区服务器：开放加入 + 邀请链接
+const wsOpenJoin = ref(false)          // 当前工作区是否"开放加入"(join_rule=public)
+const wsJoinBusy = ref(false)
+const wsLinkCopied = ref(false)
+const wsJoinLink = computed(() => activeSpace.value ? spaceJoinLink(activeSpace.value) : '')
 function openWsSettings() {
   if (!activeSpace.value) return
   const s = spaces.value.find((x) => x.id === activeSpace.value)
@@ -332,7 +341,30 @@ function openWsSettings() {
   wsSetAvatarChange.value = undefined
   wsSetAvatarPreview.value = s?.avatarUrl || ''
   wsDeleteArm.value = false
+  wsOpenJoin.value = spaceJoinRule(activeSpace.value) === 'public'
+  wsLinkCopied.value = false
   wsSetOpen.value = true
+}
+async function toggleWsOpenJoin() {
+  if (!activeSpace.value || wsJoinBusy.value) return
+  const next = !wsOpenJoin.value
+  wsJoinBusy.value = true
+  try {
+    await setSpaceOpenJoin(activeSpace.value, next)
+    wsOpenJoin.value = next
+    toast(next ? '已开放加入' : '已关闭加入', next ? '任何人凭邀请链接都能加入' : '恢复仅邀请')
+  } catch (e: any) {
+    toast('操作失败', e?.message || '可能没有权限')
+  } finally {
+    wsJoinBusy.value = false
+  }
+}
+async function copyWsJoinLink() {
+  try {
+    await navigator.clipboard.writeText(wsJoinLink.value)
+    wsLinkCopied.value = true
+    setTimeout(() => { wsLinkCopied.value = false }, 1500)
+  } catch { toast('复制失败', '请手动复制链接') }
 }
 async function onPickWsImage(e: Event) {
   const file = (e.target as HTMLInputElement).files?.[0]
@@ -755,6 +787,28 @@ async function afterLogin(uid: string) {
   isServerAdmin().then((ok) => { isAdmin.value = ok }).catch(() => { isAdmin.value = false })
   loadStats() // 数据看板真实指标（best-effort）
   refresh()
+  // 若是从"社区服务器邀请链接"进来的，登录后执行加入
+  if (pendingJoinSpace) { const sid = pendingJoinSpace; pendingJoinSpace = ''; doJoinSpace(sid) }
+}
+
+// ── 社区服务器：凭邀请链接加入 ──
+let pendingJoinSpace = ''            // 未登录时先记下要加入的 Space，登录后再执行
+const joinAttempted = new Set<string>()  // 防同一链接重复加入
+async function doJoinSpace(spaceId: string) {
+  if (!spaceId || joinAttempted.has(spaceId)) return
+  joinAttempted.add(spaceId)
+  toast('加入中…', '正在加入社区服务器')
+  const ok = await joinSpaceByLink(spaceId)
+  if (!ok) {
+    toast('加入失败', '这个服务器可能未开放加入或链接失效')
+    router.replace('/').catch(() => {})
+    return
+  }
+  setTimeout(() => {
+    refresh()
+    selectSpace(spaceId)   // 切到刚加入的服务器
+    toast('已加入 🎉', '欢迎加入')
+  }, 800)
 }
 
 async function doLogin() {
@@ -1119,6 +1173,14 @@ function computePath(): string {
 
 /** 按当前地址还原内部导航状态（后退/前进/深链/刷新时调用） */
 function applyFromRoute() {
+  // 社区服务器邀请链接 /join/:space（会话内点开/粘贴）：已登录直接加入，未登录先记下。
+  const jm = route.path.match(/^\/join\/(.+)$/)
+  if (jm) {
+    const sid = decodeURIComponent(jm[1])
+    if (loggedIn.value) doJoinSpace(sid)
+    else pendingJoinSpace = sid
+    return
+  }
   applyingFromRoute = true
   try {
     const p = route.path
@@ -1169,6 +1231,9 @@ onMounted(async () => {
   document.addEventListener('click', onDocClick)
   hideRightPanel()  // 「关于此频道」面板在真实客户端默认收起，由频道头 ℹ 按钮开关
   loading.value = true
+  // 冷启动若是 /join/:space 邀请链接：先记下目标，登录/恢复会话后 afterLogin 里执行加入。
+  const jm = route.path.match(/^\/join\/(.+)$/)
+  if (jm) pendingJoinSpace = decodeURIComponent(jm[1])
   try {
     const uid = await restoreSession()
     if (uid) await afterLogin(uid)
@@ -2018,6 +2083,23 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
+        <!-- 社区服务器：开放加入 + 邀请链接（像 Discord 那样发链接拉人进来）-->
+        <div class="ws-join">
+          <div class="ws-join-row">
+            <div>
+              <div class="ws-join-title">🌐 开放加入（社区服务器）</div>
+              <div class="ws-join-sub">开启后，任何人凭下面的邀请链接就能加入这个服务器及其频道</div>
+            </div>
+            <button class="ws-toggle" :class="{ on: wsOpenJoin }" :disabled="wsJoinBusy" @click="toggleWsOpenJoin">
+              <span class="ws-toggle-dot" />
+            </button>
+          </div>
+          <div v-if="wsOpenJoin" class="ws-join-link">
+            <input class="nw-input" :value="wsJoinLink" readonly @focus="($event.target as HTMLInputElement).select()" />
+            <button class="nw-btn" @click="copyWsJoinLink">{{ wsLinkCopied ? '已复制 ✓' : '复制链接' }}</button>
+          </div>
+        </div>
+
         <div class="nw-foot nw-foot-split">
           <!-- 左：删除工作区（红色按钮 → 点一下变二次确认）-->
           <div class="nw-foot-left">
@@ -2724,6 +2806,18 @@ onBeforeUnmount(() => {
 .nw-check { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; color: var(--text-2); cursor: pointer; }
 .nw-check input { width: 15px; height: 15px; accent-color: var(--accent); }
 .nw-warn { color: var(--warn); }
+/* 社区服务器：开放加入 + 邀请链接 */
+.ws-join { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 14px; }
+.ws-join-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ws-join-title { font-size: 13px; font-weight: 600; color: var(--text); }
+.ws-join-sub { font-size: 12px; color: var(--text-3); margin-top: 2px; max-width: 340px; }
+.ws-toggle { flex-shrink: 0; width: 42px; height: 24px; border-radius: 999px; border: none; background: var(--border); cursor: pointer; position: relative; transition: background .15s; }
+.ws-toggle.on { background: #3a7a3a; }
+.ws-toggle:disabled { opacity: .6; cursor: default; }
+.ws-toggle-dot { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: left .15s; }
+.ws-toggle.on .ws-toggle-dot { left: 21px; }
+.ws-join-link { display: flex; gap: 8px; margin-top: 10px; }
+.ws-join-link .nw-input { font-size: 12px; font-family: ui-monospace, Menlo, monospace; }
 .nw-note { margin-top: 14px; background: var(--accent-soft); border: 1px solid #f4e0bd; border-radius: 10px; padding: 10px 12px; font-size: 12px; line-height: 1.6; color: var(--text-2); }
 .nw-mem-list { max-height: 200px; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; }
 .nw-mem { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border-soft); }

@@ -19,6 +19,8 @@ const routes: RouteRecordRaw[] = [
   { path: '/s/:space/tasks',    component: Blank },
   { path: '/s/:space/docs',     component: Blank },
   { path: '/s/:space/c/:room',  component: Blank },
+  { path: '/join/:space',       component: Blank }, // 社区服务器邀请链接：点开→加入该工作区
+
   { path: '/live',      name: 'live',      component: LiveView },
   { path: '/',          name: 'dashboard', component: Blank },
   { path: '/:pathMatch(.*)*', redirect: { name: 'dashboard' } }

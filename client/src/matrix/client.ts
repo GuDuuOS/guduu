@@ -390,6 +390,54 @@ export async function createSpace(
   return sid
 }
 
+/** 读某工作区(Space)的加入规则：'public'(开放加入·社区) / 'invite'(仅邀请) / 其它。默认 invite。 */
+export function spaceJoinRule(spaceId: string): string {
+  const room = mx?.getRoom(spaceId)
+  const ev = room?.currentState?.getStateEvents?.('m.room.join_rules', '')
+  return ev?.getContent?.()?.join_rule || 'invite'
+}
+
+/** 开放/关闭某工作区「任何人凭链接加入」(社区服务器)。开放时同步把其下频道也设为可加入，
+ *  否则加入了服务器却进不去频道。需要在该 Space 有改 join_rules 的权限(创建者天然有)。 */
+export async function setSpaceOpenJoin(spaceId: string, open: boolean): Promise<void> {
+  if (!mx) throw new Error('未登录')
+  const rule = open ? 'public' : 'invite'
+  await (mx as any).sendStateEvent(spaceId, 'm.room.join_rules', { join_rule: rule }, '')
+  for (const cid of roomIdsInSpace(spaceId)) {
+    try {
+      await (mx as any).sendStateEvent(cid, 'm.room.join_rules', { join_rule: rule }, '')
+    } catch { /* 某频道无权/失败跳过，不影响 Space 本身开放 */ }
+  }
+}
+
+/** 生成某工作区的可分享邀请链接（别人点开→加入这个社区服务器）。用 hash 路由 /join/:space。 */
+export function spaceJoinLink(spaceId: string): string {
+  return `${location.origin}/#/join/${encodeURIComponent(spaceId)}`
+}
+
+/** 凭链接加入一个工作区(社区服务器)：加入 Space 本身 + 其下各频道。返回是否加入成功。
+ *  注意：Matrix 里加入 Space 不会自动加入子频道，要逐个 join（频道需已设为可加入）。 */
+export async function joinSpaceByLink(spaceId: string): Promise<boolean> {
+  if (!mx || !spaceId) return false
+  try {
+    await mx.joinRoom(spaceId)
+  } catch {
+    return false  // Space 非公开/不可加入 → 失败
+  }
+  // 加入 Space 后，其子频道列表(m.space.child)可能要等 sync；轮询几次再逐个 join。
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const children = [...roomIdsInSpace(spaceId)]
+    if (children.length) {
+      for (const cid of children) {
+        try { await mx.joinRoom(cid) } catch { /* 某频道进不了不影响整体 */ }
+      }
+      break
+    }
+    await new Promise((r) => setTimeout(r, 600))
+  }
+  return true
+}
+
 /** 退出并遗忘一个房间/工作区（leave + forget）。用于"删除工作区/频道"（客户端能做的是退出）。 */
 export async function leaveAndForget(roomId: string): Promise<void> {
   if (!mx) throw new Error('未登录')
