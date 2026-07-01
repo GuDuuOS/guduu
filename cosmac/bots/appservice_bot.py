@@ -3137,13 +3137,30 @@ class _Handler(BaseHTTPRequestHandler):
     def _client_ip(self) -> str:
         """取请求方真实 IP（公开注册/登录端点限频用）。
 
-        线上 nginx 反代，真实 IP 在 X-Forwarded-For 第一段；取链头（最靠近客户端的那个）。
-        直连无该头时回退到 TCP 对端地址。注意：X-Forwarded-For 可被伪造，但本机服务只经我们
-        自己的反代暴露，反代会重写该头——单实例「够用即止」口径下可接受。
+        安全要点（直接决定 IP 限频能不能被绕过）：限频按 IP 计数，所以「取哪个 IP」必须取
+        客户端**伪造不了**的那个。
+        ⚠️ 绝不能信 X-Forwarded-For 的**首段**——XFF 是普通请求头，客户端能随便塞；nginx 用
+        `$proxy_add_x_forwarded_for` 时会把客户端自带的 XFF 原样保留在**前面**、把真实 IP 追加在
+        **末尾**。所以首段恰恰最不可信：攻击者每次换一个伪造值，就能让限频器把每个请求都当成
+        「新 IP」，绕过全部按 IP 的限频（原实现取首段，正是这个漏洞）。
+
+        取值优先级（最可信 → 兜底）：
+          1) X-Real-IP：nginx `proxy_set_header X-Real-IP $remote_addr;` 注入的**单值**，等于
+             nginx 看到的直连源地址，客户端伪造无效 → **首选**（前提：反代 /cosmac/auth/ 的
+             location 配了这行，见 DEPLOY.md）。
+          2) X-Forwarded-For 的**最后一段**：最靠近服务端、由可信反代追加的那一跳；仅在没配
+             X-Real-IP 时兜底（只有一段时它既是客户端也是唯一可用值）。
+          3) TCP 对端地址：完全没过反代（本地直连）时用它。
         """
+        real = (self.headers.get("X-Real-IP", "") or "").strip()
+        if real:
+            return real
         xff = self.headers.get("X-Forwarded-For", "")
         if xff:
-            return xff.split(",")[0].strip()
+            # 取**最后一段**（可信跳），而非首段（客户端可伪造）
+            parts = [p.strip() for p in xff.split(",") if p.strip()]
+            if parts:
+                return parts[-1]
         try:
             return self.client_address[0]
         except Exception:

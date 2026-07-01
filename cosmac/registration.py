@@ -392,42 +392,66 @@ def verify_and_register(
     if not ok:
         return 400, {"error": msg}
 
-    # 方案A：一邮一号。验码通过后、建号前，先查邮箱是否已被注册。
-    # 放在验码之后（而非之前）：未持有邮箱的人无法借此探测"某邮箱是否已注册"（防枚举）；
-    # 验码通过=本人，此时告知"已注册"是合理的——引导去登录/找回密码，而不是又建一个
-    # 无法用邮箱登录/找回的孤儿号（历史 bug：同邮箱能注册多个账号，映射只指向最后一个）。
-    if _lookup_username(email):
+    # 一邮一号：验码通过后、**建号前先占位**。
+    # 靠 cosmac DB 的邮箱唯一约束原子占位，堵死"先查后建"的 TOCTOU 并发窗口；占位放在建号
+    # **之前**，邮箱已被占就直接 409、**根本不建号**——从根上杜绝"同邮箱建出多个账号、映射
+    # 只留最后一个"的历史 bug（那正是找回密码只能重置其中一个的病根）。
+    # 放在验码之后：未持邮箱的人无法借 409 探测"某邮箱是否已注册"（防枚举）；验码通过=本人，
+    # 此时告知"已注册"并引导去登录/找回，是合理的。
+    claim = _claim_email(email, username)
+    if claim is False:
         return 409, {"error": "该邮箱已注册，请直接登录或找回密码"}
+    if claim is None:
+        # cosmac DB 异常：它与 Synapse 同一套 Postgres，它不可用时建号本也走不通，故 fail-closed
+        # ——宁可挡下这次注册，也不在拿不到唯一约束保证时冒险破坏一邮一号。
+        return 503, {"error": "注册服务暂不可用，请稍后重试"}
 
     status, payload = _synapse_register(hs_url, username, password)
-    # 建号成功 → 登记「邮箱→用户名」映射，供以后找回密码/邮箱登录按邮箱定位账号。
-    # 账号此刻已在 Synapse 建好、无法回滚，所以映射失败不阻断注册；但它失败意味着该用户
-    # **以后无法用邮箱登录或找回密码**（二者都依赖此映射），属隐性损坏 → 提到 error 级 + 重试一次。
-    if status == 200:
-        if not _try_set_email(email, username):
-            logger.error(
-                "注册成功但邮箱映射写入失败 email=%s username=%s："
-                "该用户将无法用邮箱登录/找回密码，需人工补登记",
-                email, username,
-            )
-    # 建号失败时不还原码（已一次性作废）——让用户重新走流程，避免码被复用
+    if status != 200:
+        # 占位成功但建号失败 → 回滚占位，别让邮箱被一次失败注册永久占死（否则本人以后也注册不了）。
+        _release_email(email, username)
+    # 建号失败时不还原验证码（已一次性作废）——让用户重新走流程，避免码被复用。
     return status, payload
 
 
-def _try_set_email(email: str, username: str, attempts: int = 2) -> bool:
-    """尽力把「邮箱→用户名」映射写库；成功返回 True。重试 attempts 次抵御瞬时 DB 抖动。"""
-    for i in range(attempts):
+def _claim_email(email: str, username: str) -> Optional[bool]:
+    """一邮一号「占位」：把 email→username 写进映射表。建号**之前**调用。
+
+    返回：
+      · ``True``  —— 邮箱原本空闲，占位成功（可以去建号了）。
+      · ``False`` —— 邮箱已被占（绑本账号=幂等，或绑别的账号=拒绝改绑，或并发撞唯一约束）；
+                     调用方据此回 409「已注册」。
+      · ``None``  —— cosmac DB 异常，拿不到唯一约束保证；调用方应 fail-closed（回 503）。
+    """
+    from sqlalchemy.exc import IntegrityError
+    try:
+        from cosmac.db import session_scope
+        from cosmac.db.email_repo import EmailAlreadyBound, set_email
         try:
-            from cosmac.db import session_scope
-            from cosmac.db.email_repo import set_email
             with session_scope() as s:
-                set_email(s, email=email, username=username)
-            return True
-        except Exception:
-            logger.warning(
-                "登记邮箱→用户名映射失败（第 %d/%d 次）", i + 1, attempts, exc_info=True
-            )
-    return False
+                # set_email：True=新占位；False=已绑同账号（幂等）；抛 EmailAlreadyBound=已绑别的账号。
+                return bool(set_email(s, email=email, username=username))
+        except EmailAlreadyBound:
+            return False
+    except IntegrityError:
+        # 并发下别人抢先占了同一邮箱，提交时撞唯一约束 → 视为"已被占"。
+        return False
+    except Exception:
+        logger.warning("占位邮箱映射失败（cosmac DB 不可用？）email=%s", email, exc_info=True)
+        return None
+
+
+def _release_email(email: str, username: str) -> None:
+    """回滚占位：删掉 email→username 映射（仅当当前确实绑的是它）。尽力而为，失败仅告警不抛。"""
+    try:
+        from cosmac.db import session_scope
+        from cosmac.db.email_repo import clear_email
+        with session_scope() as s:
+            clear_email(s, email=email, username=username)
+    except Exception:
+        logger.warning(
+            "回滚邮箱占位失败 email=%s（可能残留一条映射，不影响账号）", email, exc_info=True
+        )
 
 
 def _lookup_username(email: str) -> Optional[str]:

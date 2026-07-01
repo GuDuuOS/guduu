@@ -22,6 +22,11 @@ class RegistrationTest(unittest.TestCase):
         # 建号成功桩：回 200 + 假 user_id
         reg._synapse_register = lambda hs, u, p: (  # type: ignore
             200, {"user_id": f"@{u}:test", "access_token": "tok"})
+        # 隔离 DB：一邮一号「占位」默认成功（邮箱空闲=True），回滚为空操作——不碰真实 SQLite，
+        # 保证单测幂等可重复跑（否则第一次注册占位写库后，第二次跑套件会被占位拦成 409）。
+        reg._lookup_username = lambda email: None  # type: ignore
+        reg._claim_email = lambda email, username: True  # type: ignore
+        reg._release_email = lambda email, username: None  # type: ignore
 
     def _last_code(self) -> str:
         return self._sent[-1][1]
@@ -74,6 +79,42 @@ class RegistrationTest(unittest.TestCase):
             "a@b.com", self._last_code(), "Alice Space", "Test1234!", hs_url="http://hs")
         self.assertEqual(st, 400)
         self.assertIn("用户名", payload["error"])
+
+    def test_duplicate_email_rejected(self) -> None:
+        # 邮箱已被占（占位返回 False）→ 409，且**不应去建号**（claim-first 的核心）。
+        reg._claim_email = lambda email, username: False  # type: ignore
+        called = []
+        reg._synapse_register = lambda hs, u, p: called.append(1) or (200, {})  # type: ignore
+        reg.request_code("a@b.com")
+        st, payload = reg.verify_and_register(
+            "a@b.com", self._last_code(), "alice", "Test1234!", hs_url="http://hs")
+        self.assertEqual(st, 409)
+        self.assertIn("已注册", payload["error"])
+        self.assertEqual(called, [])  # 占位失败就不该建号
+
+    def test_db_error_fails_closed(self) -> None:
+        # 占位时 cosmac DB 异常（None）→ 503，且不建号（fail-closed，绝不冒险破坏一邮一号）。
+        reg._claim_email = lambda email, username: None  # type: ignore
+        called = []
+        reg._synapse_register = lambda hs, u, p: called.append(1) or (200, {})  # type: ignore
+        reg.request_code("a@b.com")
+        st, _ = reg.verify_and_register(
+            "a@b.com", self._last_code(), "alice", "Test1234!", hs_url="http://hs")
+        self.assertEqual(st, 503)
+        self.assertEqual(called, [])
+
+    def test_rollback_on_register_failure(self) -> None:
+        # 占位成功但建号失败 → 回滚占位（_release_email 被调用），返回建号的错误码。
+        reg._claim_email = lambda email, username: True  # type: ignore
+        released = []
+        reg._release_email = (  # type: ignore
+            lambda email, username: released.append((email, username)))
+        reg._synapse_register = lambda hs, u, p: (500, {"error": "boom"})  # type: ignore
+        reg.request_code("a@b.com")
+        st, _ = reg.verify_and_register(
+            "a@b.com", self._last_code(), "alice", "Test1234!", hs_url="http://hs")
+        self.assertEqual(st, 500)
+        self.assertEqual(released, [("a@b.com", "alice")])
 
 
 class PasswordResetTest(unittest.TestCase):

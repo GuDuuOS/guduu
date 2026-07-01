@@ -7,6 +7,27 @@
 
 ---
 
+## 2026-07-01 — 修复注册/登录两处安全问题（IP 限频可绕过 + 一邮一号没兜住）
+- 问题一「IP 限频能被绕过」：`_Handler._client_ip()` 原来取 `X-Forwarded-For` **首段**——XFF 是
+  普通请求头、客户端能随便塞，nginx 用 `$proxy_add_x_forwarded_for` 会把客户端伪造值保留在前、
+  真实 IP 追加在末尾，所以首段最不可信；攻击者每次换个假 IP 就能让限频器把每个请求当"新 IP"、
+  绕过全部按 IP 的发码/验码/登录限频。**修法**：优先信 nginx 注入的 `X-Real-IP`（客户端伪造不了）
+  → 其次取 XFF **最后一段**（可信跳）→ 兜底 socket 地址。⚠️ 上线前确认服务器 nginx 反代
+  `/cosmac/auth/` 配了 `proxy_set_header X-Real-IP $remote_addr;`（没配也能靠"取 XFF 末段"兜底，
+  前提是反代把真实 IP append 到了 XFF）。
+- 问题二「同邮箱多账号只重置部分」：根因是注册"先查后建"有 TOCTOU 竞态、且映射写库是**覆盖**语义
+  → 历史上同邮箱能建出多个 Synapse 账号、映射只留最后一个 → 找回密码只重置得到那一个。负责人拍板
+  **坚持一邮一号（方案A）**、不做绑定/解绑系统。**修法**：`verify_and_register` 改成 **claim-first**
+  ——验码通过后、建号**之前**先占位（`_claim_email` 靠邮箱唯一约束原子占位），邮箱已被占直接 409、
+  **根本不建号**；建号失败再 `_release_email` 回滚占位。`email_repo.set_email` 从"覆盖"改成**拒绝改绑**
+  （已绑别的账号抛 `EmailAlreadyBound`，绝不挤走先注册的），新增 `clear_email`。cosmac DB 异常时
+  fail-closed 回 503（该 DB 与 Synapse 同实例，它挂了注册本就走不通）。
+- 关键决策：注册撞邮箱的 409 仍放在**验码之后**（防邮箱枚举，不变）；存量历史多号无法自动反查清理
+  （老账号没绑 3pid、映射表没记），个别人工处理，本次只保证"从现在起不再产生"。
+- 测试：`test_email_repo.py`(拒绝改绑/幂等/新建/回滚) + `test_registration.py` 新增(撞库 409/DB 异常 503/
+  建号失败回滚) + 新 `test_client_ip.py`(伪造 XFF 首段不污染取值)。全量 329 测试通过、ruff 通过。
+- **纯后端改动，无需部署**（没动 `client/`）；生效于 bot 进程重启。
+
 ## 2026-07-01 — 主AI放大态改造成「多会话」界面(参考 Claude)
 - 需求：主 AI 放大后要像 Claude——左侧 Recents 历史会话列表 + New session 新建会话；负责人拍板
   「三栏·保留特色」：左 Recents / 中 当前对话 / 右 任务进度+知识库(保留现有增值栏)。
