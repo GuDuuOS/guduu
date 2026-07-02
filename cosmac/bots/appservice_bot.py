@@ -129,7 +129,9 @@ class CosmacBot:
         # 功能门控：把工具调用也接进会员门控（"让 AI 帮我建群/跑工作流"与命令同一道闸）。
         self.toolbox.gate_check = self._tool_gate_check
         # 用量配额：可计量工具（建专班数/工作流次数）按 tier 限量（变现第二步）。
+        # check 只拦超额；consume 由工具在成功路径上调（先扣后执行会把失败也扣，审查 bug#7）。
         self.toolbox.quota_check = self._tool_quota_check
+        self.toolbox.quota_consume = self._tool_quota_consume
         # 知识库检索工具化：把 bot 的检索逻辑注入 Toolbox，让主 AI 能主动调 search_knowledge
         # 工具（在每轮盲塞 RAG 之外，模型还能用精准关键词多次深挖）。门控走 knowledge 闸。
         self.toolbox.kb_search = self._kb_search_for_tool
@@ -1282,6 +1284,15 @@ class CosmacBot:
                 if not self._gate_allows(sender, "create_room"):
                     self.client.send_text(room_id, self._gate_denied_text("create_room"))
                     return True
+                # 「建专班」命令与自然语言 assemble_team 工具是**同一动作**，必须过同一道
+                # 付费门控 + teams 配额——否则命令成了付费墙旁路（审查 bug#11）。
+                if not self._gate_allows(sender, "assemble_team"):
+                    self.client.send_text(room_id, self._gate_denied_text("assemble_team"))
+                    return True
+                over = self._rate_quota_blocked(sender, "teams", consume=False)
+                if over:
+                    self.client.send_text(room_id, over)
+                    return True
                 name = text[len(prefix):].strip(" :：") or "新专班"
                 self._launch_campaign(room_id, sender, name)
                 return True
@@ -2218,7 +2229,9 @@ class CosmacBot:
             return 401, {"error": "登录已失效，请重新登录"}
         rec = self.members.get_record(user_id)
         tier = active_tier(rec)
-        exp = int(rec.get("expires_ts") or 0) if rec else 0
+        # 已过期回落 free 时，不再返回旧 expires_ts——否则前端显示"免费会员，到期 <过去日期>"
+        # 这种自相矛盾的组合（审查 bug#13）。
+        exp = int(rec.get("expires_ts") or 0) if (rec and tier != "free") else 0
         return 200, {"tier": tier, "tier_label": tier_label(tier), "expires_ts": exp}
 
     def handle_register_request_code(
@@ -2819,9 +2832,13 @@ class CosmacBot:
         except Exception:
             return -1  # 读不到配额配置：宁可放行，不锁死
 
-    def _rate_quota_blocked(self, user_id: str, metric: str) -> Optional[str]:
-        """rate 类配额（按天/月）检查 + 消费：超额返回升级提示文案，否则计数 +1 返回 None。
+    def _rate_quota_blocked(
+        self, user_id: str, metric: str, consume: bool = True
+    ) -> Optional[str]:
+        """配额检查（可选消费）：超额返回升级提示文案，否则返回 None。
 
+        consume=True 才计数 +1；工具路径传 False（只拦不扣），由工具在**成功路径**上另调
+        _tool_quota_consume 扣数——避免"先扣后执行、失败也扣"（审查 bug#7）。
         DB 不可用一律放行（不因计数挂了就把人挡在门外）。管理员/不限额直接放行不计数。
         """
         limit = self._quota_limit(user_id, metric)
@@ -2845,7 +2862,8 @@ class CosmacBot:
                         f"你{span}的「{label}」额度已用完（{used}/{limit}）。"
                         "升级会员可解锁更多 —— 私聊发「会员」查看，或在「升级会员」里订阅。"
                     )
-                incr(s, user_id, metric, pkey)
+                if consume:
+                    incr(s, user_id, metric, pkey)
         except Exception:
             logger.debug("配额计数失败（放行）：metric=%s", metric, exc_info=True)
         return None
@@ -2866,11 +2884,37 @@ class CosmacBot:
     }
 
     def _tool_quota_check(self, sender: str, tool_name: str) -> Optional[str]:
-        """工具配额钩子（注入 Toolbox.quota_check）：超额返回升级提示，否则计数后放行。"""
+        """工具配额钩子（注入 Toolbox.quota_check）：超额返回升级提示。**只查不扣**——
+        计数由工具在成功路径上调 quota_consume（审查 bug#7：失败/纯列表查询不该扣）。"""
         metric = self._TOOL_QUOTA_MAP.get(tool_name)
         if not metric:
             return None
-        return self._rate_quota_blocked(sender, metric)
+        return self._rate_quota_blocked(sender, metric, consume=False)
+
+    def _tool_quota_consume(self, sender: str, tool_name: str) -> None:
+        """工具配额**消费**钩子（注入 Toolbox.quota_consume）：计数 +1，绝不抛异常。
+
+        与 _tool_quota_check 配对：check 在执行前拦超额，consume 在工具**做成事**后扣。
+        检查与消费之间有并发窗口（可能偶发超放 1 次）——与配额计数既有的"够用即止"口径一致。
+        """
+        metric = self._TOOL_QUOTA_MAP.get(tool_name)
+        if not metric:
+            return
+        try:
+            from cosmac.quotas import metric_meta
+
+            from cosmac.db import session_scope
+            from cosmac.db.quota_repo import incr, period_key
+
+            limit = self._quota_limit(sender, metric)
+            if limit < 0:
+                return  # 管理员/不限额：check 时没拦，也无需计数
+            meta = metric_meta(metric) or {}
+            pkey = period_key(str(meta.get("period") or "day"))
+            with session_scope() as s:
+                incr(s, sender, metric, pkey)
+        except Exception:
+            logger.debug("配额消费失败（忽略）：metric=%s", metric, exc_info=True)
 
     def _launch_campaign(self, origin_room: str, requester: str, name: str) -> None:
         """建一个专班群、拉发起人进来，并在群里发一张"派单"富卡。"""
@@ -2878,6 +2922,8 @@ class CosmacBot:
         if not new_room:
             self.client.send_text(origin_room, f"抱歉，建专班「{name}」失败了，请稍后再试。")
             return
+        # 专班房真建成才消费 teams 配额（与 assemble_team 工具同一本账，失败不扣）
+        self._tool_quota_consume(requester, "assemble_team")
 
         # 派单富卡：body 是纯文本兜底（Element 显示这个），card 是结构化数据（CosMac 客户端渲染）
         card = {

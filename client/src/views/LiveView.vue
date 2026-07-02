@@ -1402,7 +1402,8 @@ onMounted(async () => {
   try {
     const uid = await restoreSession()
     if (uid) await afterLogin(uid)
-    else router.push('/login')   // 无有效会话 → 回独立登录页(守卫兜底)
+    // 无有效会话 → 回登录页,带上当前地址;登录成功后 proceed() 送回原深链(审查 bug#12)
+    else router.push({ path: '/login', query: { redirect: route.fullPath } })
   } finally {
     loading.value = false
   }

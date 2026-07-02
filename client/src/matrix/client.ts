@@ -40,7 +40,7 @@ export interface ReactionAgg {
 }
 
 const SESSION_KEY = 'cosmac.session'
-const SYNC_PREPARED_TIMEOUT_MS = 15000
+const SYNC_PREPARED_TIMEOUT_MS = 60000  // 大账号初始同步可能很慢;15s 会误杀有效登录
 
 // 单例：整个前端共用一个登录后的 Matrix client
 let mx: MatrixClient | null = null
@@ -123,6 +123,10 @@ async function startFrom(opts: {
   userId: string
   deviceId?: string
 }): Promise<string> {
+  // 覆盖单例前先停掉旧客户端——否则旧账号的 client 留在内存里用旧 token 持续 /sync 永不停止,
+  // 每走一次"添加账号"往返就泄漏一个(双倍流量、线性累积,审查 bug#2)。stopClient 幂等。
+  try { mx?.stopClient() } catch { /* 未启动/已停,忽略 */ }
+  try { (mx as any)?.removeAllListeners?.() } catch { /* ignore */ }
   mx = createClient({
     baseUrl: opts.baseUrl,
     accessToken: opts.accessToken,
@@ -139,9 +143,11 @@ async function startFrom(opts: {
         if (timer !== null) window.clearTimeout(timer)
         client.off?.('sync', handler)
       }
-      const fail = (reason: string) => {
+      const fail = (reason: string, errcode?: string) => {
         cleanup()
-        reject(new Error(reason))
+        const err: any = new Error(reason)
+        if (errcode) err.errcode = errcode   // 调用方据此区分"鉴权失效"和"瞬时网络错误"
+        reject(err)
       }
       const handler = (state: string, _prev?: string, data?: any) => {
         if (state === 'PREPARED') {
@@ -149,8 +155,17 @@ async function startFrom(opts: {
           resolve()
           return
         }
-        if (state === 'ERROR' || state === 'STOPPED') {
-          fail(data?.error?.message || `Matrix sync ${state}`)
+        if (state === 'STOPPED') {
+          fail('Matrix sync STOPPED')
+          return
+        }
+        if (state === 'ERROR') {
+          // 只有**确定的鉴权失效**才判死刑;其它 ERROR(网络抖动/5xx)SDK 会自动重试,
+          // 继续等 PREPARED 或超时——别把一次网络错当"会话失效"(审查 bug#1)。
+          const errcode = data?.error?.errcode || data?.error?.data?.errcode
+          if (errcode === 'M_UNKNOWN_TOKEN' || errcode === 'M_USER_DEACTIVATED') {
+            fail(`Matrix auth error: ${errcode}`, errcode)
+          }
         }
       }
       const currentState = client.getSyncState?.()
@@ -158,10 +173,8 @@ async function startFrom(opts: {
         cleanup()
         resolve()
       }
-      else if (currentState === 'ERROR' || currentState === 'STOPPED') {
-        fail(`Matrix sync ${currentState}`)
-      }
       else {
+        // ERROR/STOPPED 初始态也交给 handler 统一裁决(SDK 对 ERROR 会重试)
         timer = window.setTimeout(() => fail('Matrix sync timeout'), SYNC_PREPARED_TIMEOUT_MS)
         client.on('sync', handler)
       }
@@ -299,8 +312,12 @@ export async function restoreSession(): Promise<string | null> {
     // 看不到旧号、无法一键切回。upsert 幂等，同号覆盖、保留原显示名。
     if (uid) upsertAccount(s)
     return uid
-  } catch {
-    localStorage.removeItem(SESSION_KEY)
+  } catch (e: any) {
+    // 只有**确定的鉴权失效**(token 无效/账号停用)才删会话；网络抖动/初始同步超时等瞬时失败
+    // 必须保留会话——否则弱网刷新一次就把有效 token 删了、把人踢回登录页重输密码(审查 bug#1)。
+    if (e?.errcode === 'M_UNKNOWN_TOKEN' || e?.errcode === 'M_USER_DEACTIVATED') {
+      localStorage.removeItem(SESSION_KEY)
+    }
     return null
   }
 }
@@ -408,12 +425,32 @@ export function listRooms(): LiveRoom[] {
  */
 export async function acceptPendingInvites(): Promise<number> {
   if (!mx) return 0
+  const myId = (mx as any).getUserId?.() || ''
+  const myServer = myId.split(':').slice(1).join(':')   // @u:server → server
   let joined = 0
   const invited = mx.getRooms().filter((r: any) => {
     try { return r.getMyMembership?.() === 'invite' } catch { return false }
   })
   for (const r of invited) {
-    try { await mx.joinRoom(r.roomId); joined++ } catch { /* 单个进不去,跳过 */ }
+    // 只自动接受**本服务器用户**发来的邀请——联邦陌生人的邀请不自动进,否则垃圾邀请
+    // (invite spam)等于"强制入群"(审查 bug#10)。外来邀请留在 invite 态,不动。
+    let inviter = ''
+    try {
+      inviter = (r as any).currentState?.getStateEvents?.('m.room.member', myId)?.getSender?.() || ''
+    } catch { /* 读不到邀请人就不自动进 */ }
+    const inviterServer = inviter.split(':').slice(1).join(':')
+    if (!inviter || !myServer || inviterServer !== myServer) continue
+    try {
+      await mx.joinRoom(r.roomId)
+      joined++
+    } catch (e: any) {
+      // 永久性失败(403 无权/404 房间没了) → 直接拒掉邀请(leave),否则这条坏邀请每次登录
+      // 都重试一遍、永远打不进也永远清不掉(审查 bug#10)。瞬时错误(网络)保留下次再试。
+      const st = e?.httpStatus
+      if (st === 403 || st === 404) {
+        try { await (mx as any).leave(r.roomId) } catch { /* 拒不掉就留着 */ }
+      }
+    }
   }
   return joined
 }

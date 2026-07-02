@@ -355,13 +355,24 @@ def _synapse_register(hs_url: str, username: str, password: str) -> Tuple[int, D
         rr = requests.post(url, json=body, timeout=_HS_TIMEOUT)
         if rr.status_code == 200:
             return 200, rr.json()
-        # Synapse 把"用户名已占用"等错误放在 body.error
+        # Synapse 把"用户名已占用"等错误放在 body.errcode/error。
+        # ⚠️ 判定要用 **errcode**（M_USER_IN_USE）：Synapse 1.141 的文案是
+        # "User ID already taken."——既不含 "in use" 也不含 "exist"，只匹配文本会漏判、
+        # 把英文原文 400 直接怼给用户（审查 bug#5，原实现即此病）。文本匹配仅作兜底。
         err = ""
+        errcode = ""
         try:
-            err = rr.json().get("error", "")
+            j = rr.json()
+            err = j.get("error", "")
+            errcode = j.get("errcode", "")
         except Exception:
             pass
-        if "in use" in err.lower() or (rr.status_code == 400 and "exist" in err.lower()):
+        low = err.lower()
+        if (
+            errcode == "M_USER_IN_USE"
+            or "in use" in low or "taken" in low
+            or (rr.status_code == 400 and "exist" in low)
+        ):
             return 409, {"error": "该用户名已被占用，请换一个"}
         return rr.status_code if rr.status_code >= 400 else 502, {"error": err or "注册失败"}
     except requests.RequestException:
@@ -399,7 +410,7 @@ def verify_and_register(
     # 放在验码之后：未持邮箱的人无法借 409 探测"某邮箱是否已注册"（防枚举）；验码通过=本人，
     # 此时告知"已注册"并引导去登录/找回，是合理的。
     claim = _claim_email(email, username)
-    if claim is False:
+    if claim == "taken":
         return 409, {"error": "该邮箱已注册，请直接登录或找回密码"}
     if claim is None:
         # cosmac DB 异常：它与 Synapse 同一套 Postgres，它不可用时建号本也走不通，故 fail-closed
@@ -407,21 +418,27 @@ def verify_and_register(
         return 503, {"error": "注册服务暂不可用，请稍后重试"}
 
     status, payload = _synapse_register(hs_url, username, password)
-    if status != 200:
-        # 占位成功但建号失败 → 回滚占位，别让邮箱被一次失败注册永久占死（否则本人以后也注册不了）。
+    if status != 200 and claim == "claimed" and 400 <= status < 500:
+        # 只在「本次新占位 + 确定性失败(4xx,如用户名已占用/参数错)」时回滚占位。
+        # ⚠️ 5xx/网络超时是**结果未知**——账号可能已在 Synapse 建成,此时删映射=该账号永远
+        # 无法邮箱登录/找回(审查 bug#6)。保住映射,本人重试时 _claim_email 走 "existing"
+        # 自愈:账号没建成→重试成功;已建成→报"用户名已占用",可走找回密码拿回账号。
         _release_email(email, username)
     # 建号失败时不还原验证码（已一次性作废）——让用户重新走流程，避免码被复用。
     return status, payload
 
 
-def _claim_email(email: str, username: str) -> Optional[bool]:
+def _claim_email(email: str, username: str) -> Optional[str]:
     """一邮一号「占位」：把 email→username 写进映射表。建号**之前**调用。
 
-    返回：
-      · ``True``  —— 邮箱原本空闲，占位成功（可以去建号了）。
-      · ``False`` —— 邮箱已被占（绑本账号=幂等，或绑别的账号=拒绝改绑，或并发撞唯一约束）；
-                     调用方据此回 409「已注册」。
-      · ``None``  —— cosmac DB 异常，拿不到唯一约束保证；调用方应 fail-closed（回 503）。
+    返回（字符串枚举，调用方按值分流）：
+      · ``"claimed"``  —— 邮箱原本空闲，**新占位**成功（建号失败时需回滚这条占位）。
+      · ``"existing"`` —— 邮箱**本就绑定本账号**：视为占位成功但**不可回滚**——这是"上次建号
+                         结果未知(超时/5xx)后本人重试"的自愈通道；也可能账号早已建成，此时后续
+                         建号会撞 M_USER_IN_USE 报「用户名已占用」，但映射必须保住（否则该账号
+                         永远无法邮箱登录/找回，见审查 bug#6）。
+      · ``"taken"``    —— 已被**别的**账号占（或并发撞唯一约束）；调用方回 409「已注册」。
+      · ``None``       —— cosmac DB 异常；调用方 fail-closed（回 503）。
     """
     from sqlalchemy.exc import IntegrityError
     try:
@@ -429,13 +446,14 @@ def _claim_email(email: str, username: str) -> Optional[bool]:
         from cosmac.db.email_repo import EmailAlreadyBound, set_email
         try:
             with session_scope() as s:
-                # set_email：True=新占位；False=已绑同账号（幂等）；抛 EmailAlreadyBound=已绑别的账号。
-                return bool(set_email(s, email=email, username=username))
+                # set_email：True=新插入；False=已绑同账号；抛 EmailAlreadyBound=已绑别的账号。
+                created = set_email(s, email=email, username=username)
+                return "claimed" if created else "existing"
         except EmailAlreadyBound:
-            return False
+            return "taken"
     except IntegrityError:
         # 并发下别人抢先占了同一邮箱，提交时撞唯一约束 → 视为"已被占"。
-        return False
+        return "taken"
     except Exception:
         logger.warning("占位邮箱映射失败（cosmac DB 不可用？）email=%s", email, exc_info=True)
         return None
@@ -513,8 +531,10 @@ def _admin_reset_password(hs_url: str, user_id: str, new_password: str) -> Tuple
     token = _env("ADMIN_TOKEN")
     if not token:
         return 503, {"error": "服务器未配置管理员令牌"}
+    from urllib.parse import quote
     base = hs_url.rstrip("/")
-    url = f"{base}/_synapse/admin/v1/reset_password/{user_id}"
+    # user_id 进 URL 路径要编码（纵深防御——localpart 已过白名单正则,此处防未来改动引入注入面）
+    url = f"{base}/_synapse/admin/v1/reset_password/{quote(user_id, safe='')}"
     try:
         rr = requests.post(
             url,

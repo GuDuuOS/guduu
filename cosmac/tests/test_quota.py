@@ -95,16 +95,20 @@ class TestBotQuotaEnforce(unittest.TestCase):
             self.assertIsNone(bot._rate_quota_blocked("@p:h", "ai_msg_daily"))
 
     def test_tool_quota_teams(self) -> None:
-        # assemble_team 工具 → teams 配额：免费 1 个，第 2 次被拦
+        # assemble_team 工具 → teams 配额：免费 1 个。新契约：check **只查不扣**（失败/纯查询
+        # 不消耗额度），工具做成事后调 consume 才计数——之后第 2 次 check 才被拦。
         bot = _bot()
         bot.members.get_tier = lambda u: "free"  # type: ignore
         bot.quotas.limit = lambda m, t: 1 if m == "teams" else -1  # type: ignore
-        self.assertIsNone(bot._tool_quota_check("@u:h", "assemble_team"))   # 1
-        over = bot._tool_quota_check("@u:h", "assemble_team")               # 超额
+        self.assertIsNone(bot._tool_quota_check("@u:h", "assemble_team"))   # 查：未用 → 放行
+        self.assertIsNone(bot._tool_quota_check("@u:h", "assemble_team"))   # 只查不扣：仍放行
+        bot._tool_quota_consume("@u:h", "assemble_team")                    # 专班真建成 → 扣 1
+        over = bot._tool_quota_check("@u:h", "assemble_team")               # 1/1 → 拦
         self.assertIsNotNone(over)
         self.assertIn("专班数", over)
-        # 不在配额表里的工具不计量
+        # 不在配额表里的工具不计量（check/consume 都无操作）
         self.assertIsNone(bot._tool_quota_check("@u:h", "send_message_to_room"))
+        bot._tool_quota_consume("@u:h", "send_message_to_room")  # 应无操作不报错
 
     def test_usage_mine(self) -> None:
         bot = _bot()

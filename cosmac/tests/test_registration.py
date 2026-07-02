@@ -25,7 +25,7 @@ class RegistrationTest(unittest.TestCase):
         # 隔离 DB：一邮一号「占位」默认成功（邮箱空闲=True），回滚为空操作——不碰真实 SQLite，
         # 保证单测幂等可重复跑（否则第一次注册占位写库后，第二次跑套件会被占位拦成 409）。
         reg._lookup_username = lambda email: None  # type: ignore
-        reg._claim_email = lambda email, username: True  # type: ignore
+        reg._claim_email = lambda email, username: "claimed"  # type: ignore
         reg._release_email = lambda email, username: None  # type: ignore
 
     def _last_code(self) -> str:
@@ -82,7 +82,7 @@ class RegistrationTest(unittest.TestCase):
 
     def test_duplicate_email_rejected(self) -> None:
         # 邮箱已被占（占位返回 False）→ 409，且**不应去建号**（claim-first 的核心）。
-        reg._claim_email = lambda email, username: False  # type: ignore
+        reg._claim_email = lambda email, username: "taken"  # type: ignore
         called = []
         reg._synapse_register = lambda hs, u, p: called.append(1) or (200, {})  # type: ignore
         reg.request_code("a@b.com")
@@ -104,17 +104,45 @@ class RegistrationTest(unittest.TestCase):
         self.assertEqual(called, [])
 
     def test_rollback_on_register_failure(self) -> None:
-        # 占位成功但建号失败 → 回滚占位（_release_email 被调用），返回建号的错误码。
-        reg._claim_email = lambda email, username: True  # type: ignore
+        # 新占位 + 建号**确定性失败(4xx)** → 回滚占位；返回建号的错误码。
+        reg._claim_email = lambda email, username: "claimed"  # type: ignore
         released = []
         reg._release_email = (  # type: ignore
             lambda email, username: released.append((email, username)))
-        reg._synapse_register = lambda hs, u, p: (500, {"error": "boom"})  # type: ignore
+        reg._synapse_register = lambda hs, u, p: (409, {"error": "已占用"})  # type: ignore
         reg.request_code("a@b.com")
         st, _ = reg.verify_and_register(
             "a@b.com", self._last_code(), "alice", "Test1234!", hs_url="http://hs")
-        self.assertEqual(st, 500)
+        self.assertEqual(st, 409)
         self.assertEqual(released, [("a@b.com", "alice")])
+
+    def test_no_rollback_on_unknown_outcome(self) -> None:
+        # 5xx/网络超时=**结果未知**（账号可能已建成）→ **不**回滚占位，保住邮箱映射
+        # （否则孤儿账号永远无法邮箱登录/找回，见审查 bug#6）。
+        reg._claim_email = lambda email, username: "claimed"  # type: ignore
+        released = []
+        reg._release_email = (  # type: ignore
+            lambda email, username: released.append((email, username)))
+        reg._synapse_register = lambda hs, u, p: (502, {"error": "timeout"})  # type: ignore
+        reg.request_code("a@b.com")
+        st, _ = reg.verify_and_register(
+            "a@b.com", self._last_code(), "alice", "Test1234!", hs_url="http://hs")
+        self.assertEqual(st, 502)
+        self.assertEqual(released, [])  # 映射保留 → 本人重试可自愈/可找回密码
+
+    def test_existing_claim_never_released(self) -> None:
+        # 邮箱本就绑定本账号（"existing"，上次结果未知后的重试）→ 即使建号 4xx 失败
+        # 也**不**回滚——那条映射不是本次建的，删了就毁掉老账号的邮箱登录/找回。
+        reg._claim_email = lambda email, username: "existing"  # type: ignore
+        released = []
+        reg._release_email = (  # type: ignore
+            lambda email, username: released.append((email, username)))
+        reg._synapse_register = lambda hs, u, p: (409, {"error": "已占用"})  # type: ignore
+        reg.request_code("a@b.com")
+        st, _ = reg.verify_and_register(
+            "a@b.com", self._last_code(), "alice", "Test1234!", hs_url="http://hs")
+        self.assertEqual(st, 409)
+        self.assertEqual(released, [])
 
 
 class PasswordResetTest(unittest.TestCase):

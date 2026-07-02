@@ -61,9 +61,14 @@ class Toolbox:
         # 在 execute() 里、真正跑工具前调用——让"让 AI 帮我建群/跑工作流"也受会员门控约束
         # （与聊天命令同一道闸，防止绕过命令直接走自然语言）。None = 不做门控（如单测）。
         self.gate_check: Optional[Callable[[str, str], Optional[str]]] = None
-        # 用量配额钩子：由 bot 注入。签名 (sender, tool_name) -> 超额提示文案 或 None(放行+计数)。
-        # 在 execute() 门控之后调用——给"建专班数/工作流次数"等可计量工具按 tier 限量。
+        # 用量配额钩子：由 bot 注入。签名 (sender, tool_name) -> 超额提示文案 或 None(放行)。
+        # 在 execute() 门控之后调用。⚠️ 只做**检查**不计数——计数由工具在**成功路径**上调
+        # quota_consume（否则"先扣后执行"会把失败/纯列表查询也扣掉；teams 是终身配额，免费
+        # 用户被一次 Synapse 抖动扣光就永久锁死，审查 bug#7）。
         self.quota_check: Optional[Callable[[str, str], Optional[str]]] = None
+        # 用量配额**消费**钩子：由 bot 注入。签名 (sender, tool_name) -> None。工具在真正
+        # 做成事的那一刻调用（如专班房建成、工作流真正提交），失败路径不扣。
+        self.quota_consume: Optional[Callable[[str, str], None]] = None
         # 知识库检索回调：由 bot 注入 self._kb_search_for_tool。签名 (query, ctx) -> 结果文本。
         # 让 search_knowledge 工具的检索逻辑(embedder/DB/作用域)留在 bot 一侧，Toolbox 保持薄。
         # None（如单测/未注入）→ search_knowledge 工具返回"暂不可用"，绝不报错。
@@ -697,14 +702,21 @@ class Toolbox:
         user_input = args.get("input") or ""
         name = conn.get("name") or slug
         platform = conn.get("platform", "webhook")
+        # 幂等键拼上 slug：ctx.source_key 在一次 Agent run 内共享（同一条消息），若直接拿它查重，
+        # 一句"跑一下工作流 A 和 B"里 B 会命中 A 的登记、被误判"重复提交"（审查 bug#8）。
+        # 拼 slug 后：事务重放（同 event 同 slug）仍防得住；同消息不同工作流互不干扰。
+        skey = f"{ctx.source_key}:{slug}" if ctx.source_key else ""
 
         # #1/#3：异步连接器(async=true、bot 注入了 dispatch_async、**且平台支持回调**) → 走回调
         # 协议；dify/coze/comfyui 没有回调通道，即便误存 async=true 也按后台同步跑（不挂 pending）。
         from cosmac.wf import supports_async_callback
         if conn.get("async") and self.dispatch_async and supports_async_callback(platform):
-            return self.dispatch_async(
-                conn, user_input, ctx.room_id, ctx.sender, name, ctx.source_key
+            out = self.dispatch_async(
+                conn, user_input, ctx.room_id, ctx.sender, name, skey
             )
+            # 真正发起了一次异步提交 → 此刻消费配额（列表/找不到 slug 的分支不该扣）
+            self._consume_quota(ctx, "run_workflow")
+            return out
 
         # #1/#4/#5：**其余所有连接器**都放有界后台池跑、立即给 Agent 一个"已开始"让它继续——
         # webhook/dify/coze(≤30s) 也会卡住 Agent + appservice 事务，ComfyUI 更甚(120s)。
@@ -728,17 +740,19 @@ class Toolbox:
                 logger.exception("后台工作流执行出错：%s", name)
 
         pool = "slow" if platform == "comfyui" else "fast"  # ComfyUI 走慢池(#5)
-        reserved = bool(ctx.source_key)
+        reserved = bool(skey)
         if reserved and not self._reserve_workflow_source(
-            ctx.source_key, slug, platform, ctx, user_input
+            skey, slug, platform, ctx, user_input
         ):
             return f"工作流「{name}」已经由这条消息触发过，我不会重复提交。"
         if submit_background(_work, pool=pool):
+            # 真正提交进后台池 → 此刻消费配额（失败/列表/重复分支都不扣，审查 bug#7）
+            self._consume_quota(ctx, "run_workflow")
             return f"工作流「{name}」已开始，完成后我会把结果发到群里。"
         # 池满提交失败：必须回滚刚才的来源预约，否则这条事件之后重试会被误判"已触发过"
         # 而永远跑不起来（预约占位残留，直到 1 小时后才被遗孤回收并误报"提交队列中断"）。
         if reserved:
-            self._release_workflow_source(ctx.source_key)
+            self._release_workflow_source(skey)
         return "任务太多、系统繁忙，请稍后再让我跑。"
 
     def _tool_create_tasks(self, args: Dict[str, Any], ctx: ToolContext) -> str:
@@ -1033,6 +1047,9 @@ class Toolbox:
         room_id = self.client.create_room(project, invitees=[ctx.sender])
         if not room_id:
             return f"建专班「{project}」失败了（建房间接口出错）。"
+        # 专班房**真建成**才消费 teams 配额（终身配额，失败绝不能扣——否则免费用户被一次
+        # Synapse 抖动扣光就永久锁死，审查 bug#7）。
+        self._consume_quota(ctx, "assemble_team")
         invited, failed = [], []
         for m in members:
             if m == ctx.sender:
@@ -1140,6 +1157,15 @@ class Toolbox:
         except Exception:
             # 运行记录丢失不影响已拿到的结果，但要留痕，否则"为什么没有运行记录"无从排查。
             logger.debug("登记工作流运行记录失败（忽略）", exc_info=True)
+
+    def _consume_quota(self, ctx: ToolContext, tool_name: str) -> None:
+        """在工具**成功路径**上消费配额（bot 注入 quota_consume 时才生效）。绝不抛异常。"""
+        if self.quota_consume is None:
+            return
+        try:
+            self.quota_consume(ctx.sender, tool_name)
+        except Exception:
+            logger.debug("配额消费失败（忽略）：%s", tool_name, exc_info=True)
 
     def _reserve_workflow_source(
         self, source_key: str, slug: str, platform: str, ctx: ToolContext, user_input: str

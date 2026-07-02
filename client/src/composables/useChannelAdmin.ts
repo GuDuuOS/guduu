@@ -175,10 +175,11 @@ function loadConfigFromRoom(name: string, roomId: string) {
   const saved = getChannelConfig(roomId)
   const cfg = configs[name]
   suppressPersist = true
-  // 单值配置：有存的就 merge，没存的保留中性默认（人设模板/默认模型/默认记忆）
-  if (saved.persona) Object.assign(cfg.persona, saved.persona)
-  if (saved.model) Object.assign(cfg.model, saved.model)
-  if (saved.memory) Object.assign(cfg.memory, saved.memory)
+  // 单值配置：**先重置为中性基线再套已存的**——增量 Object.assign 会把上一次加载的残留键
+  // (如别的配置里的 agentSlug)留在内存里、随下次编辑一起写进本房 state event(审查 bug#4)。
+  cfg.persona = { ...BASE_PERSONA, ...(saved.persona || {}) } as any
+  cfg.model = { ...BASE_MODEL, ...(saved.model || {}) } as any
+  cfg.memory = { ...BASE_MEMORY, ...(saved.memory || {}) } as any
   // 列表配置：真实频道一律以"已存的为准、没存就空"——清掉 seedConfig 里的 demo mock，内容由用户真填
   cfg.skills = Array.isArray(saved.skills) ? saved.skills : []
   cfg.knowledge = Array.isArray(saved.knowledge) ? saved.knowledge : []
@@ -187,14 +188,18 @@ function loadConfigFromRoom(name: string, roomId: string) {
   nextTick(() => { suppressPersist = false })
 }
 
-function ensure(name: string) {
-  if (!configs[name]) configs[name] = seedConfig(name)
+function ensure(key: string, displayName?: string) {
+  if (!configs[key]) configs[key] = seedConfig(displayName || key)
 }
-/** 切换当前群（频道视图挂载、或打开弹窗时调用）。roomId 可选：传了就启用真实成员+配置持久化。*/
+/** 切换当前群（频道视图挂载、或打开弹窗时调用）。roomId 可选：传了就启用真实成员+配置持久化。
+ *  ⚠️ 真实频道的内存 key 用 **roomId**（不用频道名）——两个工作区的同名频道（如都叫「综合」）
+ *  若按名字共享一份配置，A 的人设会被静默带进 B 并写进 B 的 state event（审查 bug#4）。
+ *  demo 场景（无 roomId）仍按名字，保留 mock 行为。 */
 function setCurrent(name?: string, roomId?: string) {
-  const k = name?.trim()
+  const display = name?.trim()
+  const k = (roomId || display || '').trim()
   if (!k) return
-  ensure(k)
+  ensure(k, display)
   currentKey.value = k
   currentRoomId.value = roomId || ''
   saveState.value = 'idle'
@@ -202,29 +207,51 @@ function setCurrent(name?: string, roomId?: string) {
   refreshLiveMembers()
 }
 
-/** 防抖把某 patch 写回当前频道的 state event */
+/** 防抖把 patch 写回当前频道的 state event。
+ *  ⚠️ 700ms 窗口内的多次编辑**累积合并**——原实现只保留最后一个 patch,连改「人设+模型」时
+ *  先改的那份被静默丢弃、UI 还显示"已保存"(审查 bug#3)。写入用 inflight 链**串行化**,
+ *  避免两个并发的「读本地-合并-写回」互相覆盖。 */
 let saveTimer: ReturnType<typeof setTimeout> | null = null
+let pendingPatch: Record<string, any> = {}   // 防抖窗口内累积的所有编辑
+let pendingRid = ''                           // pendingPatch 属于哪个房间
+let inflight: Promise<void> = Promise.resolve()  // 写入串行链
+
+async function writePatch(rid: string, batch: Record<string, any>): Promise<void> {
+  try {
+    await setChannelConfig(rid, batch)
+    saveState.value = 'saved'
+  } catch {
+    // 保存被拒(多半 power 不够)。若本人是平台管理员,后端用 make_room_admin 给我在本频道授权,
+    // 然后重试一次;非管理员 claim 返回 false,退回错误提示(bug14)。
+    let ok = false
+    try {
+      if (await claimChannelAdmin(rid)) {
+        await setChannelConfig(rid, batch)
+        ok = true
+      }
+    } catch { /* 重试仍失败 */ }
+    saveState.value = ok ? 'saved' : 'error'
+  }
+}
+
 function persist(patch: Record<string, any>) {
   const rid = currentRoomId.value
   if (!rid) return
+  // 700ms 内切换了房间：把上一个房间攒的 patch 立刻冲出去,别混进新房间的批里
+  if (pendingRid && pendingRid !== rid && Object.keys(pendingPatch).length) {
+    const oldRid = pendingRid
+    const oldBatch = pendingPatch
+    inflight = inflight.then(() => writePatch(oldRid, oldBatch))
+    pendingPatch = {}
+  }
+  pendingRid = rid
+  pendingPatch = { ...pendingPatch, ...patch }
   if (saveTimer) clearTimeout(saveTimer)
   saveState.value = 'saving'
-  saveTimer = setTimeout(async () => {
-    try {
-      await setChannelConfig(rid, patch)
-      saveState.value = 'saved'
-    } catch {
-      // 保存被拒(多半 power 不够)。若本人是平台管理员,后端用 make_room_admin 给我在本频道授权,
-      // 然后重试一次;非管理员 claim 返回 false,退回错误提示(bug14)。
-      let ok = false
-      try {
-        if (await claimChannelAdmin(rid)) {
-          await setChannelConfig(rid, patch)
-          ok = true
-        }
-      } catch { /* 重试仍失败 */ }
-      saveState.value = ok ? 'saved' : 'error'
-    }
+  saveTimer = setTimeout(() => {
+    const batch = pendingPatch
+    pendingPatch = {}
+    inflight = inflight.then(() => writePatch(rid, batch))
   }, 700)
 }
 
