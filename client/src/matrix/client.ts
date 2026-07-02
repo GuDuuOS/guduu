@@ -2200,7 +2200,7 @@ export async function getAuthConfig(baseUrl: string): Promise<{ turnstile: boole
   } catch { return { turnstile: false, siteKey: '' } }
 }
 
-export async function registerRequestCode(baseUrl: string, email: string, turnstile = ''): Promise<void> {
+export async function registerRequestCode(baseUrl: string, email: string, turnstile = ''): Promise<number> {
   const base = baseUrl.replace(/\/$/, '')
   const r = await fetch(`${base}/cosmac/register/request-code`, {
     method: 'POST',
@@ -2208,7 +2208,13 @@ export async function registerRequestCode(baseUrl: string, email: string, turnst
     body: JSON.stringify({ email, turnstile }),
   })
   const j = await r.json().catch(() => ({}))
-  if (!r.ok) throw new Error(j?.error || '发送验证码失败')
+  if (!r.ok) {
+    const e: any = new Error(j?.error || '发送验证码失败')
+    // 后端在"发送太频繁"时会带 cooldown 剩余秒数,透传给调用方去走按钮倒计时
+    if (typeof j?.cooldown === 'number') e.cooldown = j.cooldown
+    throw e
+  }
+  return typeof j?.cooldown === 'number' ? j.cooldown : 60
 }
 
 /** 验码 + 建号。成功返回后端 body（含 user_id）；失败抛出带文案的错误。 */
@@ -2230,7 +2236,7 @@ export async function registerVerify(
 /* —— 找回密码：调 bot 的 /cosmac/reset/* 端点（同样登录前调，需传 HS 基址）—— */
 
 /** 请求把找回密码验证码发到邮箱。防枚举：未注册也回成功（不报错）。 */
-export async function resetRequestCode(baseUrl: string, email: string, turnstile = ''): Promise<void> {
+export async function resetRequestCode(baseUrl: string, email: string, turnstile = ''): Promise<number> {
   const base = baseUrl.replace(/\/$/, '')
   const r = await fetch(`${base}/cosmac/reset/request-code`, {
     method: 'POST',
@@ -2238,7 +2244,12 @@ export async function resetRequestCode(baseUrl: string, email: string, turnstile
     body: JSON.stringify({ email, turnstile }),
   })
   const j = await r.json().catch(() => ({}))
-  if (!r.ok) throw new Error(j?.error || '发送验证码失败')
+  if (!r.ok) {
+    const e: any = new Error(j?.error || '发送验证码失败')
+    if (typeof j?.cooldown === 'number') e.cooldown = j.cooldown
+    throw e
+  }
+  return typeof j?.cooldown === 'number' ? j.cooldown : 60
 }
 
 /** 入驻引导：把模板预置文档灌进本人个人知识库（引导是登录后跑的，用当前会话 token）。

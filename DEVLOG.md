@@ -7,6 +7,13 @@
 
 ---
 
+## 2026-07-03 — 修:发验证码"太频繁"时前端按钮不走倒计时
+- 现象: 点发码被后端限频拦(429"发送太频繁请X秒后再试"),前端只显示错误、按钮仍"发送验证码"可点,
+  再点又撞。根因: 发码函数丢了后端返回的 cooldown 字段,倒计时只在发码成功后才启动。
+- 修: registerRequestCode/resetRequestCode 改 Promise<number> 返回 cooldown;失败时把 cooldown 挂到
+  错误对象抛出。sendCode 抽 startCodeCooldown(sec):成功用后端cooldown、被限频用剩余秒数,两种都走
+  按钮倒计时。纯前端;build 过。
+
 ## 2026-07-03 — auth 安全增强阶段1(下):Turnstile 人机验证(注册/找回发码前)
 - 防机器人批量注册/刷验证码。**env 可插拔**:后端配了 COSMAC_TURNSTILE_SECRET 才启用,没配则整段
   跳过(不破坏现有流程)。site key 走 COSMAC_TURNSTILE_SITE_KEY(公开)。

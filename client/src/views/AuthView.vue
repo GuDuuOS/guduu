@@ -123,6 +123,15 @@ function proceed() {
   router.push(to)
 }
 
+/** 启动"发送验证码"按钮的倒计时（秒）。成功发码用后端给的 cooldown；被限频时用后端剩余秒数。 */
+function startCodeCooldown(sec: number) {
+  codeCooldown.value = Math.max(1, Math.round(sec))
+  const t = setInterval(() => {
+    codeCooldown.value -= 1
+    if (codeCooldown.value <= 0) clearInterval(t)
+  }, 1000)
+}
+
 /** 发送邮箱验证码（带 60s 倒计时防连点）。 */
 async function sendCode() {
   error.value = ''; info.value = ''
@@ -133,16 +142,15 @@ async function sendCode() {
   if (tsEnabled.value && !tsToken.value) { error.value = '请先完成下方人机验证'; return }
   sendingCode.value = true
   try {
-    if (authMode.value === 'reset') await resetRequestCode(HS, e, tsToken.value)
-    else await registerRequestCode(HS, e, tsToken.value)
+    const cd = authMode.value === 'reset'
+      ? await resetRequestCode(HS, e, tsToken.value)
+      : await registerRequestCode(HS, e, tsToken.value)
     info.value = `验证码已发送，请查收 ${e}（含垃圾箱）`
-    codeCooldown.value = 60
-    const t = setInterval(() => {
-      codeCooldown.value -= 1
-      if (codeCooldown.value <= 0) clearInterval(t)
-    }, 1000)
+    startCodeCooldown(cd || 60)
   } catch (err: any) {
     error.value = err?.message || '发送验证码失败'
+    // 后端返回了剩余冷却秒数（如"发送太频繁，请 X 秒后再试"）→ 按钮也走倒计时，别让用户空点再撞
+    if (typeof err?.cooldown === 'number' && err.cooldown > 0) startCodeCooldown(err.cooldown)
   } finally {
     sendingCode.value = false
   }
