@@ -163,6 +163,35 @@ def _gen_code() -> str:
     return f"{secrets.randbelow(1_000_000):06d}"
 
 
+def turnstile_enabled() -> bool:
+    """配了 Cloudflare Turnstile 的 secret 才算启用人机验证（没配则相关校验自动跳过）。"""
+    return bool(_env("TURNSTILE_SECRET"))
+
+
+def _verify_turnstile(token: str, client_ip: str = "") -> bool:
+    """向 Cloudflare 校验 Turnstile 令牌。**没配 secret → 直接放行**（功能可插拔,不破坏现有流程）。
+
+    配了 secret 就强制:token 空或校验不过一律 False。校验用服务端 secret,绝不进前端/日志。
+    网络异常时保守拒绝(返回 False)——人机验证挡不住就宁可让用户重试,不放过。
+    """
+    secret = _env("TURNSTILE_SECRET")
+    if not secret:
+        return True  # 未启用:放行
+    token = (token or "").strip()
+    if not token:
+        return False
+    try:
+        resp = requests.post(
+            "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+            data={"secret": secret, "response": token, "remoteip": client_ip or ""},
+            timeout=10,
+        )
+        return bool(resp.json().get("success"))
+    except Exception:
+        logger.warning("Turnstile 校验调用失败", exc_info=True)
+        return False
+
+
 def _smtp_conf() -> Optional[Dict[str, Any]]:
     """读 SMTP 配置；缺关键项则返回 None（注册功能视为未启用）。"""
     host = _env("SMTP_HOST")
@@ -325,10 +354,14 @@ def _issue_code(key: str, send: Callable[[str], None]) -> Tuple[int, Dict[str, A
     return 200, {"ok": True, "cooldown": _RESEND_COOLDOWN}
 
 
-def request_code(email: str, *, client_ip: str = "") -> Tuple[int, Dict[str, Any]]:
-    """发**注册**验证码到邮箱。返回 (http状态, 响应体)。"""
+def request_code(
+    email: str, *, client_ip: str = "", turnstile: str = ""
+) -> Tuple[int, Dict[str, Any]]:
+    """发**注册**验证码到邮箱。返回 (http状态, 响应体)。turnstile=前端人机验证令牌。"""
     if not registration_enabled():
         return 503, {"error": "服务器未开启邮箱注册"}
+    if not _verify_turnstile(turnstile, client_ip):
+        return 400, {"error": "人机验证未通过，请重试"}
     email = (email or "").strip().lower()
     if not _EMAIL_RE.match(email):
         return 400, {"error": "邮箱格式不正确"}
@@ -684,13 +717,17 @@ def make_room_admin(hs_url: str, room_id: str, user_id: str) -> Tuple[int, Dict[
         return 502, {"error": "接管频道服务暂不可用，请稍后重试"}
 
 
-def reset_request_code(email: str, *, client_ip: str = "") -> Tuple[int, Dict[str, Any]]:
-    """找回密码：发验证码到邮箱。
+def reset_request_code(
+    email: str, *, client_ip: str = "", turnstile: str = ""
+) -> Tuple[int, Dict[str, Any]]:
+    """找回密码：发验证码到邮箱。turnstile=前端人机验证令牌。
 
     防邮箱枚举：无论该邮箱是否注册都返回成功，只有**确实注册过**才真正发信。
     """
     if not reset_enabled():
         return 503, {"error": "服务器未开启密码找回"}
+    if not _verify_turnstile(turnstile, client_ip):
+        return 400, {"error": "人机验证未通过，请重试"}
     email = (email or "").strip().lower()
     if not _EMAIL_RE.match(email):
         return 400, {"error": "邮箱格式不正确"}

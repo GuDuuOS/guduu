@@ -272,5 +272,36 @@ class PasswordStrengthTest(unittest.TestCase):
         self.assertIn("用户名", payload["error"])  # 密码包含用户名被拦
 
 
+class TurnstileTest(unittest.TestCase):
+    """Turnstile 人机验证:没配 secret 放行;配了则 token 空/校验不过被拦(阶段1下)。"""
+
+    def setUp(self) -> None:
+        import os
+        os.environ.pop("COSMAC_TURNSTILE_SECRET", None)
+
+    def tearDown(self) -> None:
+        import os
+        os.environ.pop("COSMAC_TURNSTILE_SECRET", None)
+
+    def test_disabled_passes(self) -> None:
+        # 没配 secret → _verify_turnstile 一律放行(功能可插拔)
+        self.assertTrue(reg._verify_turnstile(""))
+        self.assertFalse(reg.turnstile_enabled())
+
+    def test_enabled_empty_token_blocked(self) -> None:
+        import os
+        os.environ["COSMAC_TURNSTILE_SECRET"] = "s3cr3t"
+        self.assertTrue(reg.turnstile_enabled())
+        self.assertFalse(reg._verify_turnstile(""))   # 空 token 直接 False,不打网络
+
+    def test_request_code_blocked_when_turnstile_fails(self) -> None:
+        import os
+        os.environ["COSMAC_TURNSTILE_SECRET"] = "s3cr3t"
+        reg.registration_enabled = lambda: True  # type: ignore
+        st, payload = reg.request_code("a@b.com", turnstile="")
+        self.assertEqual(st, 400)
+        self.assertIn("人机验证", payload["error"])
+
+
 if __name__ == "__main__":
     unittest.main()

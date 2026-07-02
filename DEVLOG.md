@@ -7,6 +7,19 @@
 
 ---
 
+## 2026-07-03 — auth 安全增强阶段1(下):Turnstile 人机验证(注册/找回发码前)
+- 防机器人批量注册/刷验证码。**env 可插拔**:后端配了 COSMAC_TURNSTILE_SECRET 才启用,没配则整段
+  跳过(不破坏现有流程)。site key 走 COSMAC_TURNSTILE_SITE_KEY(公开)。
+- 后端 registration._verify_turnstile()(向 Cloudflare siteverify 校验;没配secret放行;网络异常保守拒)
+  接进 request_code/reset_request_code(发码前,IP限频之前);新增公开端点 GET /cosmac/auth/config
+  (前端拿"要不要显示挂件+site_key",secret绝不出现);CORS 白名单加 /cosmac/auth/。
+- 前端 client.ts getAuthConfig() + 发码带 turnstile token;AuthView 按需注入 Turnstile 脚本、注册/找回
+  模式渲染挂件、拿到 token 才让发码,登录模式不显示。
+- Site key(公开): 0x4AAAAAADulch6YiMNXKDh8。**Secret key 待配进服务器 env(负责人另发,不进git)**。
+- 测试 TurnstileTest(未启用放行/启用空token拦/发码被拦);全量 339 过 + ruff + build 过。
+- **部署: 前端 dist + 重启 bot。启用人机验证还需在 bot 服务 env 配 COSMAC_TURNSTILE_SECRET +
+  COSMAC_TURNSTILE_SITE_KEY;不配则功能静默关闭。**
+
 ## 2026-07-02 — auth 安全增强阶段1(上):密码强度(前端即时提示 + 后端弱密码拦截)
 - 规则按 NIST 思路(长度优先,不强制大小写符号组合):>=8位 + 至少两类字符(字母/数字/符号)+
   不在常见弱密码表(30个高频泄露密码,不引 zxcvbn 重依赖)+ 不含用户名(>=4位才启用)。

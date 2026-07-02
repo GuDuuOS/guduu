@@ -2189,12 +2189,23 @@ function payBase(): string {
  *  所以这两个函数必须由调用方传入 homeserver 基址（前端的 HS 常量）。 */
 
 /** 请求把验证码发到邮箱。返回 {ok} 或抛出带后端文案的错误。 */
-export async function registerRequestCode(baseUrl: string, email: string): Promise<void> {
+/** 拿认证前端配置（是否启用 Turnstile + site key）。失败/未启用返回关闭态,不影响现有流程。 */
+export async function getAuthConfig(baseUrl: string): Promise<{ turnstile: boolean; siteKey: string }> {
+  try {
+    const base = baseUrl.replace(/\/$/, '')
+    const r = await fetch(`${base}/cosmac/auth/config`)
+    if (!r.ok) return { turnstile: false, siteKey: '' }
+    const j = await r.json()
+    return { turnstile: !!j?.turnstile, siteKey: j?.turnstile_site_key || '' }
+  } catch { return { turnstile: false, siteKey: '' } }
+}
+
+export async function registerRequestCode(baseUrl: string, email: string, turnstile = ''): Promise<void> {
   const base = baseUrl.replace(/\/$/, '')
   const r = await fetch(`${base}/cosmac/register/request-code`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ email, turnstile }),
   })
   const j = await r.json().catch(() => ({}))
   if (!r.ok) throw new Error(j?.error || '发送验证码失败')
@@ -2219,12 +2230,12 @@ export async function registerVerify(
 /* —— 找回密码：调 bot 的 /cosmac/reset/* 端点（同样登录前调，需传 HS 基址）—— */
 
 /** 请求把找回密码验证码发到邮箱。防枚举：未注册也回成功（不报错）。 */
-export async function resetRequestCode(baseUrl: string, email: string): Promise<void> {
+export async function resetRequestCode(baseUrl: string, email: string, turnstile = ''): Promise<void> {
   const base = baseUrl.replace(/\/$/, '')
   const r = await fetch(`${base}/cosmac/reset/request-code`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ email, turnstile }),
   })
   const j = await r.json().catch(() => ({}))
   if (!r.ok) throw new Error(j?.error || '发送验证码失败')

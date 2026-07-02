@@ -11,13 +11,13 @@
  *     做**唯一一次**同步。既不双同步、也无需整页 reload。
  *   - 视觉与原登录块保持一致（同一套 class + 样式），只改架构不改观感。
  */
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import logoUrl from '@/assets/cosmac-logo.png'
 import {
   loginNoStart, loginWithEmailNoStart,
   registerRequestCode, registerVerify,
-  resetRequestCode, resetVerify,
+  resetRequestCode, resetVerify, getAuthConfig,
 } from '@/matrix/client'
 
 // homeserver 基址（与 LiveView 保持一致）
@@ -42,6 +42,55 @@ const loading = ref(false)
 
 // 「添加账号」模式：从主应用点「添加账号」跳来时带 ?add=1，给个「返回当前账号」出口。
 const isAdd = computed(() => route.query.add === '1')
+
+// —— Turnstile 人机验证（阶段1；env 可插拔:后端没配 secret 就整段跳过）——
+const tsEnabled = ref(false)          // 后端是否启用了 Turnstile
+const tsSiteKey = ref('')
+const tsToken = ref('')               // 挂件回调拿到的一次性令牌;发码时带上
+const tsBoxRef = ref<HTMLElement>()   // 挂件容器
+let tsWidgetId: string | null = null
+declare global { interface Window { turnstile?: any; onTurnstileLoad?: () => void } }
+
+/** 按需注入 Cloudflare Turnstile 脚本（只注一次）。 */
+function loadTurnstileScript(): Promise<void> {
+  return new Promise((resolve) => {
+    if (window.turnstile) { resolve(); return }
+    const existing = document.querySelector('script[data-turnstile]')
+    if (existing) { existing.addEventListener('load', () => resolve()); return }
+    const s = document.createElement('script')
+    s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js'
+    s.async = true; s.defer = true; s.setAttribute('data-turnstile', '1')
+    s.onload = () => resolve()
+    s.onerror = () => resolve()   // 加载失败也 resolve:后端会拦,不因脚本挂了卡死前端
+    document.head.appendChild(s)
+  })
+}
+
+/** 在容器里渲染挂件（切到"需要发码"的注册/找回模式时调用）。 */
+async function renderTurnstile() {
+  if (!tsEnabled.value || !tsSiteKey.value) return
+  await loadTurnstileScript()
+  if (!window.turnstile || !tsBoxRef.value) return
+  if (tsWidgetId !== null) { try { window.turnstile.remove(tsWidgetId) } catch { /* ignore */ } tsWidgetId = null }
+  tsToken.value = ''
+  tsWidgetId = window.turnstile.render(tsBoxRef.value, {
+    sitekey: tsSiteKey.value,
+    callback: (t: string) => { tsToken.value = t },
+    'expired-callback': () => { tsToken.value = '' },
+    'error-callback': () => { tsToken.value = '' },
+  })
+}
+
+onMounted(async () => {
+  const cfg = await getAuthConfig(HS)
+  tsEnabled.value = cfg.turnstile
+  tsSiteKey.value = cfg.siteKey
+  // 若一进来就在需要验证码的模式(注册/找回),渲染挂件
+  if (tsEnabled.value && authMode.value !== 'login') renderTurnstile()
+})
+onBeforeUnmount(() => { if (tsWidgetId !== null && window.turnstile) { try { window.turnstile.remove(tsWidgetId) } catch { /* ignore */ } } })
+// 切到注册/找回时渲染;切回登录时不需要
+watch(authMode, (m) => { if (tsEnabled.value && m !== 'login') renderTurnstile() })
 
 // —— 密码强度（与后端 registration.password_problem 同一套规则,即时提示;后端是真防线）——
 const WEAK_SET = new Set([
@@ -80,10 +129,12 @@ async function sendCode() {
   const e = email.value.trim()
   if (!e) { error.value = '请先填邮箱'; return }
   if (codeCooldown.value > 0 || sendingCode.value) return
+  // 启用了 Turnstile 但用户还没过验证 → 先别发
+  if (tsEnabled.value && !tsToken.value) { error.value = '请先完成下方人机验证'; return }
   sendingCode.value = true
   try {
-    if (authMode.value === 'reset') await resetRequestCode(HS, e)
-    else await registerRequestCode(HS, e)
+    if (authMode.value === 'reset') await resetRequestCode(HS, e, tsToken.value)
+    else await registerRequestCode(HS, e, tsToken.value)
     info.value = `验证码已发送，请查收 ${e}（含垃圾箱）`
     codeCooldown.value = 60
     const t = setInterval(() => {
@@ -216,6 +267,8 @@ function switchAuthMode(m: 'login' | 'register' | 'reset') {
               {{ codeCooldown > 0 ? `${codeCooldown}s` : (sendingCode ? '发送中…' : '发送验证码') }}
             </button>
           </div>
+          <!-- 人机验证挂件（后端启用时才显示） -->
+          <div v-if="tsEnabled" ref="tsBoxRef" class="ts-box"></div>
           <input v-model="emailCode" name="reg-otp" autocomplete="one-time-code" inputmode="numeric" maxlength="6"
                  placeholder="6 位验证码（填邮件里的数字）"
                  @keyup.enter="authMode === 'reset' ? doResetPassword() : doRegister()" />
@@ -290,5 +343,6 @@ function switchAuthMode(m: 'login' | 'register' | 'reset') {
 .pw-bar.on.strong { background: #4c9a5f; }
 .pw-label { font-size: 12px; color: var(--text-3); }
 .pw-label.warn { color: #d9534f; }
+.ts-box { min-height: 0; }
 .add-acct-back { align-self: flex-start; border: none; background: transparent; color: var(--text-3); font-size: 13px; cursor: pointer; padding: 0; }
 </style>

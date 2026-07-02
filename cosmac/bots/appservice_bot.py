@@ -2239,7 +2239,10 @@ class CosmacBot:
     ) -> Tuple[int, Dict[str, Any]]:
         """自建邮箱注册：给邮箱发验证码（公开端点，无 token——用户还没账号）。限频在 registration 内强制。"""
         from cosmac import registration
-        return registration.request_code((body or {}).get("email", ""), client_ip=client_ip)
+        b0 = body or {}
+        return registration.request_code(
+            b0.get("email", ""), client_ip=client_ip, turnstile=b0.get("turnstile", ""),
+        )
 
     def handle_register_verify(
         self, body: Dict[str, Any], client_ip: str = ""
@@ -2257,8 +2260,9 @@ class CosmacBot:
     ) -> Tuple[int, Dict[str, Any]]:
         """找回密码：给邮箱发验证码（公开端点；防枚举：未注册也回成功但不发信）。"""
         from cosmac import registration
+        b0 = body or {}
         return registration.reset_request_code(
-            (body or {}).get("email", ""), client_ip=client_ip
+            b0.get("email", ""), client_ip=client_ip, turnstile=b0.get("turnstile", ""),
         )
 
     def handle_reset_verify(
@@ -3093,7 +3097,8 @@ class _Handler(BaseHTTPRequestHandler):
                 or p.startswith("/cosmac/profile/")
                 or p.startswith("/cosmac/usage/")
                 or p.startswith("/cosmac/admin/")      # 后台用户列表拉邮箱（GET 带 Authorization 也要预检）
-                or p.startswith("/cosmac/channel/")):  # 平台管理员接管频道（bug14）；都走浏览器，需预检
+                or p.startswith("/cosmac/channel/")     # 平台管理员接管频道（bug14）
+                or p.startswith("/cosmac/auth/")):     # 认证前端配置（Turnstile 开关）；都走浏览器，需预检
             origin = os.environ.get("COSMAC_APP_ORIGIN", "") or "*"
             self.send_response(204)
             self.send_header("Access-Control-Allow-Origin", origin)
@@ -3149,6 +3154,16 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(503, {"errcode": "M_UNAVAILABLE"})
 
     def do_GET(self) -> None:  # noqa: N802
+        # 公开读「认证前端配置」：前端据此决定登录/注册页要不要挂 Turnstile 人机验证。
+        # 只回 site_key(本就是公开的)+ 开关;secret 绝不出现。无需鉴权、可跨源。
+        if self.path.split("?", 1)[0] == "/cosmac/auth/config":
+            import os
+            from cosmac import registration
+            self._send_json(200, {
+                "turnstile": registration.turnstile_enabled(),
+                "turnstile_site_key": os.environ.get("COSMAC_TURNSTILE_SITE_KEY", ""),
+            }, cors=True)
+            return
         # 模块4：公开读上架套餐（给前端「升级会员」展示；无密钥、可跨源）
         if self.path.split("?", 1)[0] == "/cosmac/pay/plans":
             try:
