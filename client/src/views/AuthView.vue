@@ -43,6 +43,29 @@ const loading = ref(false)
 // 「添加账号」模式：从主应用点「添加账号」跳来时带 ?add=1，给个「返回当前账号」出口。
 const isAdd = computed(() => route.query.add === '1')
 
+// —— 密码强度（与后端 registration.password_problem 同一套规则,即时提示;后端是真防线）——
+const WEAK_SET = new Set([
+  'password', 'password1', 'passw0rd', '12345678', '123456789', '1234567890',
+  'qwerty123', 'qwertyuiop', '11111111', '88888888', '66666666', '00000000',
+  'abc12345', 'a1234567', 'iloveyou', 'admin123', 'root1234', 'letmein1',
+  'sunshine', 'princess', 'football', 'baseball', 'dragon123', 'monkey123',
+  'qq123456', 'wang1234', 'zhang123', 'asdfghjkl', '1q2w3e4r', '1qaz2wsx',
+])
+/** 0=太短 1=弱(会被后端拒) 2=中 3=强;附带不合格原因文案 */
+const pwStrength = computed(() => {
+  const pw = password.value
+  if (!pw) return { level: 0, label: '', warn: '' }
+  if (pw.length < 8) return { level: 0, label: '太短', warn: '至少 8 位' }
+  const kinds = (/[a-zA-Z]/.test(pw) ? 1 : 0) + (/[0-9]/.test(pw) ? 1 : 0) + (/[^a-zA-Z0-9]/.test(pw) ? 1 : 0)
+  if (kinds < 2) return { level: 1, label: '弱', warn: '请混用字母、数字或符号中的至少两类' }
+  if (WEAK_SET.has(pw.toLowerCase())) return { level: 1, label: '弱', warn: '这个密码太常见、极易被猜中' }
+  const u = user.value.trim().toLowerCase()
+  if (u && u.length >= 4 && pw.toLowerCase().includes(u)) return { level: 1, label: '弱', warn: '密码不能包含你的用户名' }
+  // 达标线以上再分档:12+ 且三类 = 强
+  if (pw.length >= 12 && kinds === 3) return { level: 3, label: '强', warn: '' }
+  return { level: 2, label: '中', warn: '' }
+})
+
 /** 认证成功后进入主应用：优先回到守卫记下的目标地址，否则首页。 */
 function proceed() {
   const to = typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/')
@@ -200,6 +223,15 @@ function switchAuthMode(m: 'login' | 'register' | 'reset') {
           <input v-model="password" type="password" autocomplete="new-password"
                  :placeholder="authMode === 'reset' ? '新密码（至少 8 位）' : '密码（至少 8 位）'"
                  @keyup.enter="authMode === 'reset' ? doResetPassword() : doRegister()" />
+          <!-- 密码强度即时提示（与后端同规则;弱=提交会被拒,提前告知） -->
+          <div v-if="password" class="pw-meter">
+            <div class="pw-bars">
+              <span v-for="i in 3" :key="i" class="pw-bar" :class="{ on: pwStrength.level >= i, weak: pwStrength.level <= 1, mid: pwStrength.level === 2, strong: pwStrength.level === 3 }"></span>
+            </div>
+            <span class="pw-label" :class="{ warn: pwStrength.level <= 1 }">
+              {{ pwStrength.warn || `密码强度：${pwStrength.label}` }}
+            </span>
+          </div>
           <input v-model="password2" type="password" autocomplete="new-password"
                  :placeholder="authMode === 'reset' ? '确认新密码' : '确认密码'"
                  @keyup.enter="authMode === 'reset' ? doResetPassword() : doRegister()" />
@@ -250,5 +282,13 @@ function switchAuthMode(m: 'login' | 'register' | 'reset') {
 .auth-switch a:hover { text-decoration: underline; }
 .err { color: var(--danger); font-size: 13px; }
 .ok { color: var(--accent); font-size: 13px; margin: 0; }
+.pw-meter { display: flex; align-items: center; gap: 10px; margin-top: -6px; }
+.pw-bars { display: flex; gap: 4px; }
+.pw-bar { width: 34px; height: 4px; border-radius: 2px; background: var(--border); }
+.pw-bar.on.weak { background: #d9534f; }
+.pw-bar.on.mid { background: #e8a33d; }
+.pw-bar.on.strong { background: #4c9a5f; }
+.pw-label { font-size: 12px; color: var(--text-3); }
+.pw-label.warn { color: #d9534f; }
 .add-acct-back { align-self: flex-start; border: none; background: transparent; color: var(--text-3); font-size: 13px; cursor: pointer; padding: 0; }
 </style>

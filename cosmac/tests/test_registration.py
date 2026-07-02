@@ -245,5 +245,32 @@ class LoginAccountTest(unittest.TestCase):
         self.assertEqual(st, 403)
 
 
+class PasswordStrengthTest(unittest.TestCase):
+    """password_problem 规则 + 注册/重置弱密码拦截(阶段1)。纯计算,无桩。"""
+
+    def test_rules(self) -> None:
+        pp = reg.password_problem
+        self.assertIsNotNone(pp("short1"))              # 太短
+        self.assertIsNotNone(pp("abcdefgh"))            # 单一类别(纯字母)
+        self.assertIsNotNone(pp("12345678"))            # 单一类别+常见弱密码
+        self.assertIsNotNone(pp("Password1".lower()))   # 常见弱密码表
+        self.assertIsNotNone(pp("alice2024", "alice"))  # 含用户名
+        self.assertIsNone(pp("zk8#mQ2pL"))              # 合格
+        self.assertIsNone(pp("hong2024mao"))            # 字母+数字两类,合格
+        self.assertIsNone(pp("ali99xxxx", "ali"))       # 用户名<4位不启用包含规则
+
+    def test_register_rejects_weak(self) -> None:
+        reg.registration_enabled = lambda: True  # type: ignore
+        sent: list = []
+        reg._send_email = lambda to, code: sent.append((to, code))  # type: ignore
+        reg._store.clear()
+        reg._ip_store.clear()
+        reg.request_code("w@b.com")
+        st, payload = reg.verify_and_register(
+            "w@b.com", sent[-1][1], "bobby", "bobby1234567", hs_url="http://hs")
+        self.assertEqual(st, 400)
+        self.assertIn("用户名", payload["error"])  # 密码包含用户名被拦
+
+
 if __name__ == "__main__":
     unittest.main()

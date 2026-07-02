@@ -54,6 +54,44 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _USERNAME_RE = re.compile(r"^[a-z0-9._=\-+]+$")
 _USERNAME_MAX = 64           # localpart 长度上限（防超长 localpart 造成异常账号）
 
+# 常见弱密码小表（全网泄露榜高频项；小写比对）。够拦住最烂的那批就行——真正的防线是
+# 长度+字符类别+IP限频，不追求大而全的字典（那是 zxcvbn 的活，单实例不引重依赖）。
+_COMMON_WEAK = {
+    "password", "password1", "passw0rd", "12345678", "123456789", "1234567890",
+    "qwerty123", "qwertyuiop", "11111111", "88888888", "66666666", "00000000",
+    "abc12345", "a1234567", "iloveyou", "admin123", "root1234", "letmein1",
+    "sunshine", "princess", "football", "baseball", "dragon123", "monkey123",
+    "qq123456", "wang1234", "zhang123", "asdfghjkl", "1q2w3e4r", "1qaz2wsx",
+}
+
+
+def password_problem(password: str, username: str = "") -> Optional[str]:
+    """检查新设密码的强度；不合格返回中文原因，合格返回 None。
+
+    规则（按 NIST 思路——长度优先，不强制大小写符号那种反人类组合）：
+      ① 至少 8 位；② 至少两类字符（字母/数字/符号）；③ 不在常见弱密码表；
+      ④ 不包含用户名（防 "alice2024" 这类一猜即中）。
+    只在**新设密码**时（注册/重置）强制，老账号既有密码不受影响。
+    前端 AuthView 有同一套规则的即时提示，这里是服务端真防线（防绕过前端直调 API）。
+    """
+    pw = password or ""
+    if len(pw) < 8:
+        return "密码至少 8 位"
+    low = pw.lower()
+    kinds = sum((
+        any(ch.isalpha() for ch in pw),
+        any(ch.isdigit() for ch in pw),
+        any(not ch.isalnum() for ch in pw),
+    ))
+    if kinds < 2:
+        return "密码太简单：请混用字母、数字或符号中的至少两类"
+    if low in _COMMON_WEAK:
+        return "这个密码太常见、极易被猜中，请换一个"
+    u = (username or "").strip().lower()
+    if u and len(u) >= 4 and u in low:
+        return "密码不能包含你的用户名"
+    return None
+
 
 class _PendingCode:
     """某邮箱待验证的码 + 限频计数（仅内存）。"""
@@ -393,8 +431,9 @@ def verify_and_register(
         return 400, {"error": "邮箱格式不正确"}
     if not username or not _USERNAME_RE.match(username) or len(username) > _USERNAME_MAX:
         return 400, {"error": "用户名只能用小写字母/数字/._-=+，且不超过 64 位"}
-    if len(password or "") < 8:
-        return 400, {"error": "密码至少 8 位"}
+    weak = password_problem(password, username)
+    if weak:
+        return 400, {"error": weak}
     # 按 IP 限制验码尝试（叠加单码 5 次上限，堵住「不断重发刷新尝试计数 + 多邮箱并发」爆破）。
     if not _ip_rate_ok("attempt", client_ip, _IP_ATTEMPT_MAX, _IP_ATTEMPT_WINDOW):
         return 429, {"error": "尝试过于频繁，请稍后再试"}
@@ -674,8 +713,11 @@ def reset_verify(
     email = (email or "").strip().lower()
     if not _EMAIL_RE.match(email):
         return 400, {"error": "邮箱格式不正确"}
-    if len(new_password or "") < 8:
-        return 400, {"error": "新密码至少 8 位"}
+    # 只做纯计算规则（不带"含用户名"检查）——那需要查 DB 反查用户名，而此处在 IP 限频
+    # **之前**，不能给未限频的请求开 DB 查询面；重置场景该规则价值也低（攻击者拿不到验证码）。
+    weak = password_problem(new_password)
+    if weak:
+        return 400, {"error": weak}
     # 重置码爆破比注册更危险（成功即账号接管）——同样按 IP 限尝试。
     if not _ip_rate_ok("attempt", client_ip, _IP_ATTEMPT_MAX, _IP_ATTEMPT_WINDOW):
         return 429, {"error": "尝试过于频繁，请稍后再试"}
